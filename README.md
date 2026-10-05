@@ -20,7 +20,7 @@ Use `/br` to open Raid, `/br stats` for Raid Stats, `/br csr` for CSR and `/br s
 
 New sessions capture the physical raid independently of guild membership. Save Raid preserves roster, loot and selected statistics. Live tracking, group/list appearance, the default game Raid tab and Loot Master messages have independent settings.
 
-Standalone Settings includes Profiles for adding, saving, loading, deleting and exporting named preferences. In Booty Suite, use Profile → General. Reset keeps raid and loot history.
+Standalone Settings has two main sections: **Profile** and **Raid**. Use **Profile → General** to add, save, load, delete or export named preferences in either standalone mode or Booty Suite. Reset keeps raid and loot history.
 
 ## Existing data
 

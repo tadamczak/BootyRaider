@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.2 — 2026-10-05
+
+- Use corrected shared Settings accordion actions, including during a loaded raid.
+- Document standalone Settings under Profile and Raid.
+
 ## 0.1.0-dev.1 — 2026-10-05
 
 - Extract Raid, Raid Stats, CSR, loot tools and native Raid integration into BootyRaider with BootyLib as its only required addon.
