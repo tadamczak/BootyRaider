@@ -1,0 +1,12 @@
+BootyRaider = BootyRaider or {}
+local Raider = BootyRaider
+Raider.version = "0.1.0-dev.1"
+Raider.productId = "raider"
+Raider.UI = BootyLib.UI
+Raider.Core = BootyLib.Core
+Raider.Diagnostics = BootyLib.Diagnostics
+Raider.Modules = Raider.Modules or {}
+Raider.Services = Raider.Services or {}
+Raider.Database = Raider.Database or {}
+Raider.lootMasterMode = false
+Raider.lootMasterMinimized = false

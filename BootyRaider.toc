@@ -1,0 +1,40 @@
+## Interface: 11200
+## Title: BootyRaider
+## Notes: Raid sessions, loot tools, raid statistics and CSR. Works with or without Booty Suite.
+## Author: Mukla
+## Version: 0.1.0-dev.1
+## X-Release-Version: 0.1.0
+## RequiredDeps: BootyLib
+## SavedVariables: BootyRaiderDB
+
+Core\Bootstrap.lua
+Services\RankPolicy.lua
+Services\LootMessageService.lua
+Core\Database.lua
+Services\RaidResService.lua
+Services\RaidService.lua
+Services\RaidTabService.lua
+Services\RaidInfoService.lua
+Services\AutoLootService.lua
+Services\TestRaidService.lua
+Services\RaidStatisticsService.lua
+Services\CSRService.lua
+Services\CSRTestService.lua
+Services\RaidSessionService.lua
+Services\LootRollRequest.lua
+Modules\RaidSessionController.lua
+Modules\MasterLootEvents.lua
+Modules\LootRollDialog.lua
+Modules\MasterLootWindow.lua
+Modules\RaidStatistics.lua
+Modules\CSR.lua
+Modules\RaidRules.lua
+Modules\RaidHistory.lua
+Modules\RaidSoftReserve.lua
+Modules\RaidManagement.lua
+Modules\RaidInfo.lua
+Modules\NativeRaidTab.lua
+Modules\Runtime.lua
+Modules\RaidScreen.lua
+Core\Settings.lua
+BootyRaider.lua
