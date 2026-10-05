@@ -22,8 +22,10 @@ New sessions capture the physical raid independently of guild membership. Save R
 
 Standalone Settings has two main sections: **Profile** and **Raid**. Use **Profile → General** to add, save, load, delete or export named preferences in either standalone mode or Booty Suite. Reset keeps raid and loot history.
 
+Loot Master, New Roll and further loot dialogs open above the window that launched them, including in standalone mode.
+
+Soft Reserve warnings stay above raid members in List and Groups. Their INFO and FIX SR windows close when the warning is dismissed or the Raid view is hidden.
+
 ## Existing data
 
 Existing Mukla Officer Suite data is imported by the optional migration bridge. Keep the old SavedVariables until migration has been confirmed in game.
-
-Loot Master, New Roll and further loot dialogs open above the window that launched them, including in standalone mode.

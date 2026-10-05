@@ -3290,6 +3290,7 @@ function RaidManagement.CreateLifecycle(options)
 
     function lifecycle:Hide()
         options.page.groupMovePending = nil
+        RaidManagement.HideSoftReserveWarnings(options.page)
         local detached = options.isDetachedActive and options.isDetachedActive()
         if not detached then options.setLiveTracking(false); self:CancelRosterUpdate() end
         options.page.refreshControls.refreshButton:SetInactive(false)
