@@ -345,7 +345,7 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.ApplyDropdownChoiceSurface(controls.raidInfo)
     Raider.UI.Components.AttachGoldHoverBorder(controls.raidInfo, 0.35, 0.35, 0.35, 1)
     Raider.UI.Components.AttachTooltip(controls.raidInfo, "Raid Info", "Your saved instances, raid IDs and time until reset.")
-    controls.raidInfo:SetScript("OnClick", function() if Raider.Modules.RaidInfo then Raider.Modules.RaidInfo.Toggle() end end)
+    controls.raidInfo:SetScript("OnClick", function() if Raider.Modules.RaidInfo then Raider.Modules.RaidInfo.Toggle(this) end end)
     controls.raidInfo:Hide(); page.raidInfoButton = controls.raidInfo
     controls.scan = Raider.UI.Components.CreateButton(page, nil, "Scan Raid", 140, 24)
     controls.scan:SetPoint("CENTER", page, "CENTER", 0, 12); controls.scan:Hide()
@@ -829,6 +829,7 @@ function RaidManagement.MountList(page, chrome, options)
         timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
     local removeSRDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderRemoveMemberSR", "Remove Soft Reserve", "Remove SR", "fix")
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(removeSRDialog, page) end
     local controller = RaidManagement.CreateListController({
         page = page, runMemberAction = options.runMemberAction, isSelected = options.isSelected,
         refresh = options.refresh, onSelect = options.onSelect, removeSoftReserve = function(memberName)
@@ -2509,7 +2510,7 @@ end
 
 function RaidManagement.CreateDragGhost(page)
     local ghost = Raider.UI.Components.CreateContainer(nil, UIParent)
-    ghost:SetWidth(300); ghost:SetHeight(20); ghost:SetFrameStrata("TOOLTIP"); ghost:EnableMouse(false)
+    ghost:SetWidth(300); ghost:SetHeight(20); ghost:EnableMouse(false)
     ghost:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 8, edgeSize = 9, insets = { left = 2, right = 2, top = 2, bottom = 2 } })
     ghost:SetBackdropColor(0.025, 0.025, 0.025, 0.98); ghost:SetBackdropBorderColor(0.42, 0.42, 0.42, 1)
     ghost.topEdge = Raider.UI.Components.CreateTexture(ghost, nil, "BORDER")
@@ -2530,6 +2531,11 @@ function RaidManagement.CreateDragGhost(page)
     ghost.offline:SetPoint("RIGHT", ghost, "RIGHT", -6, 0); ghost.offline:SetWidth(42); ghost.offline:SetJustifyH("RIGHT"); ghost.offline:SetText("Offline"); ghost.offline:Hide(); ghost:Hide()
     page.dragGhost = ghost
     page.updateDragGhost = function() RaidManagement.UpdateDragGhost(page) end
+    local stack = Raider.UI.Components.WindowStack
+    if stack then
+        if stack.GetWindow(page) then stack.Attach(ghost, page, 100)
+        else stack.Register(ghost, {owner = page, kind = "popup"}) end
+    end
     return ghost
 end
 
@@ -2578,11 +2584,11 @@ end
 
 function RaidManagement.CreateMemberMenu(page, runAction, isIgnored)
     local dismiss = Raider.UI.Components.CreateControl(nil, UIParent)
-    dismiss:SetAllPoints(UIParent); dismiss:SetFrameStrata("FULLSCREEN_DIALOG"); dismiss:SetFrameLevel(210); dismiss:Hide()
+    dismiss:SetAllPoints(UIParent); dismiss:Hide()
     page.memberMenuDismiss = dismiss
 
     local menu = Raider.UI.Components.CreateContainer(nil, UIParent)
-    menu:SetWidth(132); menu:SetHeight(168); menu:SetFrameStrata("FULLSCREEN_DIALOG"); menu:SetFrameLevel(220)
+    menu:SetWidth(132); menu:SetHeight(168)
     menu:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
     menu:SetBackdropColor(0.03, 0.03, 0.06, 0.98); menu:SetBackdropBorderColor(0.55, 0.55, 0.65, 1)
     menu.title = Raider.UI.Components.CreateLabel(menu, nil, "OVERLAY", "GameFontNormalSmall")
@@ -2617,6 +2623,7 @@ function RaidManagement.CreateMemberMenu(page, runAction, isIgnored)
     menu:SetScript("OnHide", function() dismiss:Hide() end); menu:Hide()
 
     page.showMemberMenu = function(owner) RaidManagement.ShowMemberMenu(page, owner, isIgnored) end
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(menu, {owner = page, kind = "popup", dismiss = dismiss}) end
     return menu
 end
 
@@ -2659,12 +2666,20 @@ end
 local function InvokeActionSource(source)
     local handler = source:GetScript("OnClick")
     if not handler then return false end
-    local previous = this
-    this = source
-    local ok, message = pcall(handler)
-    this = previous
-    if not ok then error(message) end
-    return true
+    local invoker = this
+    local function Invoke()
+        local previous = this
+        this = source
+        local ok, message = pcall(handler)
+        this = previous
+        if not ok then error(message) end
+        return true
+    end
+    -- Detached tool menus reuse Raid actions. Keep their real invoking window
+    -- while the callback temporarily uses the original source control as this.
+    local stack = Raider.UI.Components.WindowStack
+    if stack then return stack.WithOwner(invoker, Invoke) end
+    return Invoke()
 end
 
 local function ToolSpecs(page, kind)
@@ -3337,13 +3352,13 @@ end
 function RaidManagement.CreateLootMasterController(options)
     local UI = Raider.UI.Components
     local window = UI.CreateContainer("BootyRaiderLootMasterMode", UIParent)
-    window:SetFrameStrata("FULLSCREEN_DIALOG"); window:SetFrameLevel(100)
     window:SetWidth(400); window:SetHeight(210); window:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     window:SetMovable(true); window:SetResizable(true); window:EnableMouse(true); window:RegisterForDrag("LeftButton")
     if window.SetClampedToScreen then window:SetClampedToScreen(true) end
     UI.Window.ApplyProjectSurface(window)
     UI.RegisterSkinCallback(function() UI.Window.ApplyProjectSurface(window) end)
     window:Hide()
+    if UI.WindowStack then UI.WindowStack.Register(window, {owner = options.page}) end
     -- This controller owns a separate window; it never changes dashboard chrome or geometry.
     options.dashboard = window
     local controller = { dashboard = window, getSettings = options.getSettings }
@@ -3351,27 +3366,15 @@ function RaidManagement.CreateLootMasterController(options)
     options.page.lmConfigPanel:SetParent(UIParent)
     options.page.lmConfigPanel:ClearAllPoints()
     options.page.lmConfigPanel:SetPoint("TOPLEFT", options.dashboard, "TOPRIGHT", 0, 0)
-    options.page.lmConfigPanel:SetFrameLevel(options.dashboard:GetFrameLevel() + 30)
-    options.page.lmConfigPanel:SetFrameStrata("FULLSCREEN_DIALOG")
-    options.page.lmConfigPanel:SetFrameLevel(300)
-    options.page.lmAutoLoot:SetFrameLevel(301)
-    if options.page.lmConfigClose then options.page.lmConfigClose:SetFrameStrata("FULLSCREEN_DIALOG"); options.page.lmConfigClose:SetFrameLevel(305) end
     options.page.reyCoinPanel:SetParent(UIParent)
     options.page.reyCoinPanel:ClearAllPoints()
     options.page.reyCoinPanel:SetPoint("TOPLEFT", options.page.lmConfigPanel, "TOPLEFT", 0, 0)
-    options.page.reyCoinPanel:SetFrameStrata("FULLSCREEN_DIALOG")
-    options.page.reyCoinPanel:SetFrameLevel(300)
-    options.page.reyCoinScroll:SetFrameStrata("FULLSCREEN_DIALOG"); options.page.reyCoinScroll:SetFrameLevel(301)
-    options.page.reyCoinCanvas:SetFrameStrata("FULLSCREEN_DIALOG"); options.page.reyCoinCanvas:SetFrameLevel(302)
-    local reyCoinRowIndex
-    for reyCoinRowIndex = 1, table.getn(options.page.reyCoinRows) do
-        local row = options.page.reyCoinRows[reyCoinRowIndex]
-        row:SetFrameStrata("FULLSCREEN_DIALOG"); row:SetFrameLevel(303)
-        row.remove:SetFrameStrata("FULLSCREEN_DIALOG"); row.remove:SetFrameLevel(304)
+    if UI.WindowStack then
+        UI.WindowStack.Register(options.page.lmConfigPanel, {owner = window})
+        UI.WindowStack.Register(options.page.reyCoinPanel, {owner = function()
+            return options.page.reyCoinSolo and options.page or window
+        end})
     end
-    if options.page.reyCoinItem then options.page.reyCoinItem:SetFrameStrata("FULLSCREEN_DIALOG"); options.page.reyCoinItem:SetFrameLevel(303) end
-    options.page.reyCoinInput:SetFrameStrata("FULLSCREEN_DIALOG"); options.page.reyCoinInput:SetFrameLevel(303)
-    options.page.reyCoinAdd:SetFrameStrata("FULLSCREEN_DIALOG"); options.page.reyCoinAdd:SetFrameLevel(303)
     controller.ReanchorPanels = function()
         options.page.lmConfigPanel:ClearAllPoints()
         options.page.lmConfigPanel:SetPoint("TOPLEFT", window, "TOPRIGHT", 0, 0)
@@ -3415,7 +3418,6 @@ function RaidManagement.CreateLootMasterController(options)
     reyPanel:SetScript("OnDragStop", function() reyPanel:StopMovingOrSizing(); controller.ReanchorPanels() end)
     local reyClose = UI.CreateWindowButton(reyPanel, nil, "close")
     reyClose:SetPoint("TOPRIGHT", reyPanel, "TOPRIGHT", -4, -4)
-    reyClose:SetFrameStrata("FULLSCREEN_DIALOG"); reyClose:SetFrameLevel(305)
     reyClose:SetScript("OnClick", function() reyPanel:Hide() end)
     controller.OpenSoloReyCoin = function()
         reyPanel:Hide()
@@ -3672,6 +3674,7 @@ function RaidManagement.AttachActionHandlers(options)
         return true
     end)
     newRaidDialog:SetHeight(190)
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(newRaidDialog, options.page) end
     Raider.UI.Components.SetHeadingIcon(newRaidDialog.title,"raids")
     newRaidDialog.raidLabel = Raider.UI.Components.CreateLabel(newRaidDialog, nil, "OVERLAY", "GameFontHighlightSmall")
     newRaidDialog.raidLabel:SetPoint("TOPLEFT", newRaidDialog, "TOPLEFT", 18, -91); newRaidDialog.raidLabel:SetText("Raid")
@@ -3696,6 +3699,7 @@ function RaidManagement.AttachActionHandlers(options)
         if accepted then pendingShareAction = nil end
         return accepted, message
     end, 500)
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(shareSrDialog, options.page) end
     Raider.UI.Components.SetHeadingIcon(shareSrDialog.title,"link")
     local function ShareWithUrl(action)
         local url = options.getSrUrl()
@@ -3722,6 +3726,7 @@ function RaidManagement.AttachActionHandlers(options)
     options.page.getRaidHistory = options.getRaidHistory
     local pendingDeleteRaidId = nil
     StaticPopupDialogs["BOOTY_RAIDER_DELETE_RAID_SNAPSHOT"] = {
+        mosProjectTitle = "Delete Raid", mosProjectOwner = options.page,
         text = "Delete this saved raid snapshot?", button1 = "Delete", button2 = "Cancel",
         OnAccept = function()
             if pendingDeleteRaidId and options.deleteRaidSnapshot(pendingDeleteRaidId) then
@@ -3750,6 +3755,7 @@ function RaidManagement.AttachActionHandlers(options)
         end)
     end
     local liveLoadDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderLiveLoad", "Live Tracking", "Yes", "refresh")
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(liveLoadDialog, options.page) end
     liveLoadDialog.no:SetText("No")
     liveLoadDialog.close:Hide()
     local function StopLoadedTracking()
@@ -3818,7 +3824,7 @@ function RaidManagement.AttachActionHandlers(options)
     local sessionPrompt
     local saveDialog = Raider.UI.Components.CreateContainer("BootyRaiderSaveRaidSessionDialog", UIParent)
     saveDialog:SetWidth(300); saveDialog:SetHeight(218); saveDialog:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
-    saveDialog:SetFrameStrata("FULLSCREEN_DIALOG"); saveDialog:SetFrameLevel(245); saveDialog:EnableMouse(true)
+    saveDialog:EnableMouse(true)
     saveDialog:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 6, right = 6, top = 6, bottom = 6 } })
     saveDialog:SetBackdropColor(0.03, 0.025, 0.02, 1)
     if saveDialog.SetClampedToScreen then saveDialog:SetClampedToScreen(true) end
@@ -3872,6 +3878,7 @@ function RaidManagement.AttachActionHandlers(options)
     end
     options.page.OpenSaveDialog = function(contextKey) saveDialog.transitionContext=contextKey;saveDialog:Open() end
     saveDialog:Hide()
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(saveDialog, {owner = options.page}) end
     options.page.saveSessionDialog = saveDialog
     controls.export:SetScript("OnClick", function()
         if options.isTestRaid and options.isTestRaid() then return end
@@ -3885,12 +3892,13 @@ function RaidManagement.AttachActionHandlers(options)
         timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
     local quitDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderQuitRaidDialog", "Quit Raid", "Quit", "quit")
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(quitDialog, options.page) end
     options.page.quitDialog = quitDialog
     controls.quit:SetScript("OnClick", function() quitDialog:Open("Quit the current raid session without saving?", StaticPopupDialogs.BOOTY_RAIDER_QUIT_RAID_SESSION.OnAccept) end)
 
     sessionPrompt = Raider.UI.Components.CreateContainer("BootyRaiderRaidSessionPrompt", UIParent)
     sessionPrompt:SetWidth(390); sessionPrompt:SetHeight(150); sessionPrompt:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
-    sessionPrompt:SetFrameStrata("FULLSCREEN_DIALOG"); sessionPrompt:SetFrameLevel(240); sessionPrompt:EnableMouse(true)
+    sessionPrompt:EnableMouse(true)
     sessionPrompt:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 6, right = 6, top = 6, bottom = 6 } })
     sessionPrompt:SetBackdropColor(0.03, 0.025, 0.02, 1)
     if sessionPrompt.SetClampedToScreen then sessionPrompt:SetClampedToScreen(true) end
@@ -3915,6 +3923,7 @@ function RaidManagement.AttachActionHandlers(options)
     promptText:SetHeight(48); promptText:SetJustifyV("TOP")
     sessionPrompt.continueButton, sessionPrompt.saveButton, sessionPrompt.closeButton = continueButton, saveButton, closeButton
     sessionPrompt:Hide()
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(sessionPrompt, {owner = options.page}) end
     continueButton:SetScript("OnClick", function()
         sessionPrompt:Hide()
         if options.continueRaidSession then options.continueRaidSession(sessionPrompt.contextKey) end
@@ -3940,7 +3949,12 @@ function RaidManagement.AttachActionHandlers(options)
     end
     options.page.HideSessionTransitionPrompt = function() sessionPrompt:Hide() end
 
+    -- The native world event can show this prompt before the Raid view exists.
+    -- Keep its pooled window while installing the page-specific callbacks.
+    local previousRaidReminder = StaticPopupDialogs["BOOTY_RAIDER_START_RAID_REMINDER"]
     StaticPopupDialogs["BOOTY_RAIDER_START_RAID_REMINDER"] = {
+        mosProjectTitle = "Start Raid", mosProjectOwner = options.page,
+        mosProjectFrame = previousRaidReminder and previousRaidReminder.mosProjectFrame,
         text = "You entered a raid instance without an active Raider raid session.",
         button1 = "No", button2 = "Start New Raid",
         OnAccept = function()
@@ -3957,7 +3971,7 @@ function RaidManagement.AttachActionHandlers(options)
         Raider.UI.Components.ShowOpaquePopup("BOOTY_RAIDER_START_RAID_REMINDER")
     end
     options.page.HideRaidStartReminder = function()
-        StaticPopup_Hide("BOOTY_RAIDER_START_RAID_REMINDER")
+        Raider.UI.Components.HideOpaquePopup("BOOTY_RAIDER_START_RAID_REMINDER")
     end
     controls.raidLeaderTools:SetScript("OnClick", function()
         if options.page.activeToolMenu == "leader" then options.page.activeToolMenu = nil else options.page.activeToolMenu = "leader" end
@@ -4068,12 +4082,13 @@ function RaidManagement.CreateAutoLootControls(page, view)
     local inclusionsArea = UI.MakeTextAreaScrollable(inclusions, panel)
     local focusDismiss = UI.CreateControl(nil, UIParent)
     focusDismiss:SetAllPoints(UIParent); focusDismiss:EnableMouse(true); focusDismiss:Hide()
+    if UI.WindowStack then UI.WindowStack.Attach(focusDismiss, panel, -1) end
     local function ClearTextFocus() exceptions:ClearFocus(); inclusions:ClearFocus(); focusDismiss:Hide() end
     focusDismiss:SetScript("OnMouseDown", ClearTextFocus)
     panel:SetScript("OnMouseDown", ClearTextFocus)
     tooltipHit:SetScript("OnMouseDown", ClearTextFocus); inclusionTooltip:SetScript("OnMouseDown", ClearTextFocus)
     local function FocusText()
-        focusDismiss:SetFrameStrata(panel:GetFrameStrata()); focusDismiss:SetFrameLevel(math.max(0, panel:GetFrameLevel()-1)); focusDismiss:Show()
+        focusDismiss:Show()
     end
     exceptions:SetScript("OnEditFocusGained", FocusText); inclusions:SetScript("OnEditFocusGained", FocusText)
     exceptions:SetScript("OnEditFocusLost", function() focusDismiss:Hide(); Apply() end)

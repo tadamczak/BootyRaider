@@ -5,10 +5,9 @@ Raider.Modules = Raider.Modules or {}
 local CSR = {}
 Raider.Modules.CSR = CSR
 
-local function CreateTestLab(onChanged, onExit)
+local function CreateTestLab(owner, onChanged, onExit)
     local dialog = UI.CreateContainer("BootyRaiderCSRTestLab", UIParent)
     dialog:SetWidth(500); dialog:SetHeight(420); dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
-    dialog:SetFrameStrata("FULLSCREEN_DIALOG"); dialog:SetFrameLevel(230)
     dialog:SetResizable(true); dialog:SetMinResize(280, 240); dialog:SetMaxResize(850, 700)
     if dialog.SetClampedToScreen then dialog:SetClampedToScreen(true) end
     dialog.title = UI.CreateHeading(dialog, "CSR Test Lab", 1, "gold", "csr")
@@ -90,6 +89,7 @@ local function CreateTestLab(onChanged, onExit)
     end
     function dialog:Open() self:Refresh(); self:Show() end
     dialog:Hide()
+    if UI.WindowStack then UI.WindowStack.Register(dialog, {owner = owner}) end
     return dialog
 end
 
@@ -100,7 +100,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     local raidFilterIndex
     for raidFilterIndex = 1, table.getn(raidNames) do controller.selectedRaids[raidNames[raidFilterIndex]] = true end
     page.csrController=controller;host.csrController=controller
-    controller.testLab = CreateTestLab(function() controller.testMode = true; controller:Refresh() end, function() controller.testMode = false; controller:Refresh() end)
+    controller.testLab = CreateTestLab(page, function() controller.testMode = true; controller:Refresh() end, function() controller.testMode = false; controller:Refresh() end)
     controller.title = Raider.UI.Components.CreateHeading(page, "", 1, "gold", "csr"); controller.title:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -10); controller.title:SetText("CSR")
     controller.description = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontHighlightSmall"); controller.description:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -40); controller.description:SetPoint("RIGHT", page, "RIGHT", -6, 0); controller.description:SetJustifyH("LEFT")
     controller.description:SetText("Unsuccessful Soft Reserves from the last 60 days. Each player-item pair accumulates independently. Each miss grants 10 CSR.")

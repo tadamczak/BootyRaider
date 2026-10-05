@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.3 — 2026-10-05
+
+- Keep Loot Master, New Roll, loot rules and nested dialogs above their opening window.
+- Preserve owned confirmations for loot awards, saved-raid deletion and session reminders.
+
 ## 0.1.0-dev.2 — 2026-10-05
 
 - Use corrected shared Settings accordion actions, including during a loaded raid.

@@ -11,6 +11,11 @@ local RaidService = Raider.Services.Raid
 
 Raider.Modules.MasterLootWindow = Raider.Modules.MasterLootWindow or {}
 local MasterLootWindow = Raider.Modules.MasterLootWindow
+local Stack = Raider.UI.Components.WindowStack
+local function RaidWindowOwner()
+    local host = Raider.Runtime and Raider.Runtime.host
+    return host and (host.windows and host.windows.raid or host.window)
+end
 
 local MAX_ROWS = 8
 local MAX_RESULT_ROWS = 6
@@ -22,7 +27,8 @@ local ROLL_ICON_PATH = "Interface\\Buttons\\UI-GroupLoot-Dice-Up"
 local panel = Raider.UI.Components.CreateContainer("BootyRaiderMasterLootWindow", UIParent)
 panel:SetWidth(390); panel:SetHeight(94 + MAX_ROWS * ROW_HEIGHT)
 panel:SetPoint("CENTER", UIParent, "CENTER", 0, 50)
-panel:SetFrameStrata("FULLSCREEN_DIALOG"); panel:SetFrameLevel(200); panel:EnableMouse(true); panel:Hide()
+panel:EnableMouse(true); panel:Hide()
+if Stack then Stack.Register(panel, {owner = RaidWindowOwner}) end
 panel:SetMovable(true); panel:SetResizable(true)
 panel:SetMinResize(360, 180); panel:SetMaxResize(600, 600)
 panel:RegisterForDrag("LeftButton")
@@ -614,35 +620,31 @@ local function AwardToPlayer(roll, name)
     end
     GiveMasterLoot(slot, candidate)
 end
-StaticPopupDialogs["BOOTY_RAIDER_GIVE_MASTER_LOOT"] = {
-    text = "Give %s to %s?", button1 = "Give loot", button2 = CANCEL or "Cancel",
-    OnAccept = function(data)
-        AwardToPlayer(data and data.roll, data and data.name)
-    end,
-    timeout = 0, whileDead = 1, hideOnEscape = 1,
-}
-
+local giveConfirmation
 local function ConfirmGive(roll, name)
     local candidate, slot, reason = CanGive(roll, name)
     if not candidate then
         if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("Raider: " .. reason) end
         return
     end
-    local dialog = StaticPopup_Show("BOOTY_RAIDER_GIVE_MASTER_LOOT", roll.link, name)
-    if dialog then
-        dialog.data = { roll = roll, name = name }
-        dialog:ClearAllPoints()
-        dialog:SetPoint("BOTTOM", panel, "TOP", 0, 8)
-        dialog:SetFrameStrata("TOOLTIP")
+    if not giveConfirmation then
+        giveConfirmation = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderGiveLoot", "Give Master Loot", "Give loot", "lootmaster", {modal = false})
+        Raider.UI.Components.RegisterEscapeDialog(giveConfirmation)
+        if Stack then Stack.SetOwner(giveConfirmation, panel) end
     end
+    giveConfirmation.data = {roll = roll, name = name}
+    giveConfirmation:Open("Give " .. tostring(roll.link or "item") .. " to " .. tostring(name) .. "?", function()
+        local data = giveConfirmation.data
+        AwardToPlayer(data and data.roll, data and data.name)
+    end)
+    giveConfirmation:ClearAllPoints(); giveConfirmation:SetPoint("BOTTOM", panel, "TOP", 0, 8)
 end
 
 local candidateMenu = Raider.UI.Components.CreateContainer("BootyRaiderLootCandidates", UIParent)
 candidateMenu:SetWidth(220); candidateMenu:SetHeight(360)
-candidateMenu:SetFrameStrata("TOOLTIP"); candidateMenu:SetFrameLevel(1000); candidateMenu:EnableMouse(true); candidateMenu:Hide()
+candidateMenu:EnableMouse(true); candidateMenu:Hide()
 local candidateDismiss = Raider.UI.Components.CreateControl(nil, UIParent)
 candidateDismiss:SetAllPoints(UIParent)
-candidateDismiss:SetFrameStrata("FULLSCREEN_DIALOG"); candidateDismiss:SetFrameLevel(250)
 candidateDismiss:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 candidateDismiss:SetScript("OnClick", function() candidateMenu:Hide() end)
 candidateDismiss:Hide()
@@ -652,6 +654,7 @@ candidateMenu:SetScript("OnDragStart", function() this:StartMoving() end)
 candidateMenu:SetScript("OnDragStop", function() this:StopMovingOrSizing(); this.userMoved = true end)
 candidateMenu:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12, insets = { left = 4, right = 4, top = 4, bottom = 4 } })
 candidateMenu:SetBackdropColor(0.02, 0.02, 0.02, 0.98); candidateMenu:SetBackdropBorderColor(0.68, 0.54, 0.27, 1)
+if Stack then Stack.Register(candidateMenu, {owner = panel, kind = "popup", dismiss = candidateDismiss}) end
 local candidateButtons = {}
 local eligibleCandidates = {}
 local groupCounts = {}
@@ -659,7 +662,8 @@ local RestoreSession
 local restorePicker = Raider.UI.Components.CreateContainer("BootyRaiderRestoreRolls", UIParent)
 restorePicker:SetWidth(340); restorePicker:SetHeight(60)
 restorePicker:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-restorePicker:SetFrameStrata("TOOLTIP"); restorePicker:SetFrameLevel(210); restorePicker:EnableMouse(true); restorePicker:Hide()
+restorePicker:EnableMouse(true); restorePicker:Hide()
+if Stack then Stack.Register(restorePicker, {owner = panel}) end
 restorePicker:SetMovable(true); restorePicker:RegisterForDrag("LeftButton")
 restorePicker:SetScript("OnDragStart", function() this:StartMoving() end)
 restorePicker:SetScript("OnDragStop", function() this:StopMovingOrSizing(); this.userMoved = true end)
@@ -1254,7 +1258,8 @@ end
 tracker = Raider.UI.Components.CreateContainer("BootyRaiderRollTracker", UIParent)
 tracker:SetWidth(300); tracker:SetHeight(168)
 tracker:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -80, 130)
-tracker:SetFrameStrata("DIALOG"); tracker:EnableMouse(true); tracker:Hide()
+tracker:EnableMouse(true); tracker:Hide()
+if Stack then Stack.Register(tracker, {owner = RaidWindowOwner}) end
 tracker:SetMovable(true); tracker:SetResizable(true)
 tracker:SetMinResize(280, 168); tracker:SetMaxResize(500, 340)
 tracker:RegisterForDrag("LeftButton")
@@ -1862,7 +1867,8 @@ end)
 local historyDialog = Raider.UI.Components.CreateContainer("BootyRaiderRollHistory", UIParent)
 historyDialog:SetWidth(340); historyDialog:SetHeight(90)
 historyDialog:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-historyDialog:SetFrameStrata("FULLSCREEN_DIALOG"); historyDialog:SetFrameLevel(500); historyDialog:EnableMouse(true); historyDialog:Hide()
+historyDialog:EnableMouse(true); historyDialog:Hide()
+if Stack then Stack.Register(historyDialog, {owner = RaidWindowOwner}) end
 historyDialog:SetMovable(true); historyDialog:RegisterForDrag("LeftButton")
 historyDialog:SetScript("OnDragStart", function() this:StartMoving() end)
 historyDialog:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
@@ -2229,6 +2235,7 @@ end
         events:UnregisterEvent("LOOT_CLOSED");events:UnregisterEvent("LOOT_SLOT_CLEARED")
         events:UnregisterEvent("RAID_ROSTER_UPDATE");events:UnregisterEvent("UI_ERROR_MESSAGE");events:UnregisterEvent("CHAT_MSG_SYSTEM")
         panel:Hide();tracker:Hide();candidateMenu:Hide();restorePicker:Hide();historyDialog:Hide()
+        if giveConfirmation then giveConfirmation:Hide() end
         if MasterLootWindow.newRollDialog then MasterLootWindow.newRollDialog:Hide() end
         timer:SetScript("OnUpdate",nil);timer:Hide();autoLootTimeout:Hide()
         return true

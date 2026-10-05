@@ -161,6 +161,7 @@ function NativeRaidTab.Create(options)
         if inviteDialog and inviteDialog:IsVisible() then inviteDialog:Hide(); return end
         if not inviteDialog then
             inviteDialog = UI.Window.CreateProjectConfirmation("BootyRaiderRaidTabInvite", "Add Member", "Invite", "leader", {modal = false})
+            if UI.WindowStack then UI.WindowStack.SetOwner(inviteDialog, FriendsFrame) end
             inviteDialog.memberName = UI.CreateFramedEditBox(inviteDialog, "BootyRaiderRaidTabInviteName", 304)
             inviteDialog.memberName:SetPoint("TOPLEFT", inviteDialog, "TOPLEFT", 8, -62)
             inviteDialog.memberName:SetAutoFocus(false)

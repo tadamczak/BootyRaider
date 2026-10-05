@@ -6,7 +6,7 @@ local RaidManagement = Raider.Modules.RaidManagement
 function RaidManagement.CreateLootRulesDialog(options)
     local frame = Raider.UI.Components.CreateContainer("BootyRaiderLootRulesDialog", UIParent)
     frame:SetWidth(690); frame:SetHeight(560); frame:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
-    frame:SetFrameStrata("FULLSCREEN_DIALOG"); frame:SetFrameLevel(230); frame:EnableMouse(true); frame:Hide()
+    frame:EnableMouse(true); frame:Hide()
     frame:SetMovable(true); frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart", function() this:StartMoving() end); frame:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
     if frame.SetClampedToScreen then frame:SetClampedToScreen(true) end
@@ -120,6 +120,7 @@ function RaidManagement.CreateLootRulesDialog(options)
         end
         self:Show()
     end
+    if UI.WindowStack then UI.WindowStack.Register(frame, {owner = options.page}) end
     return frame
 end
 
@@ -134,14 +135,14 @@ function RaidManagement.CreateHighlyContestedItemsDialog(options)
         return true
     end)
     dialog:SetWidth(560); dialog:SetHeight(400); dialog.save:SetText("Save"); dialog.cancel:SetText("Close")
-    dialog:BringToFront(500)
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(dialog, options.page) end
     dialog.description = Raider.UI.Components.CreateLabel(dialog, nil, "OVERLAY", "GameFontHighlightSmall")
     dialog.description:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -39); dialog.description:SetWidth(528); dialog.description:SetJustifyH("LEFT")
     dialog.description:SetText("Enter one exact item name per line. Empty and duplicate lines are removed when saved.")
     dialog.scroll:ClearAllPoints(); dialog.scroll:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -68); dialog.scroll:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -32, 52)
     dialog.OpenItems = function(self)
         self:Open(table.concat(options.getHighlyContestedItems(), "\n"))
-        self.scroll:Show(); self.edit:Show(); self:BringToFront(500); self.edit:SetFocus()
+        self.scroll:Show(); self.edit:Show(); self:BringToFront(); self.edit:SetFocus()
     end
     return dialog
 end

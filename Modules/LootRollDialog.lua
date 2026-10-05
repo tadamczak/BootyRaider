@@ -6,6 +6,12 @@ Raider.Modules.LootRollDialog = Dialog
 function Dialog.Create(options)
     local UI = Raider.UI.Components
     local frame = UI.Window.CreateProjectConfirmation("BootyRaiderNewRoll", "New Roll", "Start Roll", "dice", {modal=false})
+    if UI.WindowStack then
+        UI.WindowStack.SetOwner(frame, function()
+            local host = Raider.Runtime and Raider.Runtime.host
+            return host and (host.windows and host.windows.raid or host.window)
+        end)
+    end
     local projectOpen = frame.Open
     frame.label:SetJustifyH("LEFT")
     frame.item = UI.CreateFramedEditBox(frame, nil, 304, 22)
