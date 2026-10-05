@@ -67,6 +67,7 @@ function RaidManagement.CreateSoftReserveImportDialog(options)
     end
     dialog.cancel:ClearAllPoints(); dialog.cancel:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -86, 8)
     dialog.save:ClearAllPoints(); dialog.save:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -8, 8)
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(dialog, options.page) end
     return dialog
 end
 
@@ -122,6 +123,7 @@ local function CreateWarningCard(page, dialogName, dialogTitle, background, bord
         warning.text:SetTextColor(0.92, 0.91, 0.87)
     end)
     warning.dialog = Raider.UI.Components.CreateReadOnlyDialog(dialogName, dialogTitle, 430, 260, background)
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(warning.dialog, warning) end
     Raider.UI.Components.Window.StyleProjectDialog(warning.dialog, "warning_triangle")
     warning.dialog.title:SetTextColor(1, 1, 1)
     warning.dialog.icon = warning.dialog.title.mosHeadingIcon
@@ -263,10 +265,10 @@ end
 
 function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refresh)
     local dismiss = Raider.UI.Components.CreateControl(nil, UIParent)
-    dismiss:SetAllPoints(UIParent); dismiss:SetFrameStrata("FULLSCREEN_DIALOG"); dismiss:SetFrameLevel(229); dismiss:Hide()
+    dismiss:SetAllPoints(UIParent); dismiss:Hide()
     local dialog = Raider.UI.Components.CreateContainer("BootyRaiderSoftReserveFixDialog", UIParent)
     dialog:SetWidth(700); dialog:SetHeight(430); dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
-    dialog:SetFrameStrata("FULLSCREEN_DIALOG"); dialog:SetFrameLevel(230); dialog:EnableMouse(true); dialog:Hide()
+    dialog:EnableMouse(true); dialog:Hide()
     if dialog.SetClampedToScreen then dialog:SetClampedToScreen(true) end
     dialog:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 7, right = 7, top = 7, bottom = 7 } }); dialog:SetBackdropColor(0.018, 0.018, 0.016, 1)
     Raider.UI.Components.RegisterDialogSurface(dialog, "panel", { 0.018, 0.018, 0.016, 1 })
@@ -297,7 +299,7 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
     end
     dialog.save = Raider.UI.Components.CreateButton(dialog, nil, "Save", 78, 22); dialog.save:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -94, 8)
     dialog.close = Raider.UI.Components.CreateButton(dialog, nil, "Close", 78, 22); dialog.close:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -8, 8)
-    dialog.ghost = Raider.UI.Components.CreateContainer(nil, UIParent); dialog.ghost:SetWidth(260); dialog.ghost:SetHeight(22); dialog.ghost:SetFrameStrata("TOOLTIP"); dialog.ghost:SetFrameLevel(240)
+    dialog.ghost = Raider.UI.Components.CreateContainer(nil, UIParent); dialog.ghost:SetWidth(260); dialog.ghost:SetHeight(22)
     dialog.ghost:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 8, edgeSize = 8, insets = { left = 2, right = 2, top = 2, bottom = 2 } }); dialog.ghost:SetBackdropColor(0.12, 0.09, 0.03, 0.98)
     dialog.ghost.text = Raider.UI.Components.CreateLabel(dialog.ghost, nil, "OVERLAY", "GameFontHighlightSmall"); dialog.ghost.text:SetPoint("LEFT", dialog.ghost, "LEFT", 8, 0); dialog.ghost:Hide()
     dialog.ghost:SetScript("OnUpdate", function() local x, y = GetCursorPosition(); local scale = UIParent:GetEffectiveScale(); this:ClearAllPoints(); this:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale) end)
@@ -368,4 +370,9 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
         CenterOnScreen(self); RefreshDialog(); dismiss:Show(); self:Show()
     end
     page.softReserveFixDialog = dialog
+    if Raider.UI.Components.WindowStack then
+        local stack = Raider.UI.Components.WindowStack
+        stack.Register(dialog, {owner = page, dismiss = dismiss})
+        stack.Attach(dialog.ghost, dialog, 100)
+    end
 end

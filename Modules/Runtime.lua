@@ -53,14 +53,19 @@ local function Reload()
     if type(ReloadUI)=="function" then ReloadUI()
     elseif type(ConsoleExec)=="function" then ConsoleExec("reloadui") end
 end
+local function RaidPromptOwner()
+    local host = Runtime.host
+    return host and (host.windows and host.windows.raid or host.window)
+end
 local function RegisterPrompts()
     StaticPopupDialogs["BOOTY_RAIDER_ATTENDANCE_RELOAD"]={
-        mosProjectTitle="Save Raid",text="Raid data is saved in memory. Reload the UI now to write it to disk?",
+        mosProjectTitle="Save Raid",mosProjectOwner=RaidPromptOwner,text="Raid data is saved in memory. Reload the UI now to write it to disk?",
         button1="Reload now",button2="Later",OnAccept=Reload,
         OnCancel=function() Runtime.Print("Raid data remains in memory until /reload or normal logout.") end,
         timeout=0,whileDead=1,hideOnEscape=1,
     }
     StaticPopupDialogs["BOOTY_RAIDER_START_RAID_REMINDER"]={
+        mosProjectTitle="Start Raid",mosProjectOwner=RaidPromptOwner,
         text="You entered a raid instance without an active BootyRaider session.",button1="Later",button2="New Raid",
         OnAccept=function() Raider.raidStartReminderContext=Raider.raidStartReminderShownContext end,
         OnCancel=function()
@@ -79,6 +84,10 @@ local function ShowTransitionPrompt(contextKey)
     Runtime.sessionController:ConfirmTransition(contextKey)
     if not Runtime.transitionPrompt then
         local dialog=UI.Window.CreateProjectConfirmation("BootyRaiderSessionTransition","Raid session is still active","Continue Session","raids",{modal=false})
+        if UI.WindowStack then UI.WindowStack.SetOwner(dialog, function()
+            local host = Runtime.host
+            return host and (host.windows and host.windows.raid or host.window)
+        end) end
         dialog:SetWidth(390);dialog.no:SetText("End & Save");dialog.no:SetWidth(112);dialog.yes:SetWidth(132)
         dialog.no:ClearAllPoints();dialog.no:SetPoint("BOTTOMLEFT",dialog,"BOTTOMLEFT",48,12)
         dialog.yes:ClearAllPoints();dialog.yes:SetPoint("LEFT",dialog.no,"RIGHT",18,0)
@@ -196,7 +205,7 @@ function Runtime.Initialize(host)
         getSessionTransitionContext=function() return Runtime.sessionController:GetTransitionContext() end,
         setTransitionPending=function(value) Runtime.sessionController:SetTransitionPending(value) end,
         showRaidStartReminder=function() UI.ShowOpaquePopup("BOOTY_RAIDER_START_RAID_REMINDER") end,
-        hideRaidStartReminder=function() if type(StaticPopup_Hide)=="function" then StaticPopup_Hide("BOOTY_RAIDER_START_RAID_REMINDER") end end,
+        hideRaidStartReminder=function() UI.HideOpaquePopup("BOOTY_RAIDER_START_RAID_REMINDER") end,
         showSessionTransitionPrompt=ShowTransitionPrompt,hideSessionTransitionPrompt=HideTransitionPrompt,
     })
     Runtime.nativeRaidTab=Raider.Modules.NativeRaidTab.Create({

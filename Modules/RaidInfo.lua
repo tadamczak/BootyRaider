@@ -9,7 +9,6 @@ function RaidInfo.Create(parent, service)
     local dialogWidth, idWidth, resetWidth = 360, 70, 80
     local innerWidth, rightColumns = dialogWidth - 20, idWidth + resetWidth
     frame:SetWidth(dialogWidth); frame:SetHeight(130); frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    frame:SetFrameStrata("FULLSCREEN_DIALOG"); frame:SetFrameLevel(220)
     frame.title = UI.CreateHeading(frame, "", 3, "gold", "info"); frame.title:SetText("Raid Info")
     frame.close = UI.CreateWindowButton(frame, nil, "close")
     UI.Window.StyleProjectDialog(frame)
@@ -29,7 +28,13 @@ function RaidInfo.Create(parent, service)
     end
     local empty = UI.CreateLabel(frame, nil, "OVERLAY", "GameFontHighlightSmall")
     empty:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -58); empty:SetWidth(innerWidth); empty:SetJustifyH("LEFT")
-    local active, controller = false, {}
+    local active, controller = false, {frame = frame}
+    if UI.WindowStack then
+        UI.WindowStack.Register(frame, {owner = function()
+            local host = Raider.Runtime and Raider.Runtime.host
+            return controller.owner or host and (host.windows and host.windows.raid or host.window)
+        end})
+    end
     local function Measure(width)
         local nameWidth = math.max(1, width - rightColumns)
         local y, index = 0, 1
@@ -104,7 +109,8 @@ function RaidInfo.Create(parent, service)
             -- and starts 28px below its top. Anchor to those visible edges.
             frame:SetPoint("TOPLEFT", owner, "TOPRIGHT", -33, -28)
         else frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0) end
-        if active then service.Request(); Render() else frame:Show(); Activate() end
+        if active then service.Request(); Render(); if UI.WindowStack then UI.WindowStack.Raise(frame, owner) end
+        else frame:Show(); Activate() end
     end
     function controller:Close() frame:Hide(); Deactivate() end
     function controller:Toggle(owner)

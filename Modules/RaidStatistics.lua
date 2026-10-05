@@ -82,14 +82,14 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.fromLabel = Raider.UI.Components.CreateLabel(controller.filterPanel, nil, "OVERLAY", "GameFontHighlightSmall"); controller.fromLabel:SetPoint("TOPLEFT", controller.filterPanel, "TOPLEFT", 10, -38); controller.fromLabel:SetText("From")
     controller.fromDate = Raider.UI.Components.CreateFramedEditBox(controller.filterPanel, nil, 80); controller.fromDate:SetPoint("TOPLEFT", controller.filterPanel, "TOPLEFT", 48, -33); controller.fromDate:SetMaxLetters(10); controller.fromDate:EnableKeyboard(false)
     controller.datePicker = Raider.UI.Components.CreateDatePicker("BootyRaiderRaidStatisticsDatePicker")
-    controller.dateDismiss = Raider.UI.Components.CreateControl(nil, UIParent); controller.dateDismiss:SetAllPoints(UIParent); controller.dateDismiss:SetFrameStrata("FULLSCREEN_DIALOG"); controller.dateDismiss:SetFrameLevel(3); controller.dateDismiss:Hide()
-    controller.datePicker:SetFrameStrata("FULLSCREEN_DIALOG"); controller.datePicker:SetFrameLevel(4)
+    controller.dateDismiss = Raider.UI.Components.CreateControl(nil, UIParent); controller.dateDismiss:SetAllPoints(UIParent); controller.dateDismiss:Hide()
+    if UI.WindowStack then
+        UI.WindowStack.Register(controller.datePicker, {owner = page, dismiss = controller.dateDismiss})
+    end
     local function CloseDatePicker() controller.datePicker:Hide(); controller.dateDismiss:Hide() end
     local function ToggleDatePicker(anchor, target)
         if controller.datePicker:IsShown() then CloseDatePicker() else
             controller.raidPanel:Hide()
-            local level=math.max(230,page:GetFrameLevel()+30)
-            controller.dateDismiss:SetFrameLevel(level);controller.datePicker:SetFrameLevel(level+1)
             controller.dateDismiss:Show(); controller.datePicker:Open(anchor, target)
         end
     end
@@ -129,12 +129,14 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     local function CreateModal(name, title, height)
         local dialog = Raider.UI.Components.CreateContainer(name, UIParent)
         dialog:SetWidth(360); dialog:SetHeight(height); dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
-        dialog:SetFrameStrata("FULLSCREEN_DIALOG"); dialog:SetFrameLevel(245); dialog:EnableMouse(true)
+        dialog:EnableMouse(true)
         dialog:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 6, right = 6, top = 6, bottom = 6 } })
         dialog:SetBackdropColor(0.03, 0.025, 0.02, 1)
         if dialog.SetClampedToScreen then dialog:SetClampedToScreen(true) end
         dialog.title = Raider.UI.Components.CreateHeading(dialog, "", 1, "gold", "raid_stats"); dialog.title:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, -17); dialog.title:SetText(title)
-        dialog:Hide(); return dialog
+        dialog:Hide()
+        if UI.WindowStack then UI.WindowStack.Register(dialog, {owner = page}) end
+        return dialog
     end
     controller.removeDialog = CreateModal("BootyRaiderRemoveRaidStatisticDialog", "Remove raid from history?", 145)
     controller.removeDialog.message = Raider.UI.Components.CreateLabel(controller.removeDialog, nil, "OVERLAY", "GameFontHighlight")
