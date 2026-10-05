@@ -71,10 +71,23 @@ function RaidManagement.CreateSoftReserveImportDialog(options)
     return dialog
 end
 
+local function HideWarningDialogs(warning)
+    warning.dialog:Hide()
+    local fix = warning.fixDialog
+    if fix then
+        if fix.Close then fix:Close() else fix:Hide() end
+    end
+end
+
+local function HideWarning(warning)
+    if not warning then return end
+    warning:Hide()
+    HideWarningDialogs(warning)
+end
+
 local function CreateWarningCard(page, dialogName, dialogTitle, background, border, textColor)
     local warning = Raider.UI.Components.CreateControl(nil, page)
     warning:SetHeight(58)
-    warning:SetFrameLevel(page:GetFrameLevel() + 50)
     warning:EnableMouse(true)
     Raider.UI.Components.Window.ApplyProjectSurface(warning)
     warning.badge = Raider.UI.Components.CreateLabel(warning, nil, "OVERLAY", "GameFontDisableSmall")
@@ -182,8 +195,20 @@ local function CreateWarningCard(page, dialogName, dialogTitle, background, bord
         end
         for index=table.getn(names)+1, table.getn(dialog.playerRows) do dialog.playerRows[index]:Hide() end
     end)
+    warning:SetScript("OnHide", function() HideWarningDialogs(warning) end)
     warning:Hide()
+    -- Cards overlay the member content in either layout. Their header, project
+    -- border and actions must share the same managed overlay allocation.
+    if Raider.UI.Components.WindowStack then
+        Raider.UI.Components.WindowStack.Register(warning, {owner = page, kind = "popup"})
+    end
     return warning
+end
+
+function RaidManagement.HideSoftReserveWarnings(page)
+    HideWarning(page.softReserveWarning)
+    HideWarning(page.missingSoftReserveWarning)
+    HideWarning(page.invalidSoftReserveWarning)
 end
 
 function RaidManagement.CreateSoftReserveWarnings(page, clearUnmatched, refresh, getAttendance)
@@ -201,6 +226,8 @@ function RaidManagement.CreateSoftReserveWarnings(page, clearUnmatched, refresh,
         timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
     local confirmBOOTY_RAIDER_CLEAR_UNMATCHED_SR = Raider.UI.Components.Window.CreateProjectConfirmation("BOOTY_RAIDER_CLEAR_UNMATCHED_SRDialog", "Fix Soft Reserves", "Remove", "fix")
+    page.softReserveWarning.fixDialog = confirmBOOTY_RAIDER_CLEAR_UNMATCHED_SR
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(confirmBOOTY_RAIDER_CLEAR_UNMATCHED_SR, page.softReserveWarning) end
     page.softReserveWarning.fix:SetScript("OnClick", function() local spec=StaticPopupDialogs.BOOTY_RAIDER_CLEAR_UNMATCHED_SR; CenterOnScreen(confirmBOOTY_RAIDER_CLEAR_UNMATCHED_SR); confirmBOOTY_RAIDER_CLEAR_UNMATCHED_SR:Open(spec.text, spec.OnAccept) end)
     page.missingSoftReserveWarning = CreateWarningCard(page, "BootyRaiderMissingSoftReserveDetails", "Raid members without Soft Reserve", { 0.18, 0.08, 0.01 }, { 1, 0.55, 0.08 }, { 1, 0.72, 0.18 })
     page.missingSoftReserveWarning.onDismiss = refresh
@@ -235,6 +262,8 @@ function RaidManagement.CreateSoftReserveWarnings(page, clearUnmatched, refresh,
         timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
     local confirmBOOTY_RAIDER_CLEAR_INVALID_SR = Raider.UI.Components.Window.CreateProjectConfirmation("BOOTY_RAIDER_CLEAR_INVALID_SRDialog", "Fix Soft Reserves", "Remove SR", "fix")
+    invalidWarning.fixDialog = confirmBOOTY_RAIDER_CLEAR_INVALID_SR
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(confirmBOOTY_RAIDER_CLEAR_INVALID_SR, invalidWarning) end
     confirmBOOTY_RAIDER_CLEAR_INVALID_SR:SetWidth(300)
     invalidWarning.fix:SetScript("OnClick", function() local spec=StaticPopupDialogs.BOOTY_RAIDER_CLEAR_INVALID_SR; CenterOnScreen(confirmBOOTY_RAIDER_CLEAR_INVALID_SR); confirmBOOTY_RAIDER_CLEAR_INVALID_SR:Open(spec.text, spec.OnAccept) end)
     invalidWarning.ping:SetScript("OnClick", function()
@@ -370,9 +399,10 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
         CenterOnScreen(self); RefreshDialog(); dismiss:Show(); self:Show()
     end
     page.softReserveFixDialog = dialog
+    if page.missingSoftReserveWarning then page.missingSoftReserveWarning.fixDialog = dialog end
     if Raider.UI.Components.WindowStack then
         local stack = Raider.UI.Components.WindowStack
-        stack.Register(dialog, {owner = page, dismiss = dismiss})
+        stack.Register(dialog, {owner = page.missingSoftReserveWarning or page, dismiss = dismiss})
         stack.Attach(dialog.ghost, dialog, 100)
     end
 end

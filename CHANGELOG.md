@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.4 — 2026-10-05
+
+- Keep Soft Reserve warning cards and their controls above raid rows and group tiles, including when docked or minimized.
+- Close warning details, Fix SR confirmations and the assignment editor when the warning or Raid view is hidden.
+
 ## 0.1.0-dev.3 — 2026-10-05
 
 - Keep Loot Master, New Roll, loot rules and nested dialogs above their opening window.
