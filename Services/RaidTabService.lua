@@ -10,7 +10,9 @@ function RaidTab.GetGroupSettings(target)
     local index
     for index = 1, table.getn(suffixes) do
         local suffix = suffixes[index]
-        target["raidGroup" .. suffix] = BootyRaiderDB["nativeRaidGroup" .. suffix]
+        local appearance=Raider.Modules.RaidAppearanceProvider
+        if appearance then target["raidGroup" .. suffix]=appearance.GetValue("nativeRaidGroup",suffix)
+        else target["raidGroup" .. suffix]=BootyRaiderDB["nativeRaidGroup" .. suffix] end
     end
     return target
 end

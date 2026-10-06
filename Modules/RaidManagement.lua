@@ -5,7 +5,9 @@ Raider.Modules.RaidManagement = Raider.Modules.RaidManagement or {}
 local RaidManagement = Raider.Modules.RaidManagement
 
 local function GroupSettings(page)
-    return page and page.groupSettings or BootyRaiderDB
+    if page and page.groupSettings then return page.groupSettings end
+    local appearance=Raider.Modules.RaidAppearanceProvider
+    return appearance and appearance.GetGroupSettings() or BootyRaiderDB
 end
 
 function RaidManagement.ResetIssueAttention(page)
@@ -1104,6 +1106,7 @@ function RaidManagement.CreateCompactGroupView(parent, dependencies)
         page:Hide(); members = {}
     end
     function controller:IsVisible() return page:IsVisible() end
+    function controller:RefreshAppearance() return RaidManagement.RefreshGroupView(page,true) end
     page:SetScript("OnHide", function() controller:Hide() end)
     return controller
 end
@@ -2311,32 +2314,38 @@ function RaidManagement.ResolveGroupViewport(page)
     return width, height, maximum
 end
 
-function RaidManagement.RefreshGroupView(page)
-    if not page.groupFrame:IsVisible() then return end
+function RaidManagement.RefreshGroupView(page,appearanceOnly)
+    if not page.groupFrame:IsVisible() then return true end
     local renderer = page.groupRenderer
-    renderer.ensureDatabase()
+    if appearanceOnly and page.groupMemberCount==nil then return true end
+    if not appearanceOnly then renderer.ensureDatabase() end
     if page.getGroupSettings then page.groupSettings = page.getGroupSettings() end
     local settings = GroupSettings(page)
     RaidManagement.ApplyGroupViewBackground(page.groupCanvas, settings, page.getGroupSettings ~= nil)
     local roster = page.groupRoster or {}; page.groupRoster = roster
-    local memberCount = math.floor(math.max(0, math.min(40, tonumber(renderer.getRaidMemberCount()) or 0)))
+    local memberCount = page.groupMemberCount
     local index
-    for index = 1, 8 do page.groupCounts[index] = 0 end
-    for index = 1, memberCount do
-        local member = roster[index] or {}; roster[index] = member
-        member[1], member[2], member[3], member[4], member[5], member[6], member[7], member[8] = renderer.getRaidMemberInfo(index)
-        member[3] = math.floor(math.max(1, math.min(8, tonumber(member[3]) or 1)))
-        if member[1] then page.groupCounts[member[3]] = page.groupCounts[member[3]] + 1 end
-    end
-    for index = memberCount + 1, table.getn(roster) do
-        for field = 1, 8 do roster[index][field] = nil end
+    if not appearanceOnly then
+        memberCount=math.floor(math.max(0, math.min(40, tonumber(renderer.getRaidMemberCount()) or 0)))
+        page.groupMemberCount=memberCount
+        for index = 1, 8 do page.groupCounts[index] = 0 end
+        for index = 1, memberCount do
+            local member = roster[index] or {}; roster[index] = member
+            member[1], member[2], member[3], member[4], member[5], member[6], member[7], member[8] = renderer.getRaidMemberInfo(index)
+            member[3] = math.floor(math.max(1, math.min(8, tonumber(member[3]) or 1)))
+            if member[1] then page.groupCounts[member[3]] = page.groupCounts[member[3]] + 1 end
+        end
+        for index = memberCount + 1, table.getn(roster) do
+            for field = 1, 8 do roster[index][field] = nil end
+        end
+        page.groupLootMethod,page.groupLootMasterIndex=renderer.getLootMasterInfo()
     end
     page.visibleGroupCount = 0
     for index = 1, 8 do if page.groupCounts[index] > 0 then page.visibleGroupCount = page.visibleGroupCount + 1 end end
     local width, height, maximum = RaidManagement.ResolveGroupViewport(page)
     local backgroundColor = settings.raidGroupBackgroundColor
     local textColor = settings.raidGroupTextColor
-    local lootMethod, raidLootMasterIndex = renderer.getLootMasterInfo()
+    local lootMethod, raidLootMasterIndex = page.groupLootMethod,page.groupLootMasterIndex
     local compact = page.mosCompactGroupWidth ~= nil
     local legacyCompact = compact and not page.getGroupSettings
     local slotHeight = legacyCompact and 20 or tonumber(settings.raidGroupTileHeight) or 22
@@ -2506,6 +2515,7 @@ function RaidManagement.RefreshGroupView(page)
             if online and settings.raidGroupClassColors and color then slot.name:SetTextColor(color.r, color.g, color.b); slot.class:SetTextColor(color.r, color.g, color.b) end
         end
     end
+    return true
 end
 
 function RaidManagement.CreateDragGhost(page)
