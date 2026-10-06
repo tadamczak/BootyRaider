@@ -158,17 +158,11 @@ end
 function Runtime.Initialize(host)
     if host then Runtime.host=host end
     Raider.Database.Ensure()
-    local provider = Raider.Modules.RaidContentProvider
-    provider.MarkDataReady()
-    local prepared, prepareFailure = provider.Prepare()
-    if not prepared then Runtime.Print(type(prepareFailure) == "table" and prepareFailure.message or prepareFailure) end
     if Runtime.initialized then
         if not Raider.active then
             Raider.active=true
             for _,name in ipairs(eventNames) do Runtime.events:RegisterEvent(name) end
-            InstallLootHook()
-            local ok, failure = provider.Sync()
-            if not ok then Runtime.Print(type(failure)=="table" and failure.message or failure) end
+            InstallLootHook();Runtime.nativeRaidTab:Sync()
         end
         return true
     end
@@ -215,60 +209,27 @@ function Runtime.Initialize(host)
         showSessionTransitionPrompt=ShowTransitionPrompt,hideSessionTransitionPrompt=HideTransitionPrompt,
     })
     Runtime.nativeRaidTab=Raider.Modules.NativeRaidTab.Create({
-        isEnabled=function() return Raider.active and not Runtime.stoppingNativeContent and provider.IsSelected() end,
-        getLayoutContext=provider.GetLayoutContext,onLayoutChanged=provider.LayoutChanged,onStatusChanged=provider.Notify,
-        onError=function(failure) Runtime.Print(type(failure)=="table" and failure.message or failure) end,
+        isEnabled=function() return Raider.active and Raider.Database.GetSetting("useMOSRaidTab") end,
         ensureDatabase=Raider.Database.Ensure,openRaidInfo=Raider.Modules.RaidInfo.Toggle,closeRaidInfo=Raider.Modules.RaidInfo.CloseOwned,
     })
-    provider.BindController(Runtime.nativeRaidTab)
     Runtime.events=UI.CreateContainer("BootyRaiderEvents",UIParent)
     for _,name in ipairs(eventNames) do Runtime.events:RegisterEvent(name) end
     Runtime.events:SetScript("OnEvent",Dispatch)
-    InstallLootHook()
-    local synced, failure = provider.Sync()
+    InstallLootHook();Runtime.nativeRaidTab:Sync()
     Raider.CompleteRaidSession=Runtime.SaveSession
-    if not synced then Runtime.Print(type(failure)=="table" and failure.message or failure) end
     return true
 end
 function Runtime.Stop()
     if Runtime.IsBusy() then return false,"Save or end the active raid and finish loot operations before stopping BootyRaider." end
     if not Runtime.initialized then return true end
-    if Runtime.stoppingNativeContent then return false,"BootyRaider is already stopping." end
-    local provider = Raider.Modules.RaidContentProvider
-    local function Message(failure)
-        return tostring(type(failure)=="table" and (failure.message or failure.code) or failure or "BootyRaider could not stop safely.")
-    end
-    local function Refuse(failure)
-        Runtime.stoppingNativeContent=nil
-        local ok, restored, rollback = pcall(provider.Sync)
-        if not ok then rollback=restored;restored=false end
-        if restored ~= true then
-            return false,{code=type(failure)=="table" and failure.code or "stop-failed",
-                message=Message(failure).." Raid content could not be restored: "..Message(rollback),
-                cause=failure,rollbackError=rollback,partial=true}
-        end
-        return false,failure
-    end
-    -- Native content can fail to detach when another addon owns its wrapper.
-    -- Verify that cleanup before stopping domain events, loot or feature views.
-    Runtime.stoppingNativeContent=true
-    local ok, synced, failure = pcall(provider.Sync)
-    if not ok then failure=synced;synced=false end
-    if synced ~= true then return Refuse(failure) end
-    local stopped, result, reason = pcall(Raider.Modules.MasterLootWindow.Stop)
-    if not stopped or result == false then return Refuse(stopped and reason or result) end
+    if Raider.Modules.MasterLootWindow.Stop() == false then return false end
     Raider.active=false
-    Runtime.stoppingNativeContent=nil
     for _,name in ipairs(eventNames) do Runtime.events:UnregisterEvent(name) end
-    Runtime.worldContext:CancelConfirmation()
-    RestoreLootHook();HideTransitionPrompt()
+    Runtime.worldContext:CancelConfirmation();Runtime.nativeRaidTab:Sync();RestoreLootHook();HideTransitionPrompt()
     for _,view in pairs(Runtime.views) do
         if view.Stop then view:Stop() elseif view.Hide then view:Hide() end
     end
     Raider.Services.Raid.ResetLootSession()
-    -- A notification error cannot make the already stopped domain appear live.
-    local notified, result, detail = pcall(provider.Notify)
-    if not notified or result == false then Runtime.Print(Message(notified and detail or result)) end
     return true
 end
 local function ApplySettingChanges(keys)

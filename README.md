@@ -20,8 +20,6 @@ Use `/br` to open Raid, `/br stats` for Raid Stats, `/br csr` for CSR and `/br s
 
 New sessions capture the physical raid independently of guild membership. Save Raid preserves roster, loot and selected statistics. Live tracking, group/list appearance, the default game Raid tab and Loot Master messages have independent settings.
 
-When BootyUI controls the game Raid tab, choose native or BootyRaider content in BootyUI. The corresponding Raider setting opens that selection. When BootyUI stops, Raider returns to its retained fallback setting; stopping Raider keeps its Raid-tab content inactive.
-
 Standalone Settings has two main sections: **Profile** and **Raid**. Use **Profile → General** to add, save, load, delete or export named preferences in either standalone mode or Booty Suite. Reset keeps raid and loot history.
 
 Loot Master, New Roll and further loot dialogs open above the window that launched them, including in standalone mode.
