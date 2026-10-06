@@ -1,22 +1,5 @@
 # Changelog
 
-## 0.1.0-dev.7 — 2026-10-06
-
-- Preserve editor-owned main group appearance previews during Suite page navigation.
-- Keep explicit cancellation, product Stop and native Raid-tab hide cleanup intact.
-
-## 0.1.0-dev.6 — 2026-10-06
-
-- Support BootyUI previews of existing main and game Raid-tab group appearance settings without saving until Apply.
-- Refresh visible group appearance from the current roster without a new roster scan.
-- Retain independent appearance settings, content choices and gameplay preferences during edits.
-
-## 0.1.0-dev.5 — 2026-10-06
-
-- Let BootyUI select native or BootyRaider content for the game Raid tab while retaining Raider's independent fallback setting.
-- Keep hidden Raid content lazy and report failed attachment or conflicting addon wrappers without taking over later changes.
-- Keep Raider active when its Raid-tab content cannot be detached safely during Stop.
-
 ## 0.1.0-dev.4 — 2026-10-05
 
 - Keep Soft Reserve warning cards and their controls above raid rows and group tiles, including when docked or minimized.

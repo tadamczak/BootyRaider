@@ -83,9 +83,7 @@ function Settings.Get()
         GroupFields("raidGroup",{"Addon UI","Raid","Layout","Group view"})
         GroupFields("nativeRaidGroup",{"Game UI","Layout","Raid","Group view"})
         Field("useMOSRaidTab","Use BootyRaider as default Raid tab","checkbox",{"Game UI","Interface"})
-        Field("useMOSRaidLogo","Use Booty logo","checkbox",{"Game UI","Interface"},nil,nil,nil,function()
-            return Raider.Modules.RaidContentProvider.IsSelected()
-        end)
+        Field("useMOSRaidLogo","Use Booty logo","checkbox",{"Game UI","Interface"},nil,nil,nil,function(store) return store.useMOSRaidTab==true end)
         Field("nativeRaidButtonStyle","Action button style","choice",{"Game UI","Layout","Raid","Appearance"},nil,nil,
             {{text="Game texture",value="game"},{text="Booty red",value="mos"}})
         local listPath={"Addon UI","Raid","Layout","List view","Display"}
@@ -124,27 +122,16 @@ function Settings.Get()
                 function(store) return store[enabledKey]~=false end,"Available variables: "..(definition[4]~="" and definition[4] or "none")..". Variables are optional.")
         end
     end
-    local visibleFields=fields
-    if Raider.Modules.RaidContentProvider.IsControlled() then
-        visibleFields={}
-        for _,field in ipairs(fields) do
-            if field.key=="useMOSRaidTab" then
-                table.insert(visibleFields,{key="useMOSRaidTab",label="Raid tab content (BootyUI)",type="action",text="Open BootyUI",
-                    path={"Game UI","Interface"},profile=false,persist=false,action=Raider.Modules.RaidContentProvider.OpenSelection,
-                    tooltip="Choose the native Raid tab or BootyRaider in BootyUI. The Raider fallback is retained for use after BootyUI stops."})
-            else table.insert(visibleFields,field) end
-        end
-    end
-    return {id="raider",label="Raid",db=db,fields=visibleFields,onChange=Raider.OnSettingChanged}
+    return {id="raider",label="Raid",db=db,fields=fields,onChange=Raider.OnSettingChanged}
 end
 
 -- Profiles reset declared preferences only. Checkbox masks own individual bits;
 -- histories, session state and unrelated bits must survive a scoped reset.
-local function ResetPreferences(selected)
+function Settings.Reset(selected)
     local schema=Settings.Get()
     local db,presetsChanged=schema.db,false
     for _,field in ipairs(schema.fields) do
-        if field.profile~=false and field.type~="action" and (not selected or selected[field.key]) then
+        if not selected or selected[field.key] then
             if field.maskBit then
                 local key,bit=field.durableKey,field.maskBit
                 local mask=tonumber(db[key]) or 0
@@ -166,15 +153,4 @@ local function ResetPreferences(selected)
         db.lmAutoLootExceptions=Raider.Services.AutoLoot.ApplyPresets(db.lmAutoLootExceptions,db.lmAutoLootPresets)
     end
     return true
-end
-function Settings.Reset(selected)
-    local appearance=Raider.Modules.RaidAppearanceProvider
-    if not appearance then return ResetPreferences(selected) end
-    local begun,failure=appearance.BeginExternalChange();if not begun then error(failure.message) end
-    local ok,result=pcall(ResetPreferences,selected)
-    local ended,detail=true,nil
-    if (Raider.Runtime.settingsBatchDepth or 0)==0 then ended,detail=appearance.CompleteExternalChange(true) end
-    if not ok then error(tostring(result)..(not ended and ("; appearance cleanup: "..detail.message) or "")) end
-    if not ended then error(detail.message) end
-    return result
 end
