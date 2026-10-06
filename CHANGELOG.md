@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-dev.5 — 2026-10-06
+
+- Let BootyUI select native or BootyRaider content for the game Raid tab while retaining Raider's independent fallback setting.
+- Keep hidden Raid content lazy and report failed attachment or conflicting addon wrappers without taking over later changes.
+- Keep Raider active when its Raid-tab content cannot be detached safely during Stop.
+
 ## 0.1.0-dev.4 — 2026-10-05
 
 - Keep Soft Reserve warning cards and their controls above raid rows and group tiles, including when docked or minimized.
