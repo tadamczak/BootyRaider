@@ -84,6 +84,7 @@ local descriptor={id="raider",name="BootyRaider",label="Raid",namespace=Raider,v
     Initialize=Runtime.Initialize,Start=Runtime.Initialize,Stop=Runtime.Stop,IsBusy=Runtime.IsBusy,GetSettings=Raider.Settings.Get,
     GetDatabase=Raider.Database.Ensure,GetQuickMenu=QuickMenu,ResetSettings=Raider.Settings.Reset,OnSettingChanged=Raider.OnSettingChanged,Command=Raider.HandleCommand,
     BeginSettingsBatch=Runtime.BeginSettingsBatch,EndSettingsBatch=Runtime.EndSettingsBatch,OnSettingsProfileApplied=Runtime.OnSettingsProfileApplied,
+    GetContentProvider=function(placeId) if placeId=="friends.raid" then return Raider.Modules.RaidContentProvider end end,
     GetGuildDirectoryDemand=function() return Raider.active and Raider.Services.Raid.IsInRaid() end,
     OnGuildDirectoryUpdated=Runtime.RefreshViews,
     views={{id="raid",label="Raid",icon="raids",create=CreateRaid},
