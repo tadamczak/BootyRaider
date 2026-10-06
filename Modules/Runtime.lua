@@ -232,11 +232,6 @@ function Runtime.Initialize(host)
 end
 function Runtime.Stop()
     if Runtime.IsBusy() then return false,"Save or end the active raid and finish loot operations before stopping BootyRaider." end
-    local appearance=Raider.Modules.RaidAppearanceProvider
-    if appearance then
-        local ended,failure=appearance.EndAll("stop")
-        if not ended then return ended,failure end
-    end
     if not Runtime.initialized then return true end
     if Runtime.stoppingNativeContent then return false,"BootyRaider is already stopping." end
     local provider = Raider.Modules.RaidContentProvider
@@ -277,19 +272,6 @@ function Runtime.Stop()
     return true
 end
 local function ApplySettingChanges(keys)
-    local appearance=Raider.Modules.RaidAppearanceProvider
-    if appearance then
-        local onlyAppearance,main,native=true,false,false
-        for key in pairs(keys) do
-            if not appearance.IsAppearanceKey(key) then onlyAppearance=false;break end
-            if string.sub(key,1,15)=="nativeRaidGroup" then native=true else main=true end
-        end
-        if onlyAppearance then
-            if main then local ok,failure=appearance.Refresh("booty.raider.appearance.groups");if not ok then error(failure.message or failure) end end
-            if native then local ok,failure=appearance.Refresh("booty.raider.appearance.native-groups");if not ok then error(failure.message or failure) end end
-            return
-        end
-    end
     if not Runtime.initialized or not Raider.active then return end
     local native,tracking,autoLoot=false,false,false
     for key in pairs(keys) do
@@ -306,10 +288,6 @@ local function ApplySettingChanges(keys)
     end
 end
 function Runtime.BeginSettingsBatch()
-    local appearance=Raider.Modules.RaidAppearanceProvider
-    if appearance and (Runtime.settingsBatchDepth or 0)==0 then
-        local ok,failure=appearance.BeginExternalChange();if not ok then error(failure.message) end
-    end
     Runtime.settingsBatchDepth=(Runtime.settingsBatchDepth or 0)+1
     if not Runtime.pendingSettings then Runtime.pendingSettings={} end
 end
@@ -318,21 +296,15 @@ function Runtime.EndSettingsBatch(success)
     if Runtime.settingsBatchDepth>0 then return end
     local keys=Runtime.pendingSettings
     Runtime.pendingSettings=nil
-    local appearance=Raider.Modules.RaidAppearanceProvider
-    if appearance then local ok,failure=appearance.CompleteExternalChange(success==false);if not ok then error(failure.message) end end
     if success==false then return end
     if keys and next(keys) then ApplySettingChanges(keys) end
 end
 function Raider.OnSettingChanged(key)
     if type(key)~="string" then return end
-    local appearance=Raider.Modules.RaidAppearanceProvider
-    if appearance then local ok,failure=appearance.OnSettingChanged(key);if not ok then error(failure.message) end end
     if (Runtime.settingsBatchDepth or 0)>0 then Runtime.pendingSettings[key]=true;return end
     ApplySettingChanges({[key]=true})
 end
 function Runtime.OnSettingsProfileApplied(keys)
-    local appearance=Raider.Modules.RaidAppearanceProvider
-    if appearance and (Runtime.settingsBatchDepth or 0)==0 then local ok,failure=appearance.EndAll("external-change");if not ok then error(failure.message) end end
     if (Runtime.settingsBatchDepth or 0)>0 then
         for key in pairs(keys or {}) do Runtime.pendingSettings[key]=true end
     else ApplySettingChanges(keys or {profile=true}) end

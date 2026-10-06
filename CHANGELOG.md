@@ -1,11 +1,5 @@
 # Changelog
 
-## 0.1.0-dev.6 — 2026-10-06
-
-- Support BootyUI previews of existing main and game Raid-tab group appearance settings without saving until Apply.
-- Refresh visible group appearance from the current roster without a new roster scan.
-- Retain independent appearance settings, content choices and gameplay preferences during edits.
-
 ## 0.1.0-dev.5 — 2026-10-06
 
 - Let BootyUI select native or BootyRaider content for the game Raid tab while retaining Raider's independent fallback setting.

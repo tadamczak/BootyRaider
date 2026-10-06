@@ -140,7 +140,7 @@ end
 
 -- Profiles reset declared preferences only. Checkbox masks own individual bits;
 -- histories, session state and unrelated bits must survive a scoped reset.
-local function ResetPreferences(selected)
+function Settings.Reset(selected)
     local schema=Settings.Get()
     local db,presetsChanged=schema.db,false
     for _,field in ipairs(schema.fields) do
@@ -166,15 +166,4 @@ local function ResetPreferences(selected)
         db.lmAutoLootExceptions=Raider.Services.AutoLoot.ApplyPresets(db.lmAutoLootExceptions,db.lmAutoLootPresets)
     end
     return true
-end
-function Settings.Reset(selected)
-    local appearance=Raider.Modules.RaidAppearanceProvider
-    if not appearance then return ResetPreferences(selected) end
-    local begun,failure=appearance.BeginExternalChange();if not begun then error(failure.message) end
-    local ok,result=pcall(ResetPreferences,selected)
-    local ended,detail=true,nil
-    if (Raider.Runtime.settingsBatchDepth or 0)==0 then ended,detail=appearance.CompleteExternalChange(true) end
-    if not ok then error(tostring(result)..(not ended and ("; appearance cleanup: "..detail.message) or "")) end
-    if not ended then error(detail.message) end
-    return result
 end

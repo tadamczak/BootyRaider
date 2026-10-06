@@ -313,17 +313,7 @@ function NativeRaidTab.Create(options)
             if not ok then error(reason.message) end
         end)
         panel:SetScript("OnHide", function()
-            local appearance=Raider.Modules.RaidAppearanceProvider
-            local appearanceFailure
-            if appearance then
-                local ok,ended,failure=pcall(appearance.EndTarget,"booty.raider.appearance.native-groups","hide",false)
-                if not ok or ended~=true then appearanceFailure=ok and failure or ended end
-            end
             local ok, reason = Cleanup()
-            if appearanceFailure then
-                local message=type(appearanceFailure)=="table" and appearanceFailure.message or tostring(appearanceFailure)
-                error(message..(not ok and ("; Raid cleanup: "..reason.message) or ""))
-            end
             if not ok then error(reason.message) end
         end)
         local function RefreshObserved()
@@ -428,20 +418,6 @@ function NativeRaidTab.Create(options)
         return true
     end
     function controller:IsVisible() return panel and panel:IsVisible() or false end
-    function controller:RefreshAppearance()
-        if not panel or not panel:IsVisible() then return true end
-        if rendering then return Failure("busy","Raid rendering is already in progress.") end
-        rendering=true
-        local ok,result,detail=pcall(function()
-            local settings=service.GetGroupSettings(groupSettings)
-            Raider.Modules.RaidManagement.ApplyGroupViewBackground(panel,settings,true)
-            Raider.Modules.RaidManagement.ApplyGroupViewBackground(panel.toolbar,settings,true)
-            return groups:RefreshAppearance()
-        end)
-        rendering=false
-        if not ok then return Failure("render-failed",result) end
-        return result,detail
-    end
     function controller:GetStatus()
         return {available = NativeAvailable() and true or false, bound = binding and binding.active == true or false,
             owned = wrapper ~= nil and FriendsFrame_ShowSubFrame == wrapper, conflict = wrapper ~= nil and FriendsFrame_ShowSubFrame ~= wrapper and FriendsFrame_ShowSubFrame ~= previous,

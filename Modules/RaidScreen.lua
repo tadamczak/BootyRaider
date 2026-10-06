@@ -140,10 +140,6 @@ function Screen.Create(parent, host)
     function controller:Show() if not Raider.active then return end;SizePage();lifecycle:Show();Refresh() end
     function controller:Hide() page:Hide();lifecycle:Hide() end
     function controller:Refresh() Refresh() end
-    function controller:RefreshAppearance()
-        if not Raider.active or not page:IsVisible() then return true end
-        return Raid.RefreshGroupView(page,true)
-    end
     function controller:OnResize() SizePage();Refresh() end
     function controller:OnRosterUpdate() lifecycle:OnRosterUpdate() end
     function controller:SyncTrackingSetting(skipRefresh) lifecycle:SyncTrackingSetting(skipRefresh) end
@@ -155,22 +151,5 @@ function Screen.Create(parent, host)
     function controller:OpenSaveDialog(context) page.OpenSaveDialog(context) end
     function controller:OfferCurrentRaidRefresh() page.OfferCurrentRaidRefresh() end
     page.lootMasterController.resetOnLoad()
-    local previousHide=page:GetScript("OnHide")
-    page:SetScript("OnHide",function()
-        local appearance=Raider.Modules.RaidAppearanceProvider
-        local appearanceFailure
-        if appearance then
-            local ok,ended,failure=pcall(appearance.EndTarget,"booty.raider.appearance.groups","hide",false)
-            if not ok or ended~=true then appearanceFailure=ok and failure or ended end
-        end
-        local hidden,message=true,nil
-        if previousHide then hidden,message=pcall(previousHide) end
-        if appearanceFailure then
-            local detail=type(appearanceFailure)=="table" and appearanceFailure.message or tostring(appearanceFailure)
-            if not hidden then error(detail.."; Raid cleanup: "..tostring(message)) end
-            Runtime.Print(detail)
-        end
-        if not hidden then error(message) end
-    end)
     return controller
 end
