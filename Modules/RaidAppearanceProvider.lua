@@ -171,15 +171,13 @@ local function CreateOwner(id,prefix,native)
         return true,{available=ok and valid==true,reason=not ok and Message(values) or not valid and Message(failure) or nil,
             values=ok and Copy(owner.active and owner.active.values or values) or Defaults(owner),fields=Fields(),defaults=Defaults(owner)}
     end
-    function owner.BeginAppearancePreview(element,onEnded,preserveOnViewHide)
+    function owner.BeginAppearancePreview(element,onEnded)
         return Run(owner,function()
             if element~=id then return Failure("unknown-element","Unknown Raid appearance element.") end
             if owner.active or owner.pending then return Failure("busy","These Raid appearance preferences are already being edited.") end
             if onEnded~=nil and type(onEnded)~="function" then return Failure("invalid-callback","Expected an editing completion callback.") end
-            if preserveOnViewHide~=nil and type(preserveOnViewHide)~="boolean" then return Failure("invalid-policy","Expected a view-hide preview policy.") end
             local store=Store();local valid,values=Validate(Values(owner,store));if not valid then return valid,values end
-            local token={};owner.active={token=token,store=store,stored=Copy(values),values=values,onEnded=onEnded,
-                preserveOnViewHide=preserveOnViewHide==true and not owner.native}
+            local token={};owner.active={token=token,store=store,stored=Copy(values),values=values,onEnded=onEnded}
             return true,token
         end)
     end
@@ -263,7 +261,6 @@ function Appearance.Refresh(id) local owner=owners[id];if not owner then return 
 function Appearance.EndTarget(id,reason,refresh)
     local owner=owners[id]
     if not owner or not owner.active then return true end
-    if reason=="hide" and owner.active.preserveOnViewHide then return true end
     return Run(owner,function() return Finish(owner,owner.active,reason or "hide",refresh==true) end,owner.active.token)
 end
 function Appearance.EndAll(reason)

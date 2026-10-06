@@ -1,10 +1,5 @@
 # Changelog
 
-## 0.1.0-dev.7 — 2026-10-06
-
-- Preserve editor-owned main group appearance previews during Suite page navigation.
-- Keep explicit cancellation, product Stop and native Raid-tab hide cleanup intact.
-
 ## 0.1.0-dev.6 — 2026-10-06
 
 - Support BootyUI previews of existing main and game Raid-tab group appearance settings without saving until Apply.
