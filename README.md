@@ -30,6 +30,8 @@ Loot Master, New Roll and further loot dialogs open above the window that launch
 
 Soft Reserve warnings stay above raid members in List and Groups. Their INFO and FIX SR windows close when the warning is dismissed or the Raid view is hidden.
 
+In current Booty Suite, you can preview Raider appearance in BootyUI, switch to Raid to inspect it, then return to Apply or Cancel. Closing or minimizing Suite cancels the unfinished preview.
+
 ## Existing data
 
 Existing Mukla Officer Suite data is imported by the optional migration bridge. Keep the old SavedVariables until migration has been confirmed in game.
