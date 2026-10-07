@@ -2858,10 +2858,6 @@ function RaidManagement.CreateQuickActions(options, loadSelectedRaid)
     return actions
 end
 
-function RaidManagement.GetQuickActions()
-    return RaidManagement.quickActions
-end
-
 function RaidManagement.UpdateToolSubmenu(page)
     local UI = Raider.UI.Components
     local controls = page.refreshControls
@@ -4097,8 +4093,7 @@ function RaidManagement.AttachActionHandlers(options)
             options.printMessage("Raid live tracking stopped.")
         end
     end)
-    RaidManagement.quickActions = RaidManagement.CreateQuickActions(options, LoadSelectedRaid)
-    return RaidManagement.quickActions
+    return RaidManagement.CreateQuickActions(options, LoadSelectedRaid)
 end
 
 function RaidManagement.CreateAutoLootControls(page, view)

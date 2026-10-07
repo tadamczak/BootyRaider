@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.12 — 2026-10-08
+
+- Skip attendance lookups for ignored loot events and reuse CSR data during resize, scrolling and row expansion.
+- Remove the unused legacy quick-actions getter and global alias; actions remain owned by each Raid screen.
+
 ## 0.1.0-dev.11 — 2026-10-07
 
 - Release owned events and loot hooks after failed startup; preserve raid data and report refused cleanup.

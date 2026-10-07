@@ -161,7 +161,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
             else
                 controller.expandedKey = key
             end
-            controller:Refresh()
+            controller:RefreshLayout()
         end)
         row:Hide(); controller.rows[index] = row
     end
@@ -273,14 +273,18 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         if table.getn(self.summary.players)==0 then self.empty:Show() else self.empty:Hide() end
         self.rendering=false
     end
-    function controller:Refresh()
+    function controller:RefreshLayout()
         if not host:IsShown() then return end
         Raider.Diagnostics.Count("uiRefreshes")
-        if self.testMode then Raider.Services.CSRTest.BuildSummary(self.testLab.state,self.summary) else Raider.Services.CSR.BuildSummary(getEntries(),getRules(),time(),self.summary,getRosterData(),self.selectedRaids,self.search:GetText()) end
         self:Layout();self:Render(true)
+    end
+    function controller:Refresh()
+        if not host:IsShown() then return end
+        if self.testMode then Raider.Services.CSRTest.BuildSummary(self.testLab.state,self.summary) else Raider.Services.CSR.BuildSummary(getEntries(),getRules(),time(),self.summary,getRosterData(),self.selectedRaids,self.search:GetText()) end
+        self:RefreshLayout()
     end
     controller.scroll:SetScript("OnVerticalScroll",function() this:SetVerticalScroll(arg1 or 0);controller:Render() end)
     return { frame=page,page=page,Show=function(self) host:Show();page:Show();controller:Refresh() end,
         Hide=function(self) controller.testLab:Hide();controller.raidPanel:Hide();controller.raidDismiss:Hide();page:Hide();host:Hide() end,
-        Refresh=function(self) controller:Refresh() end,OnResize=function(self) controller.raidPanel:Hide();controller:Refresh() end }
+        Refresh=function(self) controller:Refresh() end,OnResize=function(self) controller.raidPanel:Hide();controller:RefreshLayout() end }
 end

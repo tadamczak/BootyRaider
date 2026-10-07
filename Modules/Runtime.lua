@@ -169,9 +169,10 @@ local function Dispatch()
     if not Raider.active then return end
     Raider.Diagnostics.Count("events")
     if event=="CHAT_MSG_LOOT" then
+        if not BootyRaiderDB.raidLiveTrackingEnabled or Raider.raidSessionPaused or Raider.raidSessionTransitionPending
+            or Runtime.IsTestRaid() or not Raider.Services.Raid.IsInRaid() then return end
         local attendance=Raider.Database.GetRaidAttendance()
-        if BootyRaiderDB.raidLiveTrackingEnabled and not Raider.raidSessionPaused and not Raider.raidSessionTransitionPending
-            and not Runtime.IsTestRaid() and Raider.Services.Raid.IsInRaid() and Raider.Services.RaidRes.HasSession(attendance) then
+        if Raider.Services.RaidRes.HasSession(attendance) then
             if Raider.Services.Raid.RecordLoot(arg1) then Runtime.RefreshViews() end
         end
     else
