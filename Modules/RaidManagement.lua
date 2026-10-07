@@ -3696,20 +3696,72 @@ function RaidManagement.AttachActionHandlers(options)
     local importDialog = RaidManagement.CreateSoftReserveImportDialog(options)
     local lootRulesDialog = RaidManagement.CreateLootRulesDialog(options)
     local selectedRaidName = "Molten Core"
+    local failedCancellationId, failedCancellationToken, failedOperationReason, failedCancellationMessage
+    local function CleanupMessage(reason)
+        return failedOperationReason .. " Cleanup failed: " .. (reason or "Unable to cancel the pending scan. Please try again.")
+    end
+    local function RetryFailedCancellation()
+        if not failedCancellationId then return true end
+        -- Only this dialog's failed rollback is ours to retry. A later session
+        -- may already have committed or replaced the original pending handle.
+        if Raider.pendingRaidSessionId ~= failedCancellationId or options.getPendingRaidToken
+            and options.getPendingRaidToken() ~= failedCancellationToken then
+            failedCancellationId, failedCancellationToken, failedOperationReason, failedCancellationMessage = nil, nil, nil, nil
+            return true
+        end
+        local cancelled, reason = options.cancelPendingRaidScan()
+        if cancelled == false then
+            failedCancellationMessage = CleanupMessage(reason)
+            return false, failedCancellationMessage
+        end
+        failedCancellationId, failedCancellationToken, failedOperationReason, failedCancellationMessage = nil, nil, nil, nil
+        return true
+    end
     local newRaidDialog = Raider.UI.Components.CreateTextPrompt("BootyRaiderNewRaidDialog", "Start New Raid", "Unique raid ID", "Start", function(value)
+        local cleaned, cleanupFailure = RetryFailedCancellation()
+        if cleaned == false then return false, cleanupFailure end
         value = string.gsub(tostring(value or ""), "^%s+", ""); value = string.gsub(value, "%s+$", "")
         if value == "" then return false, "Raid ID is required." end
         if options.raidIdExists(value) then return false, "This raid ID already exists." end
         if not options.isInRaid() then return false, "Join a raid before starting a session." end
-        if options.startNewRaid(value, selectedRaidName) == false then return false, "Finish the current session or scan first." end
-        if options.requestRosterScan("raid") == false then
-            if options.cancelPendingRaidScan then options.cancelPendingRaidScan() end
+        local priorPendingId = Raider.pendingRaidSessionId
+        local started, startFailure = options.startNewRaid(value, selectedRaidName)
+        if started == false then
+            local message = startFailure or "Finish the current session or scan first."
+            if not priorPendingId and Raider.pendingRaidSessionId == value then
+                failedCancellationId, failedOperationReason, failedCancellationMessage = value, message, message
+                failedCancellationToken = options.getPendingRaidToken and options.getPendingRaidToken()
+            end
+            return false, message
+        end
+        local scanned, scanFailure = options.requestRosterScan("raid")
+        if scanned == false then
+            local message = scanFailure or "The scan could not start. Please try again."
+            if options.cancelPendingRaidScan then
+                local pendingId = Raider.pendingRaidSessionId
+                local cancelled, cancellationFailure = options.cancelPendingRaidScan()
+                if cancelled == false then
+                    failedCancellationId, failedOperationReason = pendingId, message
+                    failedCancellationToken = options.getPendingRaidToken and options.getPendingRaidToken()
+                    failedCancellationMessage = CleanupMessage(cancellationFailure)
+                    message = failedCancellationMessage
+                end
+            end
             options.refresh()
-            return false, "The scan could not start. Please try again."
+            return false, message
         end
         controls.scan:Hide(); controls.status:SetText("Scanning raid...")
         return true
     end)
+    newRaidDialog:SetScript("OnHide", function()
+        local cleaned, message = RetryFailedCancellation()
+        if cleaned == false then newRaidDialog.message:SetText(message); newRaidDialog.message:SetTextColor(1, 0.25, 0.2) end
+    end)
+    local openNewRaidDialog = newRaidDialog.Open
+    newRaidDialog.Open = function(self)
+        openNewRaidDialog(self)
+        if failedCancellationMessage then self.message:SetText(failedCancellationMessage); self.message:SetTextColor(1, 0.25, 0.2) end
+    end
     newRaidDialog:SetHeight(190)
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(newRaidDialog, options.page) end
     Raider.UI.Components.SetHeadingIcon(newRaidDialog.title,"raids")

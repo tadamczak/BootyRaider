@@ -6,6 +6,7 @@ Raider.Services.RaidSession = RaidSession
 
 local Session = {}
 Session.__index = Session
+local presetKeys = {"lmAutoLootExceptions", "lmAutoLootPresets"}
 
 -- Dependencies are domain adapters, never UI objects or session flag owners.
 -- Keeping their namespaces also preserves instrumentation installed afterward.
@@ -22,7 +23,8 @@ function Session:CaptureActiveRoster(isDraft)
     local dependencies = self.dependencies
     if dependencies.testRaid.IsActive() then return dependencies.testRaid.GetRaidMemberCount() end
     local previousAttendance = dependencies.database.GetRaidAttendance()
-    local count = dependencies.raid.SaveRoster()
+    local count, failure = dependencies.raid.SaveRoster()
+    if count == nil then return nil, failure end
     local attendance = dependencies.database.GetRaidAttendance()
     dependencies.raidRes.Reconcile(previousAttendance, attendance)
     if attendance and isDraft() then attendance._sessionDraft = true end
@@ -31,8 +33,9 @@ end
 
 function Session:CapturePendingRaid(getPendingId, getPendingName)
     local dependencies = self.dependencies
-    local count = dependencies.raid.SaveRoster()
-    local attendance = dependencies.database.GetRaidAttendance()
+    local count, attendance = dependencies.raid.CaptureRoster(true)
+    if count == nil then return nil, attendance end
+    if count <= 0 then return nil, "The physical raid roster is not ready. Retry or cancel the new session." end
     if attendance and getPendingId() then
         attendance.snapshotId = getPendingId()
         attendance.raidName = getPendingName() or attendance.raidName
@@ -40,7 +43,66 @@ function Session:CapturePendingRaid(getPendingId, getPendingName)
         attendance.softReserveImport = { id = getPendingId(), origin = "mos", importedAt = dependencies.now(), unmatchedNames = {}, unmatchedReservations = {}, missingNames = {} }
         attendance._sessionDraft = true
     end
+    dependencies.database.StoreRaidAttendance(attendance)
     return count
+end
+
+function Session:BeginPendingRaid()
+    -- This reference is transient, never another durable copy of attendance.
+    local database = self.dependencies.database
+    local pending = {attendance = database.GetRaidAttendance(), presets = {}}
+    self.pendingRaid = pending
+    local index
+    for index = 1, table.getn(presetKeys) do pending.presets[presetKeys[index]] = database.GetSetting(presetKeys[index]) end
+    self:ClearAttendance()
+end
+
+function Session:CapturePendingPreset()
+    local pending = self.pendingRaid
+    if not pending then return end
+    pending.appliedPresets = {}
+    local index
+    for index = 1, table.getn(presetKeys) do
+        pending.appliedPresets[presetKeys[index]] = self.dependencies.database.GetSetting(presetKeys[index])
+    end
+end
+
+function Session:CommitPendingRaid()
+    self.pendingRaid = nil
+end
+
+function Session:CancelPendingRaid()
+    local pending = self.pendingRaid
+    if pending then
+        local database, firstFailure = self.dependencies.database, nil
+        if pending.appliedPresets then
+            local index
+            for index = 1, table.getn(presetKeys) do
+                local key = presetKeys[index]
+                local current = database.GetSetting(key)
+                local retry = pending.failedPresetRestores and pending.failedPresetRestores[key]
+                -- A later setting edit has its own owner. Roll back only the
+                -- values still belonging to this attempted Start. A setter
+                -- may write the old value before its owner refresh throws;
+                -- retain that restoration until its effects also succeed.
+                if retry and current == pending.presets[key] or pending.presets[key] ~= pending.appliedPresets[key]
+                    and current == pending.appliedPresets[key] then
+                    local ok, failure = pcall(database.SetSetting, key, pending.presets[key])
+                    if not ok then
+                        pending.failedPresetRestores = pending.failedPresetRestores or {}
+                        pending.failedPresetRestores[key] = true
+                        if not firstFailure then firstFailure = tostring(failure) end
+                    elseif pending.failedPresetRestores then pending.failedPresetRestores[key] = nil end
+                elseif retry then pending.failedPresetRestores[key] = nil
+                end
+            end
+        end
+        local ok, failure = pcall(database.StoreRaidAttendance, pending.attendance)
+        if not ok and not firstFailure then firstFailure = tostring(failure) end
+        if firstFailure then return false, firstFailure end
+        self.pendingRaid = nil
+    end
+    return true
 end
 
 function Session:Complete(saveOptions)

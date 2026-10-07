@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-dev.10 — 2026-10-07
+
+- Reject damaged Soft Reserve exports before replacing existing reservations.
+- Complete new raid sessions only after a full physical roster capture; retain retry/cancel and previous data after failure.
+- Preserve auto loot preferences when settings restoration or cancelled raid creation unwinds changes.
+
 ## 0.1.0-dev.9 — 2026-10-07
 
 - Keep Loot Master and Raid Leader dropdown choices above all warning cards.

@@ -20,6 +20,7 @@ end
 local function MaskCheckbox(key,label,path,bit,updatePresets)
     local field=Field(key..tostring(bit),label,"checkbox",path)
     field.durableKey,field.maskBit=key,bit
+    if updatePresets then field.rollbackKeys={"lmAutoLootExceptions"} end
     field.legacyKey=key
     field.readLegacy=function(value)
         local mask=tonumber(value)
@@ -103,6 +104,7 @@ function Settings.Get()
         Field("raidListOddLightness","Alternate row lightness (%)","number",{"Addon UI","Raid","Layout","List view","Member tile color"},0,100)
         local mode=Field("lmAutoLootMode","Auto loot mode","choice",{"Addon UI","Raid","Loot Master Mode","Auto loot"},nil,nil,
             {{text="Off",value="off"},{text="Shift",value="shift"},{text="Auto",value="auto"}})
+        mode.rollbackKeys={"lmAutoLoot"}
         mode.readLegacy=function(value,old)
             if value~=nil then return value end
             if old.lmAutoLoot~=nil then return old.lmAutoLoot and "auto" or "off" end

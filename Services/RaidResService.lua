@@ -13,8 +13,16 @@ end
 decodeMap["-"] = 62
 decodeMap["_"] = 63
 
+-- Import is an explicit user operation, bounded by the existing editor budget.
+-- Keep parsing local to Raider: no shared codec, polling or client dependency.
+local MAX_IMPORT_BYTES, MAX_JSON_DEPTH = 16000, 32
+local JSON_NULL = {}
+local jsonEscapes = { ['"'] = '"', ['\\'] = '\\', ['/'] = '/', b = '\b', f = '\f', n = '\n', r = '\r', t = '\t' }
+
 local function DecodeBase64(value)
-    value = string.gsub(tostring(value or ""), "%s", "")
+    if type(value) ~= "string" then return nil, "Paste a Base64 RaidRes export." end
+    if string.len(value) > MAX_IMPORT_BYTES then return nil, "The RaidRes export exceeds the 16000-byte import limit." end
+    value = string.gsub(value, "%s", "")
     if value == "" then return nil, "Paste the RaidRes export first." end
     if math.mod(string.len(value), 4) == 1 then return nil, "The Base64 text has an invalid length." end
     local output = {}
@@ -31,6 +39,11 @@ local function DecodeBase64(value)
         if not a or not b or (cChar ~= "=" and cChar ~= "" and not c) or (dChar ~= "=" and dChar ~= "" and not d) then
             return nil, "The pasted text is not valid Base64."
         end
+        if (cChar == "=" and dChar ~= "=") or (d and not c)
+            or ((cChar == "=" or dChar == "=") and index + 3 ~= string.len(value))
+            or (not c and math.mod(b, 16) ~= 0) or (c and not d and math.mod(c, 4) ~= 0) then
+            return nil, "The pasted text has invalid Base64 padding."
+        end
         local combined = (a * 262144) + (b * 4096) + ((c or 0) * 64) + (d or 0)
         outputCount = outputCount + 1; output[outputCount] = string.char(math.floor(combined / 65536))
         if c then outputCount = outputCount + 1; output[outputCount] = string.char(math.mod(math.floor(combined / 256), 256)) end
@@ -40,60 +53,202 @@ local function DecodeBase64(value)
     return table.concat(output)
 end
 
-local function FindArray(json, key)
-    local _, markerEnd = string.find(json, '"' .. key .. '"%s*:%s*%[')
-    if not markerEnd then return nil end
-    local depth, inString, escaped = 1, false, false
-    local index
-    for index = markerEnd + 1, string.len(json) do
-        local char = string.sub(json, index, index)
-        if inString then
-            if escaped then escaped = false
-            elseif char == "\\" then escaped = true
-            elseif char == '"' then inString = false end
-        elseif char == '"' then inString = true
-        elseif char == '[' then depth = depth + 1
-        elseif char == ']' then
-            depth = depth - 1
-            if depth == 0 then return string.sub(json, markerEnd + 1, index - 1) end
-        end
+local function Utf8(code)
+    if code < 128 then return string.char(code) end
+    if code < 2048 then return string.char(192 + math.floor(code / 64), 128 + math.mod(code, 64)) end
+    if code < 65536 then return string.char(224 + math.floor(code / 4096), 128 + math.mod(math.floor(code / 64), 64), 128 + math.mod(code, 64)) end
+    return string.char(240 + math.floor(code / 262144), 128 + math.mod(math.floor(code / 4096), 64), 128 + math.mod(math.floor(code / 64), 64), 128 + math.mod(code, 64))
+end
+
+local function RawUtf8Length(text, index)
+    local first, second = string.byte(text, index), string.byte(text, index + 1)
+    local third, fourth = string.byte(text, index + 2), string.byte(text, index + 3)
+    if not second or second < 128 or second > 191 then return nil end
+    if first >= 194 and first <= 223 then return 2 end
+    if not third or third < 128 or third > 191 then return nil end
+    if first >= 224 and first <= 239 then
+        if first == 224 and second < 160 or first == 237 and second > 159 then return nil end
+        return 3
+    end
+    if not fourth or fourth < 128 or fourth > 191 then return nil end
+    if first >= 240 and first <= 244 then
+        if first == 240 and second < 144 or first == 244 and second > 143 then return nil end
+        return 4
     end
     return nil
 end
 
-local function ReadObjects(arrayText)
-    local objects, objectCount = {}, 0
-    local depth, startIndex, inString, escaped = 0, nil, false, false
-    local index
-    for index = 1, string.len(arrayText or "") do
-        local char = string.sub(arrayText, index, index)
-        if inString then
-            if escaped then escaped = false
-            elseif char == "\\" then escaped = true
-            elseif char == '"' then inString = false end
-        elseif char == '"' then inString = true
-        elseif char == '{' then
-            depth = depth + 1
-            if depth == 1 then startIndex = index end
-        elseif char == '}' then
-            depth = depth - 1
-            if depth == 0 and startIndex then
-                objectCount = objectCount + 1
-                objects[objectCount] = string.sub(arrayText, startIndex, index)
-                startIndex = nil
-            end
+local function ParseJson(text)
+    local position, length, kinds = 1, string.len(text), {}
+    local failure, ReadValue
+    local function Fail(message)
+        failure = failure or ("Invalid RaidRes JSON at byte " .. position .. ": " .. message)
+        return nil
+    end
+    local function SkipSpace()
+        while position <= length do
+            local byte = string.byte(text, position)
+            if byte ~= 32 and byte ~= 9 and byte ~= 10 and byte ~= 13 then return end
+            position = position + 1
         end
     end
-    return objects
+    local function ReadHex()
+        local hex = string.sub(text, position, position + 3)
+        if string.len(hex) ~= 4 or string.find(hex, "[^%x]") then return Fail("invalid Unicode escape.") end
+        position = position + 4
+        return tonumber(hex, 16)
+    end
+    local function ReadString()
+        position = position + 1
+        local parts, segment = {}, position
+        while position <= length do
+            local byte = string.byte(text, position)
+            if byte == 34 then
+                table.insert(parts, string.sub(text, segment, position - 1))
+                position = position + 1
+                return table.concat(parts)
+            elseif byte == 92 then
+                table.insert(parts, string.sub(text, segment, position - 1))
+                position = position + 1
+                local escape = string.sub(text, position, position)
+                position = position + 1
+                if escape == "u" then
+                    local code = ReadHex()
+                    if not code then return nil end
+                    if code >= 55296 and code <= 56319 then
+                        if string.sub(text, position, position + 1) ~= "\\u" then return Fail("missing low surrogate.") end
+                        position = position + 2
+                        local low = ReadHex()
+                        if not low then return nil end
+                        if low < 56320 or low > 57343 then return Fail("invalid low surrogate.") end
+                        code = 65536 + (code - 55296) * 1024 + low - 56320
+                    elseif code >= 56320 and code <= 57343 then return Fail("unexpected low surrogate.") end
+                    table.insert(parts, Utf8(code))
+                elseif jsonEscapes[escape] then table.insert(parts, jsonEscapes[escape])
+                else return Fail("invalid string escape.") end
+                segment = position
+            elseif byte < 32 then return Fail("unescaped control character.")
+            elseif byte >= 128 then
+                local size = RawUtf8Length(text, position)
+                if not size then return Fail("invalid UTF-8.") end
+                position = position + size
+            else position = position + 1 end
+        end
+        return Fail("unterminated string.")
+    end
+    local function ReadNumber()
+        local start = position
+        if string.sub(text, position, position) == "-" then position = position + 1 end
+        local first = string.sub(text, position, position)
+        if first == "0" then position = position + 1
+        elseif first ~= "" and string.find(first, "[1-9]") then
+            repeat position = position + 1 until not string.find(string.sub(text, position, position), "%d")
+        else return Fail("invalid number.") end
+        if string.sub(text, position, position) == "." then
+            position = position + 1
+            if not string.find(string.sub(text, position, position), "%d") then return Fail("missing decimal digits.") end
+            repeat position = position + 1 until not string.find(string.sub(text, position, position), "%d")
+        end
+        local exponent = string.sub(text, position, position)
+        if exponent == "e" or exponent == "E" then
+            position = position + 1
+            local sign = string.sub(text, position, position)
+            if sign == "+" or sign == "-" then position = position + 1 end
+            if not string.find(string.sub(text, position, position), "%d") then return Fail("missing exponent digits.") end
+            repeat position = position + 1 until not string.find(string.sub(text, position, position), "%d")
+        end
+        local number = tonumber(string.sub(text, start, position - 1))
+        if not number or number - number ~= 0 then return Fail("number is outside the supported range.") end
+        return number
+    end
+    local function ReadCollection(depth, object)
+        local result, closing = {}, object and "}" or "]"
+        kinds[result] = object and "object" or "array"
+        position = position + 1; SkipSpace()
+        if string.sub(text, position, position) == closing then position = position + 1; return result end
+        while true do
+            local key
+            if object then
+                if string.sub(text, position, position) ~= '"' then return Fail("object key must be a string.") end
+                key = ReadString()
+                if key == nil then return nil end
+                if result[key] ~= nil then return Fail("duplicate object key.") end
+                SkipSpace()
+                if string.sub(text, position, position) ~= ":" then return Fail("missing colon.") end
+                position = position + 1
+            end
+            local value = ReadValue(depth + 1)
+            if value == nil then return nil end
+            if object then result[key] = value else table.insert(result, value) end
+            SkipSpace()
+            local separator = string.sub(text, position, position)
+            position = position + 1
+            if separator == closing then return result end
+            if separator ~= "," then return Fail("missing collection separator or closing bracket.") end
+            SkipSpace()
+        end
+    end
+    ReadValue = function(depth)
+        SkipSpace()
+        if depth > MAX_JSON_DEPTH then return Fail("import structure limit exceeded.") end
+        local char = string.sub(text, position, position)
+        if char == '"' then return ReadString() end
+        if char == "{" then return ReadCollection(depth, true) end
+        if char == "[" then return ReadCollection(depth, false) end
+        if char == "-" or string.find(char, "%d") then return ReadNumber() end
+        if string.sub(text, position, position + 3) == "true" then position = position + 4; return true end
+        if string.sub(text, position, position + 4) == "false" then position = position + 5; return false end
+        if string.sub(text, position, position + 3) == "null" then position = position + 4; return JSON_NULL end
+        return Fail("expected a JSON value.")
+    end
+    local result = ReadValue(1)
+    if result == nil then return nil, failure end
+    SkipSpace()
+    if position <= length then return nil, "Invalid RaidRes JSON: unexpected trailing input." end
+    return result, nil, kinds
 end
 
-local function UnescapeJsonString(value)
-    value = string.gsub(value or "", '\\"', '"')
-    value = string.gsub(value, "\\\\", "\\")
-    value = string.gsub(value, "\\n", " ")
-    value = string.gsub(value, "\\r", " ")
-    value = string.gsub(value, "\\t", " ")
+local function ImportText(value, field, optional)
+    if optional and (value == nil or value == JSON_NULL) then return nil end
+    if type(value) ~= "string" or string.len(value) > 128 or string.find(value, "%c") then
+        return nil, "RaidRes " .. field .. " must be a string of at most 128 bytes without control characters."
+    end
+    local trimmed = string.gsub(string.gsub(value, "^%s+", ""), "%s+$", "")
+    if trimmed == "" then return nil, "RaidRes " .. field .. " must not be blank." end
     return value
+end
+
+local function ReadImport(encoded)
+    local json, decodeError = DecodeBase64(encoded)
+    if not json then return nil, decodeError end
+    local document, parseError, kinds = ParseJson(json)
+    if document == nil then return nil, parseError end
+    if kinds[document] ~= "object" or kinds[document.softreserves] ~= "array" then
+        return nil, "The decoded data must contain a RaidRes softreserves array."
+    end
+    local id, idError = ImportText(document.id, "id", true)
+    if idError then return nil, idError end
+    local origin, originError = ImportText(document.origin, "origin", true)
+    if originError then return nil, originError end
+    local reservations, index, itemIndex = {}, nil, nil
+    for index = 1, table.getn(document.softreserves) do
+        local row = document.softreserves[index]
+        if kinds[row] ~= "object" then return nil, "Each RaidRes reservation must be an object." end
+        local name, nameError = ImportText(row.name, "reservation name", false)
+        if nameError then return nil, nameError end
+        if kinds[row.items] ~= "array" then return nil, "Each RaidRes reservation must contain an items array." end
+        local ids = {}
+        for itemIndex = 1, table.getn(row.items) do
+            local item = row.items[itemIndex]
+            local itemId = kinds[item] == "object" and item.id
+            if type(itemId) ~= "number" or itemId < 1 or itemId > 2147483647 or itemId ~= math.floor(itemId) then
+                return nil, "Each RaidRes item must contain a positive integer id."
+            end
+            table.insert(ids, itemId)
+        end
+        table.insert(reservations, { name = name, itemIds = ids })
+    end
+    return { id = id, origin = origin, reservations = reservations }
 end
 
 local function NormalizeName(value)
@@ -131,52 +286,47 @@ function RaidResService.HasSession(attendance)
 end
 
 function RaidResService.Import(encoded, attendance, srUrl)
-    if not attendance or type(attendance.members) ~= "table" then return nil, "Scan the raid roster before importing Soft Reserves." end
-    local json, decodeError = DecodeBase64(encoded)
-    if not json then return nil, decodeError end
-    local arrayText = FindArray(json, "softreserves")
-    if not arrayText then return nil, "The decoded data does not contain a RaidRes softreserves list." end
-
-    local reservations = ReadObjects(arrayText)
+    if type(attendance) ~= "table" or type(attendance.members) ~= "table" then return nil, "Scan the raid roster before importing Soft Reserves." end
+    local imported, importError = ReadImport(encoded)
+    if not imported then return nil, importError end
+    if srUrl ~= nil and type(srUrl) ~= "string" then return nil, "The SR URL must be text." end
+    local cleanUrl = string.gsub(string.gsub(srUrl or "", "^%s+", ""), "%s+$", "")
+    local reservations = imported.reservations
     local byName = {}
     local reservationIndex
     for reservationIndex = 1, table.getn(reservations) do
-        local object = reservations[reservationIndex]
-        local _, _, encodedName = string.find(object, '"name"%s*:%s*"(.-)"')
-        local itemsText = FindArray(object, "items")
-        if encodedName and itemsText then
-            local itemIds, itemCount = {}, 0
-            for itemId in string.gfind(itemsText, '"id"%s*:%s*(%d+)') do
-                itemCount = itemCount + 1
-                itemIds[itemCount] = tonumber(itemId)
-            end
-            local displayName = UnescapeJsonString(encodedName)
-            byName[NormalizeName(displayName)] = { name = displayName, itemIds = itemIds }
-        end
+        local reservation = reservations[reservationIndex]
+        -- Existing exports can repeat names or item IDs. Last normalized name
+        -- wins; repeated item IDs retain their reservation multiplicity.
+        byName[NormalizeName(reservation.name)] = reservation
     end
 
-    local matched, missingNames = 0, {}
+    -- Prepare every member result and metadata before replacing any live SR.
+    -- Parser/schema failures, including a bad later row, leave history untouched.
+    local matched, missingNames, updates = 0, {}, {}
     local memberIndex
     for memberIndex = 1, table.getn(attendance.members) do
         local member = attendance.members[memberIndex]
+        if type(member) ~= "table" or type(member.name) ~= "string" or member.name == "" then
+            return nil, "The raid roster contains an invalid member. Refresh it before importing Soft Reserves."
+        end
         local reservation = byName[NormalizeName(member.name)]
+        local update = { member = member, sr = "" }
         if reservation and table.getn(reservation.itemIds) > 0 then
             local itemIds = reservation.itemIds
             local labels = {}
             local itemIndex
             for itemIndex = 1, table.getn(itemIds) do labels[itemIndex] = tostring(itemIds[itemIndex]) end
-            member.sr = table.concat(labels, ", ")
-            member.srItemIds = itemIds
-            member.srSourceName = reservation.name
+            update.sr = table.concat(labels, ", ")
+            update.itemIds = itemIds
+            update.sourceName = reservation.name
             byName[NormalizeName(member.name)] = nil
             matched = matched + 1
         else
-            member.sr = ""
-            member.srItemIds = nil
-            member.srSourceName = nil
             missingNames[table.getn(missingNames) + 1] = member.name
             if reservation then byName[NormalizeName(member.name)] = nil end
         end
+        table.insert(updates, update)
     end
     local unmatchedNames, unmatchedReservations, unmatched = {}, {}, 0
     for _, reservation in pairs(byName) do
@@ -187,12 +337,9 @@ function RaidResService.Import(encoded, attendance, srUrl)
     table.sort(unmatchedNames)
     table.sort(unmatchedReservations, function(a, b) return string.lower(a.name or "") < string.lower(b.name or "") end)
     table.sort(missingNames)
-    local _, _, importId = string.find(json, '"id"%s*:%s*"(.-)"')
-    local _, _, importOrigin = string.find(json, '"origin"%s*:%s*"(.-)"')
-    local cleanUrl = string.gsub(tostring(srUrl or ""), "^%s+", ""); cleanUrl = string.gsub(cleanUrl, "%s+$", "")
-    attendance.softReserveImport = {
-        id = importId or ((attendance.raidName or "raid") .. "-" .. time()),
-        origin = importOrigin,
+    local importInfo = {
+        id = imported.id or ((attendance.raidName or "raid") .. "-" .. time()),
+        origin = imported.origin,
         url = cleanUrl,
         rollForExport = encoded,
         importedAt = time(),
@@ -200,6 +347,11 @@ function RaidResService.Import(encoded, attendance, srUrl)
         unmatchedReservations = unmatchedReservations,
         missingNames = missingNames,
     }
+    for memberIndex = 1, table.getn(updates) do
+        local update = updates[memberIndex]
+        update.member.sr, update.member.srItemIds, update.member.srSourceName = update.sr, update.itemIds, update.sourceName
+    end
+    attendance.softReserveImport = importInfo
     SyncMutation(attendance)
     return { matched = matched, total = table.getn(reservations), unmatched = unmatched, missing = table.getn(missingNames) }
 end

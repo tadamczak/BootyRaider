@@ -131,6 +131,7 @@ function Screen.Create(parent, host)
         hasPendingRaidTransition=function() return Raider.raidSessionTransitionPending end,
         refreshCurrentRaid=function() return Runtime.sessionController:RefreshCurrentRaid() end,
         cancelPendingRaidScan=function() return Runtime.sessionController:CancelPendingRaidScan() end,
+        getPendingRaidToken=function() return Runtime.session.pendingRaid end,
         dismissRaidStartReminder=function(context) Raider.raidStartReminderContext=context end,openRaidManagement=function() Runtime.OpenView("raid") end,
         startTestRaid=function() Runtime.sessionController:StartTest() end,refresh=Refresh,printMessage=Runtime.PrintAction,showPopup=UI.ShowOpaquePopup,
         getLiveTracking=function() return Raider.raidLiveTracking end,setLiveTracking=function(value) Raider.raidLiveTracking=value end,

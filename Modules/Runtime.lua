@@ -32,9 +32,17 @@ function Runtime.CaptureActiveRoster()
 end
 function Runtime.RequestRaidScan()
     if not Raider.active or not Raider.pendingRaidSessionId then return false end
-    local count = Runtime.sessionController:CompletePendingRaidScan()
+    local previousThis, previousEvent, previousArg = this, event, arg1
+    local called, count, failure = pcall(Runtime.sessionController.CompletePendingRaidScan, Runtime.sessionController)
+    this, event, arg1 = previousThis, previousEvent, previousArg
+    if not called then failure, count = tostring(count), nil end
     Runtime.RefreshViews()
-    return count ~= nil and count > 0
+    if count == nil or count <= 0 then
+        failure = failure or "The physical raid roster is not ready. Retry or cancel the new session."
+        Runtime.Print(failure)
+        return false, failure
+    end
+    return true
 end
 function Runtime.SaveSession(options)
     local saved=Runtime.sessionController:Complete(options)
@@ -168,7 +176,8 @@ function Runtime.Initialize(host)
     end
     Runtime.initialized=true;Raider.active=true
     if Raider.Diagnostics.Wrap then
-        Raider.Services.Raid.SaveRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.SaveRoster,0)
+        Raider.Services.Raid.SaveRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.SaveRoster,1)
+        Raider.Services.Raid.CaptureRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.CaptureRoster,1)
         Raider.Services.Raid.RecordLoot=Raider.Diagnostics.Wrap("Loot message",Raider.Services.Raid.RecordLoot,2)
         Raider.Services.RaidStatistics.BuildSummary=Raider.Diagnostics.Wrap("Raid summary",Raider.Services.RaidStatistics.BuildSummary,2)
         Raider.Services.CSR.BuildSummary=Raider.Diagnostics.Wrap("CSR model",Raider.Services.CSR.BuildSummary,7)
@@ -181,6 +190,7 @@ function Runtime.Initialize(host)
         raidStatistics=Raider.Services.RaidStatistics,testRaid=Raider.Services.TestRaid,now=function() return time() end})
     Runtime.sessionController=Raider.Modules.RaidSessionController.Create({state=Raider,session=Runtime.session,
         setHistoricalLoaded=function(value) Runtime.historicalLoaded=value and true or false end,
+        getHistoricalLoaded=function() return Runtime.historicalLoaded end,
         clearSelection=function() if Runtime.views.raid then Runtime.views.raid:ClearSelection() end end,
         showSavedPopup=function() UI.ShowOpaquePopup("BOOTY_RAIDER_ATTENDANCE_RELOAD") end,
         isLiveTrackingWanted=function() return BootyRaiderDB.raidLiveTrackingEnabled and true or false end,

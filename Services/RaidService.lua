@@ -1029,9 +1029,16 @@ function RaidService.ResetRecordedLoot(attendance)
     RaidService.ResetLootSession()
 end
 
-function RaidService.SaveRoster()
+function RaidService.CaptureRoster(requirePhysicalRoster)
     Raider.Diagnostics.Count("scans")
     Raider.Database.Ensure()
+    if type(GetNumRaidMembers) ~= "function" or type(GetRaidRosterInfo) ~= "function" then
+        return nil, "The physical raid roster API is unavailable. Retry when the client roster is ready."
+    end
+    local total = GetNumRaidMembers()
+    if type(total) ~= "number" or total ~= total or total < 0 or total > 40 or total ~= math.floor(total) then
+        return nil, "The physical raid member count is unavailable or invalid. Retry the roster scan."
+    end
     local guildData = Raider.Database.GetRosterData()
     if type(IsInGuild) == "function" then
         local inGuild = IsInGuild()
@@ -1043,10 +1050,11 @@ function RaidService.SaveRoster()
     local currentRaidName = GetRealZoneText() or ""
     local previousAttendance = Raider.Database.GetRaidAttendance()
     local activeSession = Raider.Services.RaidRes and Raider.Services.RaidRes.HasSession(previousAttendance)
-    local total = GetNumRaidMembers() or 0
     -- Zone transitions can briefly expose an empty roster or a graveyard zone.
-    -- Never replace an active session with that transient context.
-    if activeSession and total == 0 then return table.getn(previousAttendance.members or {}) end
+    -- Preserve that session, but never report old members as a successful scan.
+    if total == 0 and (activeSession or requirePhysicalRoster) then
+        return nil, "The physical raid roster is not ready. Previous session data was retained."
+    end
     local preservePrevious = previousAttendance and previousAttendance.members
         and (activeSession or previousAttendance.raidName == currentRaidName)
     if preservePrevious then
@@ -1069,34 +1077,40 @@ function RaidService.SaveRoster()
     local raidIndex
     for raidIndex = 1, total do
         local name, raidRank, subgroup, level, class, classFile, zone, online, dead = GetRaidRosterInfo(raidIndex)
-        if name then
-            presentNames[string.lower(name)] = true
-            local guildMember = guildMembers[string.lower(name)]
-            local previousReserve = previousReserves[string.lower(name)]
-            table.insert(members, {
-                raidIndex = raidIndex,
-                name = name,
-                raidRank = tonumber(raidRank) or 0,
-                subgroup = subgroup or 0,
-                level = level or 0,
-                class = class or (guildMember and guildMember.class) or "",
-                classFile = classFile or "",
-                zone = zone or "",
-                online = online and true or false,
-                dead = dead and true or false,
-                guildRank = guildMember and guildMember.rank or "",
-                publicNote = guildMember and guildMember.publicNote or "",
-                officerNote = guildMember and guildMember.officerNote or "",
-                guildMember = guildMember and true or false,
-                sr = previousReserve and previousReserve.text or "",
-                srItemIds = previousReserve and previousReserve.itemIds or nil,
-                srSourceName = previousReserve and previousReserve.sourceName or nil,
-                srConsumedAt = previousSrConsumed[string.lower(name)],
-                reyCoinUsedAt = previousReyCoin[string.lower(name)],
-                reyCoinItemLink = previousReyCoinItems[string.lower(name)],
-                loot = previousLoot[string.lower(name)] or {},
-            })
+        if type(name) ~= "string" or name == "" or presentNames[string.lower(name)] then
+            return nil, "The physical raid roster is incomplete or has duplicate names. Retry when all members are available."
         end
+        presentNames[string.lower(name)] = true
+        local guildMember = guildMembers[string.lower(name)]
+        local previousReserve = previousReserves[string.lower(name)]
+        table.insert(members, {
+            raidIndex = raidIndex,
+            name = name,
+            raidRank = tonumber(raidRank) or 0,
+            subgroup = subgroup or 0,
+            level = level or 0,
+            class = class or (guildMember and guildMember.class) or "",
+            classFile = classFile or "",
+            zone = zone or "",
+            online = online and true or false,
+            dead = dead and true or false,
+            guildRank = guildMember and guildMember.rank or "",
+            publicNote = guildMember and guildMember.publicNote or "",
+            officerNote = guildMember and guildMember.officerNote or "",
+            guildMember = guildMember and true or false,
+            sr = previousReserve and previousReserve.text or "",
+            srItemIds = previousReserve and previousReserve.itemIds or nil,
+            srSourceName = previousReserve and previousReserve.sourceName or nil,
+            srConsumedAt = previousSrConsumed[string.lower(name)],
+            reyCoinUsedAt = previousReyCoin[string.lower(name)],
+            reyCoinItemLink = previousReyCoinItems[string.lower(name)],
+            loot = previousLoot[string.lower(name)] or {},
+        })
+    end
+    -- The native count may change while its individual slots are being read.
+    -- Publish only one complete observation; no partial roster reaches storage.
+    if GetNumRaidMembers() ~= total then
+        return nil, "The physical raid roster changed during capture. Previous data was retained; retry the scan."
     end
 
     -- A departing player leaves the physical roster, but their confirmed loot
@@ -1134,9 +1148,15 @@ function RaidService.SaveRoster()
         softReserveImport = preservePrevious and previousAttendance.softReserveImport or nil,
         nextLootRecordId = preservePrevious and previousAttendance.nextLootRecordId or 0,
     }
+    return table.getn(members), attendance, previousAttendance, preservePrevious
+end
+
+function RaidService.SaveRoster(requirePhysicalRoster)
+    local count, attendance, previousAttendance, preservePrevious = RaidService.CaptureRoster(requirePhysicalRoster)
+    if count == nil then return nil, attendance end
     if preservePrevious then RaidService.PreserveLootSession(previousAttendance, attendance) end
     Raider.Database.StoreRaidAttendance(attendance)
-    return table.getn(members)
+    return count
 end
 
 local function PendingReceiptTransfer(recipient, itemId)
