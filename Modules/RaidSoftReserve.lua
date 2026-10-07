@@ -197,10 +197,10 @@ local function CreateWarningCard(page, dialogName, dialogTitle, background, bord
     end)
     warning:SetScript("OnHide", function() HideWarningDialogs(warning) end)
     warning:Hide()
-    -- Cards overlay the member content in either layout. Their header, project
-    -- border and actions must share the same managed overlay allocation.
+    -- Cards sit above member content, below interactive dropdowns. Registering
+    -- them as popups gives their children the same layer as menu choices.
     if Raider.UI.Components.WindowStack then
-        Raider.UI.Components.WindowStack.Register(warning, {owner = page, kind = "popup"})
+        Raider.UI.Components.WindowStack.Attach(warning, page, 100)
     end
     return warning
 end

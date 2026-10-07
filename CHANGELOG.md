@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.9 — 2026-10-07
+
+- Keep Loot Master and Raid Leader dropdown choices above all warning cards.
+
 ## 0.1.0-dev.8 — 2026-10-07
 
 - Give Raid class and rank filters enough room for their captions in standalone and Booty Suite.
