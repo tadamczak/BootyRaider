@@ -897,6 +897,27 @@ function RaidManagement.SetListToolbar(page, controls)
     page.listToolbar = controls
 end
 
+local function FilterCaptionWidth(page, button)
+    local caption = button:GetText() or ""
+    local font, size, flags = button.label:GetFont()
+    if button.mosRaidFilterCaption == caption and button.mosRaidFilterFont == font
+        and button.mosRaidFilterSize == size and button.mosRaidFilterFlags == flags then
+        return button.mosRaidFilterWidth
+    end
+    -- A clipped field may report clipped native string bounds. Measure the
+    -- full caption with one pooled, unbounded region, using the field's font.
+    local measure = page.mosRaidFilterMeasure
+    if not measure then
+        measure = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontHighlightSmall")
+        measure:SetWidth(0); measure:Hide(); page.mosRaidFilterMeasure = measure
+    end
+    measure:SetFont(font, size, flags); measure:SetText(caption)
+    local width = math.max(84, math.ceil(measure:GetStringWidth()) + 30)
+    button.mosRaidFilterCaption, button.mosRaidFilterFont = caption, font
+    button.mosRaidFilterSize, button.mosRaidFilterFlags, button.mosRaidFilterWidth = size, flags, width
+    return width
+end
+
 function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
     local controls = page.listToolbar
     if lootMasterMode then
@@ -928,29 +949,52 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
     if not page.lootMasterController or not page.lootMasterController.IsVisible() then if not page.reyCoinSolo then page.reyCoinPanel:Hide() end; page.lmConfigPanel:Hide() end
     local submenuOffset = classic and ((page.classicSectionOffset or 0) + (page.classicActionOffset or 0) + (page.classicToolbarOffset or 0)) or 0
     local pageWidth = PageSpan(page)
-    local filterWidth = pageWidth < 650 and 60 or 84
+    local available = math.max(1, pageWidth - 12)
     local toolbar = page.filterToolbar or page
-    if page.filterToolbar then
-        page.filterToolbar.mosBorderOutsetLeft=4;page.filterToolbar.mosBorderOutsetRight=4;Raider.UI.Components.SetSurfaceHorizontalBorders(page.filterToolbar,false,true)
-        page.filterToolbar:ClearAllPoints(); page.filterToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -92 - submenuOffset); page.filterToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, -92 - submenuOffset)
-        page.filterToolbar:SetHeight(38 + (page.classicSearchOffset or 0))
-    end
     controls.filterLabel:Hide()
-    controls.classButton:ClearAllPoints(); controls.classButton:SetPoint("TOPLEFT", toolbar, "TOPLEFT", 6, -7); controls.classButton:SetWidth(filterWidth); controls.classButton:SetHeight(24)
-    controls.rankButton:ClearAllPoints(); controls.rankButton:SetPoint("LEFT", controls.classButton, "RIGHT", 8, 0); controls.rankButton:SetWidth(filterWidth)
-    controls.rankButton:SetHeight(24)
-    controls.resetButton:ClearAllPoints(); controls.resetButton:SetPoint("LEFT", controls.rankButton, "RIGHT", 8, 0); controls.resetButton:SetHeight(24)
+    local filterBottom, filterWidth = 31, 0
+    if settings.raidListShowFilters then
+        controls.classButton.mosFlowWidth = FilterCaptionWidth(page, controls.classButton)
+        controls.rankButton.mosFlowWidth = FilterCaptionWidth(page, controls.rankButton)
+        controls.classButton:SetHeight(24); controls.rankButton:SetHeight(24); controls.resetButton:SetHeight(24)
+        local flow = page.mosRaidFilterFlow
+        if not flow then
+            controls.resetButton.mosFlowWidth = controls.resetButton:GetWidth()
+            flow = {controls.classButton, controls.rankButton, controls.resetButton}; page.mosRaidFilterFlow = flow
+        end
+        filterWidth = controls.classButton.mosFlowWidth + controls.rankButton.mosFlowWidth + controls.resetButton.mosFlowWidth + 16
+        filterBottom = Raider.UI.Components.LayoutFlow(toolbar, flow, 6, 7, available, 8)
+        Raider.UI.Components.FitButtonLabel(controls.classButton, math.max(1, controls.classButton:GetWidth() - 28))
+        Raider.UI.Components.FitButtonLabel(controls.rankButton, math.max(1, controls.rankButton:GetWidth() - 28))
+    end
     Raider.UI.Components.SetClassicButtonCompact(controls.modeButton, false)
     controls.modeButton:SetWidth(96); controls.modeButton:SetHeight(22)
     if not controls.modeButton.mosClassicIconKey then Raider.UI.Components.SetClassicButtonIcon(controls.modeButton, "loot_tools", 13, 7, 0) end
     controls.searchLabel:Hide()
     controls.searchBox:ClearAllPoints()
-    if (page.classicSearchOffset or 0) > 0 then controls.searchBox:SetPoint("TOPLEFT", toolbar, "TOPLEFT", 6, -37)
-    elseif settings.raidListShowFilters then controls.searchBox:SetPoint("LEFT", controls.resetButton, "RIGHT", 10, 0)
+    local searchTop, searchWidth = 7, available - controls.refreshButton:GetWidth() - 4
+    local extraRows = settings.raidListShowFilters and filterBottom - 31 or 0
+    if settings.raidListShowFilters and settings.raidListShowSearch then
+        local remaining = available - filterWidth - 10 - controls.refreshButton:GetWidth() - 4
+        if filterBottom == 31 and remaining >= 90 then
+            controls.searchBox:SetPoint("LEFT", controls.resetButton, "RIGHT", 10, 0)
+            searchWidth = remaining
+        else
+            searchTop = filterBottom + 6
+            extraRows = searchTop - 7
+            controls.searchBox:SetPoint("TOPLEFT", toolbar, "TOPLEFT", 6, -searchTop)
+        end
     else controls.searchBox:SetPoint("TOPLEFT", toolbar, "TOPLEFT", 6, -7) end
+    page.classicSearchOffset = extraRows
+    page.classicSearchWidth = math.max(1, math.min(178, searchWidth))
     controls.searchBox:SetHeight(24)
-    controls.searchBox:SetWidth(math.min(110, page.classicSearchWidth or 110))
+    controls.searchBox:SetWidth(page.classicSearchWidth)
     controls.refreshButton:ClearAllPoints(); controls.refreshButton:SetPoint("LEFT", controls.searchBox, "RIGHT", 4, 0)
+    if page.filterToolbar then
+        page.filterToolbar.mosBorderOutsetLeft=4;page.filterToolbar.mosBorderOutsetRight=4;Raider.UI.Components.SetSurfaceHorizontalBorders(page.filterToolbar,false,true)
+        page.filterToolbar:ClearAllPoints(); page.filterToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -92 - submenuOffset); page.filterToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, -92 - submenuOffset)
+        page.filterToolbar:SetHeight(38 + extraRows)
+    end
     if settings.raidListShowFilters then
         controls.filterLabel:Hide(); controls.classButton:Show(); controls.rankButton:Show(); controls.resetButton:Show()
     else
@@ -1510,14 +1554,6 @@ function RaidManagement.RefreshListView(page, rows, members, selectedName, sortK
     local renderer = page.listRenderer
     if not page.detachedLootMaster then RaidManagement.LayoutSoftReserveWarnings(page, lootMasterMode, true, issues) end
     page.classicWarningWidth = 0
-    local pageWidth = PageSpan(page)
-    local filterWidth = pageWidth < 650 and 60 or 84
-    local searchSpace = pageWidth - (page.classicWarningWidth or 0) - ((page.classicWarningWidth or 0) > 0 and 8 or 12)
-    local searchFixed = (filterWidth * 2) + 174
-    local searchWidth = searchSpace - searchFixed
-    page.classicSearchOffset = not lootMasterMode and Raider.UI.Components.IsClassicSkin() and settings.raidListShowFilters and settings.raidListShowSearch and searchWidth < 90 and 30 or 0
-    page.classicSearchWidth = (page.classicSearchOffset or 0) > 0 and math.max(60, math.min(178, searchSpace - 93)) or math.max(90, math.min(178, searchWidth))
-    if not settings.raidListShowFilters then page.classicSearchWidth = math.max(90, math.min(178, searchSpace - 40)) end
     if not page.detachedLootMaster then RaidManagement.LayoutListToolbar(page, lootMasterMode, settings) end
     local rowStartY, tableLeft, tableWidth = RaidManagement.LayoutListHeaders(page, page.listHeaderUI.buttons, sortKey, lootMasterMode, settings.raidListRowWidth, table.getn(members), selectedName)
     local warningHeight = 0
@@ -1788,7 +1824,7 @@ function RaidManagement.FitListHeaders(page, headerButtons, lootMasterMode)
 end
 
 function RaidManagement.LayoutListHeaders(page, headerButtons, sortKey, lootMasterMode, configuredRowWidth, memberCount, selectedName)
-    local submenuOffset = not lootMasterMode and Raider.UI.Components.IsClassicSkin() and ((page.classicSectionOffset or 0) + (page.classicActionOffset or 0) + (page.classicToolbarOffset or 0) + (page.classicSearchOffset or 0)) or 0
+    local submenuOffset = not lootMasterMode and ((page.classicSearchOffset or 0) + (Raider.UI.Components.IsClassicSkin() and ((page.classicSectionOffset or 0) + (page.classicActionOffset or 0) + (page.classicToolbarOffset or 0)) or 0)) or 0
     local filterOffset = not lootMasterMode and BootyRaiderDB.raidListShowFilters == false and BootyRaiderDB.raidListShowSearch == false and 34 or 0
     local headerY = lootMasterMode and -29 or -134 - submenuOffset + filterOffset
     local rowStartY = lootMasterMode and -46 or -156 - submenuOffset + filterOffset
