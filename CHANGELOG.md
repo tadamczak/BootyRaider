@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.8 — 2026-10-07
+
+- Give Raid class and rank filters enough room for their captions in standalone and Booty Suite.
+- Wrap filter and search controls together on narrow windows and restore their layout on growth.
+
 ## 0.1.0-dev.4 — 2026-10-05
 
 - Keep Soft Reserve warning cards and their controls above raid rows and group tiles, including when docked or minimized.
