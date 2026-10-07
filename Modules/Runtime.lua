@@ -2,6 +2,10 @@ local Raider = BootyRaider
 local UI = Raider.UI.Components
 local Runtime = {views = {}, historicalLoaded = false}
 Raider.Runtime = Runtime
+local function CleanupMessage(value, fallback)
+    if type(value)=="table" then value=value.message or value.code end
+    return tostring(value or fallback or "BootyRaider cleanup failed.")
+end
 
 function Runtime.Print(message)
     if Runtime.host and Runtime.host.Print then Runtime.host.Print(message)
@@ -58,8 +62,22 @@ function Runtime.IsBusy()
 end
 
 local function Reload()
-    if type(ReloadUI)=="function" then ReloadUI()
-    elseif type(ConsoleExec)=="function" then ConsoleExec("reloadui") end
+    local shared = BootyLib.Core.Runtime
+    if not shared or type(shared.CanReload) ~= "function" then
+        Runtime.Print("Cannot verify active Booty work before reloading.")
+        return false
+    end
+    local checked, allowed, reason = pcall(shared.CanReload)
+    if not checked or not allowed then
+        Runtime.Print(CleanupMessage(reason or allowed,"Finish active Booty work before reloading."))
+        return false
+    end
+    local reload,argument=ReloadUI,nil
+    if type(reload)~="function" then reload,argument=ConsoleExec,"reloadui" end
+    if type(reload)~="function" then Runtime.Print("Reload is unavailable.");return false end
+    local called,result=pcall(reload,argument)
+    if not called or result==false or result==0 then Runtime.Print(CleanupMessage(result,"Reload failed."));return false end
+    return true
 end
 local function RaidPromptOwner()
     local host = Runtime.host
@@ -164,18 +182,30 @@ local function Dispatch()
 end
 
 function Runtime.Initialize(host)
+    if Runtime.cleanupPending then return false,"BootyRaider cleanup is incomplete. Retry Stop before resuming." end
     if host then Runtime.host=host end
     Raider.Database.Ensure()
     if Runtime.initialized then
         if not Raider.active then
-            Raider.active=true
-            for _,name in ipairs(eventNames) do Runtime.events:RegisterEvent(name) end
-            InstallLootHook();Runtime.nativeRaidTab:Sync()
+            local called,result,reason=pcall(function()
+                Raider.active=true
+                for _,name in ipairs(eventNames) do Runtime.events:RegisterEvent(name) end
+                InstallLootHook()
+                local ready,message=Runtime.nativeRaidTab:Sync()
+                if ready==false and message then return false,message end
+                return true
+            end)
+            if not called or result==false then
+                local failure=CleanupMessage(reason or result,"BootyRaider could not resume.")
+                local cleaned,message=Runtime.OnActivationFailed()
+                if not cleaned then failure=failure.." Resume cleanup failed: "..message end
+                return false,failure
+            end
         end
         return true
     end
-    Runtime.initialized=true;Raider.active=true
-    if Raider.Diagnostics.Wrap then
+    Raider.active=true
+    if Raider.Diagnostics.Wrap and not Runtime.diagnosticsWrapped then
         Raider.Services.Raid.SaveRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.SaveRoster,1)
         Raider.Services.Raid.CaptureRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.CaptureRoster,1)
         Raider.Services.Raid.RecordLoot=Raider.Diagnostics.Wrap("Loot message",Raider.Services.Raid.RecordLoot,2)
@@ -184,6 +214,7 @@ function Runtime.Initialize(host)
         Raider.Services.RaidRes.Import=Raider.Diagnostics.Wrap("SR import",Raider.Services.RaidRes.Import,3)
         Raider.Services.RaidRes.BuildSnapshot=Raider.Diagnostics.Wrap("SR snapshot",Raider.Services.RaidRes.BuildSnapshot,1)
         Raider.Modules.RaidManagement.RefreshPage=Raider.Diagnostics.Wrap("Raid refresh",Raider.Modules.RaidManagement.RefreshPage,1)
+        Runtime.diagnosticsWrapped=true
     end
     Raider.Database.onRaidAttendanceChanged=Raider.Services.Raid.OnRaidAttendanceChanged
     Runtime.session=Raider.Services.RaidSession.Create({database=Raider.Database,raid=Raider.Services.Raid,raidRes=Raider.Services.RaidRes,
@@ -219,27 +250,81 @@ function Runtime.Initialize(host)
         showSessionTransitionPrompt=ShowTransitionPrompt,hideSessionTransitionPrompt=HideTransitionPrompt,
     })
     Runtime.nativeRaidTab=Raider.Modules.NativeRaidTab.Create({
-        isEnabled=function() return Raider.active and Raider.Database.GetSetting("useMOSRaidTab") end,
+        isEnabled=function() return Raider.active and not Runtime.stoppingNativeContent and Raider.Database.GetSetting("useMOSRaidTab") end,
         ensureDatabase=Raider.Database.Ensure,openRaidInfo=Raider.Modules.RaidInfo.Toggle,closeRaidInfo=Raider.Modules.RaidInfo.CloseOwned,
     })
-    Runtime.events=UI.CreateContainer("BootyRaiderEvents",UIParent)
+    Runtime.events=Runtime.events or UI.CreateContainer("BootyRaiderEvents",UIParent)
     for _,name in ipairs(eventNames) do Runtime.events:RegisterEvent(name) end
     Runtime.events:SetScript("OnEvent",Dispatch)
     InstallLootHook();Runtime.nativeRaidTab:Sync()
     Raider.CompleteRaidSession=Runtime.SaveSession
+    Runtime.initialized=true
+    return true
+end
+local function SyncNative()
+    if not Runtime.nativeRaidTab then return true end
+    local ok,result,reason=pcall(Runtime.nativeRaidTab.Sync,Runtime.nativeRaidTab)
+    if not ok or result==false then return false,CleanupMessage(reason or result,"Native Raid cleanup refused.") end
+    return true
+end
+local function RestoreNative(reason)
+    Runtime.stoppingNativeContent=nil
+    local restored,failure=SyncNative()
+    if not restored then reason=reason.." Native Raid content could not be restored: "..failure end
+    return false,reason
+end
+local function ReleaseResources()
+    local failures={}
+    local function Attempt(callback,owner,value)
+        local ok,result,reason=pcall(callback,owner,value)
+        if not ok or result==false then table.insert(failures,CleanupMessage(reason or result)) end
+    end
+    Raider.active=false
+    if Runtime.events then
+        for _,name in ipairs(eventNames) do Attempt(Runtime.events.UnregisterEvent,Runtime.events,name) end
+    end
+    if Runtime.worldContext then Attempt(Runtime.worldContext.CancelConfirmation,Runtime.worldContext) end
+    Attempt(RestoreLootHook)
+    Attempt(HideTransitionPrompt)
+    for _,view in pairs(Runtime.views) do
+        if view.Stop then Attempt(view.Stop,view) elseif view.Hide then Attempt(view.Hide,view) end
+    end
+    if table.getn(failures)>0 then return false,table.concat(failures," ") end
+    return true
+end
+function Runtime.OnActivationFailed()
+    local failures={}
+    Runtime.stoppingNativeContent=true
+    local native,reason=SyncNative()
+    if not native then table.insert(failures,reason) end
+    local released,failure=ReleaseResources()
+    if not released then table.insert(failures,failure) end
+    local stopped,result,message=pcall(Raider.Modules.MasterLootWindow.Stop)
+    if not stopped or result==false then table.insert(failures,CleanupMessage(message or result)) end
+    Runtime.stoppingNativeContent=nil
+    Runtime.host=nil
+    Runtime.cleanupPending=table.getn(failures)>0 or nil
+    if Runtime.cleanupPending then return false,table.concat(failures," ") end
     return true
 end
 function Runtime.Stop()
+    if Runtime.cleanupPending and not Runtime.initialized then return Runtime.OnActivationFailed() end
     if Runtime.IsBusy() then return false,"Save or end the active raid and finish loot operations before stopping BootyRaider." end
-    if not Runtime.initialized then return true end
-    if Raider.Modules.MasterLootWindow.Stop() == false then return false end
-    Raider.active=false
-    for _,name in ipairs(eventNames) do Runtime.events:UnregisterEvent(name) end
-    Runtime.worldContext:CancelConfirmation();Runtime.nativeRaidTab:Sync();RestoreLootHook();HideTransitionPrompt()
-    for _,view in pairs(Runtime.views) do
-        if view.Stop then view:Stop() elseif view.Hide then view:Hide() end
+    if not Runtime.initialized and not Runtime.cleanupPending then return true end
+    Runtime.stoppingNativeContent=true
+    local native,reason=SyncNative()
+    if not native then return RestoreNative(reason) end
+    local called,stopped,failure=pcall(Raider.Modules.MasterLootWindow.Stop)
+    if not called or stopped==false then return RestoreNative(CleanupMessage(failure or stopped,"Loot cleanup refused.")) end
+    local released,message=ReleaseResources()
+    local reset,result,resetFailure=pcall(Raider.Services.Raid.ResetLootSession)
+    Runtime.stoppingNativeContent=nil
+    Runtime.cleanupPending=not released or not reset or result==false or nil
+    if not reset or result==false then
+        local failure=CleanupMessage(resetFailure or result)
+        message=message and message.." "..failure or failure
     end
-    Raider.Services.Raid.ResetLootSession()
+    if Runtime.cleanupPending then return false,message end
     return true
 end
 local function ApplySettingChanges(keys)

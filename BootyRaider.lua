@@ -82,6 +82,7 @@ end
 
 local descriptor={id="raider",name="BootyRaider",label="Raid",namespace=Raider,version=Raider.version,apiVersion=1,OnHostReady=Runtime.Initialize,
     Initialize=Runtime.Initialize,Start=Runtime.Initialize,Stop=Runtime.Stop,IsBusy=Runtime.IsBusy,GetSettings=Raider.Settings.Get,
+    OnActivationFailed=Runtime.OnActivationFailed,
     GetDatabase=Raider.Database.Ensure,GetQuickMenu=QuickMenu,ResetSettings=Raider.Settings.Reset,OnSettingChanged=Raider.OnSettingChanged,Command=Raider.HandleCommand,
     BeginSettingsBatch=Runtime.BeginSettingsBatch,EndSettingsBatch=Runtime.EndSettingsBatch,OnSettingsProfileApplied=Runtime.OnSettingsProfileApplied,
     GetGuildDirectoryDemand=function() return Raider.active and Raider.Services.Raid.IsInRaid() end,

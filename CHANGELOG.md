@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.11 — 2026-10-07
+
+- Release owned events and loot hooks after failed startup; preserve raid data and report refused cleanup.
+- Guard Save Raid reload confirmation against active work in every Booty product.
+
 ## 0.1.0-dev.10 — 2026-10-07
 
 - Reject damaged Soft Reserve exports before replacing existing reservations.
