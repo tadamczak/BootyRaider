@@ -112,7 +112,7 @@ function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
     end
     if controls.historyScroll.UpdateScrollChildRect then controls.historyScroll:UpdateScrollChildRect() end
     Raider.UI.Components.ApplyScrollRange(controls.historyScroll, bar, maximum)
-    controls.historyScroll.mosScrollGutter = overflow and 20 or 0
+    controls.historyScroll.bootyScrollGutter = overflow and 20 or 0
     if table.getn(snapshots) == 0 then
         controls.historyEmpty:ClearAllPoints(); controls.historyEmpty:SetPoint("TOPLEFT", page, "TOPLEFT", 8, actionY - 86); controls.historyEmpty:Show()
     else controls.historyEmpty:Hide() end

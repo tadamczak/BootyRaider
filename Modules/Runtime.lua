@@ -85,13 +85,13 @@ local function RaidPromptOwner()
 end
 local function RegisterPrompts()
     StaticPopupDialogs["BOOTY_RAIDER_ATTENDANCE_RELOAD"]={
-        mosProjectTitle="Save Raid",mosProjectOwner=RaidPromptOwner,text="Raid data is saved in memory. Reload the UI now to write it to disk?",
+        bootyProjectTitle="Save Raid",bootyProjectOwner=RaidPromptOwner,text="Raid data is saved in memory. Reload the UI now to write it to disk?",
         button1="Reload now",button2="Later",OnAccept=Reload,
         OnCancel=function() Runtime.Print("Raid data remains in memory until /reload or normal logout.") end,
         timeout=0,whileDead=1,hideOnEscape=1,
     }
     StaticPopupDialogs["BOOTY_RAIDER_START_RAID_REMINDER"]={
-        mosProjectTitle="Start Raid",mosProjectOwner=RaidPromptOwner,
+        bootyProjectTitle="Start Raid",bootyProjectOwner=RaidPromptOwner,
         text="You entered a raid instance without an active BootyRaider session.",button1="Later",button2="New Raid",
         OnAccept=function() Raider.raidStartReminderContext=Raider.raidStartReminderShownContext end,
         OnCancel=function()
@@ -251,7 +251,7 @@ function Runtime.Initialize(host)
         showSessionTransitionPrompt=ShowTransitionPrompt,hideSessionTransitionPrompt=HideTransitionPrompt,
     })
     Runtime.nativeRaidTab=Raider.Modules.NativeRaidTab.Create({
-        isEnabled=function() return Raider.active and not Runtime.stoppingNativeContent and Raider.Database.GetSetting("useMOSRaidTab") end,
+        isEnabled=function() return Raider.active and not Runtime.stoppingNativeContent and Raider.Database.GetSetting("useBootyRaidTab") end,
         ensureDatabase=Raider.Database.Ensure,openRaidInfo=Raider.Modules.RaidInfo.Toggle,closeRaidInfo=Raider.Modules.RaidInfo.CloseOwned,
     })
     Runtime.events=Runtime.events or UI.CreateContainer("BootyRaiderEvents",UIParent)
@@ -332,7 +332,7 @@ local function ApplySettingChanges(keys)
     if not Runtime.initialized or not Raider.active then return end
     local native,tracking,autoLoot=false,false,false
     for key in pairs(keys) do
-        if key=="profile" or key=="useMOSRaidTab" or key=="useMOSRaidLogo" or string.find(key,"^nativeRaid") then native=true end
+        if key=="profile" or key=="useBootyRaidTab" or key=="useBootyRaidLogo" or string.find(key,"^nativeRaid") then native=true end
         if key=="profile" or key=="raidLiveTrackingEnabled" then tracking=true end
         if key=="profile" or string.find(key,"^lmAutoLoot") then autoLoot=true end
     end

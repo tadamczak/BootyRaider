@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.13 — 2026-10-09
+
+- Use Booty preferences and commands; preserve previous raid settings and saved profiles.
+
 ## 0.1.0-dev.12 — 2026-10-08
 
 - Skip attendance lookups for ignored loot events and reuse CSR data during resize, scrolling and row expansion.

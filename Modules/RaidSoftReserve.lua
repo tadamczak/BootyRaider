@@ -139,7 +139,7 @@ local function CreateWarningCard(page, dialogName, dialogTitle, background, bord
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(warning.dialog, warning) end
     Raider.UI.Components.Window.StyleProjectDialog(warning.dialog, "warning_triangle")
     warning.dialog.title:SetTextColor(1, 1, 1)
-    warning.dialog.icon = warning.dialog.title.mosHeadingIcon
+    warning.dialog.icon = warning.dialog.title.bootyHeadingIcon
     warning.dialog.ok:ClearAllPoints(); warning.dialog.ok:SetPoint("BOTTOMRIGHT", warning.dialog, "BOTTOMRIGHT", -8, 8)
     warning.dialog.description = Raider.UI.Components.CreateLabel(warning.dialog, nil, "OVERLAY", "GameFontHighlightSmall")
     warning.dialog.description:SetPoint("TOPLEFT", warning.dialog, "TOPLEFT", 8, -36)

@@ -95,8 +95,3 @@ Raider.descriptor=descriptor
 BootyLib.RegisterProduct(descriptor)
 SlashCmdList=SlashCmdList or {}
 SLASH_BOOTYRAIDER1="/br";SLASH_BOOTYRAIDER2="/bootyraider";SlashCmdList.BOOTYRAIDER=Raider.HandleCommand
--- Suite can replace this alias with its own dispatcher; standalone preserves
--- the established roll command without requiring the old addon to be loaded.
-if not SlashCmdList.MUKLA_OFFICER_SUITE and not SlashCmdList.BOOTYSUITE then
-    SLASH_BOOTYRAIDERMOS1="/mos";SlashCmdList.BOOTYRAIDERMOS=Raider.HandleCommand
-end

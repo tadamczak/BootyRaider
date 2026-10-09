@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/tadamczak/MuklaOfficerSuite/master/Assets/readme-header.png" width="100%" alt="Sons of Mukla"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/tadamczak/BootyLib/develop/Assets/readme-header.png" width="100%" alt="Sons of Mukla"></p>
 
 # BootyRaider
 
@@ -16,7 +16,7 @@ Install **BootyLib** and **BootyRaider** in `Interface/AddOns`, then enable them
 
 ## Basic usage
 
-Use `/br` to open Raid, `/br stats` for Raid Stats, `/br csr` for CSR and `/br settings` for configuration. `/br roll` opens New Roll. `/br roll [item]` starts the default Tmog, OS, MS and RC modes; player names and explicit roll modes can follow the item. The established `/mos roll` command remains available when Booty Suite is absent.
+Use `/br` to open Raid, `/br stats` for Raid Stats, `/br csr` for CSR and `/br settings` for configuration. `/br roll` opens New Roll. `/br roll [item]` starts the default Tmog, OS, MS and RC modes; player names and explicit roll modes can follow the item.
 
 New sessions capture the physical raid independently of guild membership. Save Raid preserves roster, loot and selected statistics. Live tracking, group/list appearance, the default game Raid tab and Loot Master messages have independent settings.
 
@@ -38,4 +38,4 @@ Raid Leader Tools and Loot Master Tools menus open above every part of these war
 
 ## Existing data
 
-Existing Mukla Officer Suite data is imported by the optional migration bridge. Keep the old SavedVariables until migration has been confirmed in game.
+Previous data is imported by the optional **Booty Legacy Data Import** addon. Keep the old SavedVariables until migration has been confirmed in game.

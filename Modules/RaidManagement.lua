@@ -11,12 +11,12 @@ end
 function RaidManagement.ResetIssueAttention(page)
     local button = page.classicIssues
     if not button then return end
-    button.mosIssueKeys = nil; button.mosIssueScratch = nil
+    button.bootyIssueKeys = nil; button.bootyIssueScratch = nil
     Raider.UI.Components.SetAttentionPulse(button, false)
 end
 
 function RaidManagement.UpdateIssueAttention(button, issues)
-    local previous, current = button.mosIssueKeys or {}, button.mosIssueScratch or {}
+    local previous, current = button.bootyIssueKeys or {}, button.bootyIssueScratch or {}
     for key in pairs(current) do current[key] = nil end
     local newIssue, count = false, 0
     local groups = {issues.unmatchedNames, issues.missingNames, issues.invalidNames}
@@ -27,8 +27,8 @@ function RaidManagement.UpdateIssueAttention(button, issues)
             if not previous[key] then newIssue = true end
         end
     end
-    button.mosIssueKeys = current; button.mosIssueScratch = previous
-    Raider.UI.Components.SetAttentionPulse(button, count > 0 and (newIssue or button.mosAttentionPending))
+    button.bootyIssueKeys = current; button.bootyIssueScratch = previous
+    Raider.UI.Components.SetAttentionPulse(button, count > 0 and (newIssue or button.bootyAttentionPending))
 end
 
 function RaidManagement.AttachReyCoinAdd(view, refresh)
@@ -50,8 +50,8 @@ local function RestoreHeaderFont(control)
     local label = control.label or control
     if not label.GetFont then return end
     local font, size, flags = label:GetFont()
-    control.mosFitFontSize = control.mosFitFontSize or size
-    label:SetFont(font, control.mosFitFontSize, flags)
+    control.bootyFitFontSize = control.bootyFitFontSize or size
+    label:SetFont(font, control.bootyFitFontSize, flags)
     label:SetWidth(0)
 end
 
@@ -75,7 +75,7 @@ function RaidManagement.CreateChrome(page, callbacks)
     view.classicMeta:SetPoint("LEFT", view.classicRaidName, "RIGHT", 10, 0); view.classicMeta:SetWidth(82); view.classicMeta:SetJustifyH("LEFT"); view.classicMeta:Hide()
     view.classicSaved = Raider.UI.Components.CreateButton(page, nil, "Not saved yet", 108, 24)
     view.classicSaved:SetPoint("LEFT", view.classicMeta, "RIGHT", 8, 0); Raider.UI.Components.SetClassicButtonGold(view.classicSaved, true); view.classicSaved:Hide()
-    Raider.UI.Components.AttachTooltip(view.classicSaved, "Raid save status", function() return view.classicSaved.mosRaidSavedText or view.classicSaved:GetText() end)
+    Raider.UI.Components.AttachTooltip(view.classicSaved, "Raid save status", function() return view.classicSaved.bootyRaidSavedText or view.classicSaved:GetText() end)
     Raider.UI.Components.SetClassicButtonLabelOffset(view.classicSaved, 2)
     Raider.UI.Components.SetButtonLabelInsets(view.classicSaved, 8, 4)
     view.classicIssues = Raider.UI.Components.CreateButton(page, nil, "", 96, 24)
@@ -91,7 +91,7 @@ function RaidManagement.CreateChrome(page, callbacks)
     end)
     page.classicRaidName = view.classicRaidName; page.classicMeta = view.classicMeta; page.classicSaved = view.classicSaved; page.classicIssues = view.classicIssues
     view.modeButton = Raider.UI.Components.CreateButton(page, "BootyRaiderRaidModeButton", "LM Mode", 96, 22)
-    view.modeButton.mosClassicReserveIconSpace = true
+    view.modeButton.bootyClassicReserveIconSpace = true
     Raider.UI.Components.SetClassicButtonIcon(view.modeButton, "loot_tools", 13, 7, 0)
     Raider.UI.Components.AttachGoldHoverBorder(view.modeButton, 0.35, 0.35, 0.35, 1)
     view.modeButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -4, -8)
@@ -396,13 +396,13 @@ function RaidManagement.CreateActionControls(page)
     controls.addStatistics = Raider.UI.Components.CreateButton(page, nil, "Add to Raid Statistics", 132, 22); controls.addStatistics:Hide()
     Raider.UI.Components.SetClassicButtonVariant(controls.addStatistics, "red")
     Raider.UI.Components.SetClassicButtonIcon(controls.addStatistics, "raid_stats")
-    controls.addStatistics.mosClassicPersistentRed = true
+    controls.addStatistics.bootyClassicPersistentRed = true
     Raider.UI.Components.SetClassicButtonGold(controls.addStatistics, true)
     Raider.UI.Components.AttachTooltip(controls.addStatistics, "Add to Raid Statistics", "Save this session and add its compact result to Raid Statistics.")
     controls.export = Raider.UI.Components.CreateButton(page, nil, "Save Raid", 88, 22)
     Raider.UI.Components.SetClassicButtonVariant(controls.export, "red")
     Raider.UI.Components.SetClassicButtonIcon(controls.export, "save")
-    controls.export.mosClassicPersistentRed = true
+    controls.export.bootyClassicPersistentRed = true
     Raider.UI.Components.SetClassicButtonGold(controls.export, true)
     controls.export:SetPoint("TOPRIGHT", page, "TOPRIGHT", -110, -42); controls.export:Hide()
     Raider.UI.Components.AttachTooltip(controls.export, "Save Raid", "Save this raid snapshot.")
@@ -412,13 +412,13 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.SetClassicButtonGold(controls.quit, true)
     Raider.UI.Components.AttachTooltip(controls.quit, "End Raid", "End the active raid session.")
     controls.raidLeaderTools = Raider.UI.Components.CreateButton(page, nil, "Raid Leader Tools", 118, 22); controls.raidLeaderTools:Hide()
-    controls.raidLeaderTools.mosClassicKeepNormalSurface = true
-    controls.raidLeaderTools.mosHoverTextColor = {1, 0.82, 0.28}
+    controls.raidLeaderTools.bootyClassicKeepNormalSurface = true
+    controls.raidLeaderTools.bootyHoverTextColor = {1, 0.82, 0.28}
     Raider.UI.Components.SetClassicButtonIcon(controls.raidLeaderTools, "raid_tools", 13, 7, 2)
     Raider.UI.Components.SetClassicButtonLabelOffset(controls.raidLeaderTools, 2)
     controls.lootMasterTools = Raider.UI.Components.CreateButton(page, nil, "Loot Master Tools", 118, 22); controls.lootMasterTools:Hide()
-    controls.lootMasterTools.mosClassicKeepNormalSurface = true
-    controls.lootMasterTools.mosHoverTextColor = {1, 0.82, 0.28}
+    controls.lootMasterTools.bootyClassicKeepNormalSurface = true
+    controls.lootMasterTools.bootyHoverTextColor = {1, 0.82, 0.28}
     Raider.UI.Components.SetClassicButtonIcon(controls.lootMasterTools, "loot_tools", 13, 7, 2)
     Raider.UI.Components.SetClassicButtonLabelOffset(controls.lootMasterTools, 2)
     Raider.UI.Components.AttachGoldHoverBorder(controls.raidLeaderTools, 0.35, 0.35, 0.35, 1)
@@ -433,23 +433,23 @@ function RaidManagement.CreateActionControls(page)
         if Raider.Modules.MasterLootWindow then Raider.Modules.MasterLootWindow.OpenNewRollDialog() end
     end)
     controls.lootRules = Raider.UI.Components.CreateButton(page, nil, "Set Loot Rules", 102, 22)
-    controls.lootRules.mosClassicReserveIconSpace = true
+    controls.lootRules.bootyClassicReserveIconSpace = true
     Raider.UI.Components.SetClassicButtonIcon(controls.lootRules, "rules")
     controls.lootRules:SetPoint("TOPRIGHT", page, "TOPRIGHT", -326, -42); controls.lootRules:Hide()
     controls.sendLootRules = Raider.UI.Components.CreateButton(page, nil, "Send Loot Rules", 112, 22)
-    controls.sendLootRules.mosClassicReserveIconSpace = true
+    controls.sendLootRules.bootyClassicReserveIconSpace = true
     Raider.UI.Components.SetClassicButtonIcon(controls.sendLootRules, "rules")
     controls.sendLootRules:Hide()
     controls.import = Raider.UI.Components.CreateButton(page, nil, "Import SR", 82, 22)
-    controls.import.mosClassicReserveIconSpace = true
+    controls.import.bootyClassicReserveIconSpace = true
     Raider.UI.Components.SetClassicButtonIcon(controls.import, "import")
     controls.import:SetPoint("TOPRIGHT", page, "TOPRIGHT", -236, -42); controls.import:Hide()
     controls.shareSr = Raider.UI.Components.CreateButton(page, nil, "Share SR Link", 92, 22); controls.shareSr:Hide()
-    controls.shareSr.mosClassicReserveIconSpace = true
+    controls.shareSr.bootyClassicReserveIconSpace = true
     Raider.UI.Components.SetClassicButtonIcon(controls.shareSr, "link")
     Raider.UI.Components.AttachTooltip(controls.shareSr, "Share SR Link", "Send the saved Soft Reserve URL to the raid as a Raid Warning.")
     controls.resetLoot = Raider.UI.Components.CreateButton(page, "BootyRaiderRaidResetLootButton", "Reset loot", 82, 22)
-    controls.resetLoot.mosClassicReserveIconSpace = true
+    controls.resetLoot.bootyClassicReserveIconSpace = true
     Raider.UI.Components.SetClassicButtonIcon(controls.resetLoot, "reset")
     controls.resetLoot:SetPoint("TOPRIGHT", page, "TOPRIGHT", -326, -42); controls.resetLoot:Hide()
     controls.resetLoot:SetScript("OnClick", function() RaidManagement.resetLootDialog:Open("Reset all recorded raid loot?", StaticPopupDialogs.BOOTY_RAIDER_RESET_LOOT.OnAccept) end)
@@ -508,7 +508,7 @@ local function OnListViewportScroll()
 end
 
 local function PageSpan(page)
-    if page.mosCompactGroupWidth then return page.mosCompactGroupWidth, page.mosCompactGroupHeight end
+    if page.bootyCompactGroupWidth then return page.bootyCompactGroupWidth, page.bootyCompactGroupHeight end
     if page.detachedLootMaster then return math.max(1, page:GetParent():GetWidth() - 8), math.max(1, page:GetParent():GetHeight() - 28) end
     local left, right = page:GetLeft(), page:GetRight()
     local bottom, top = page:GetBottom(), page:GetTop()
@@ -582,8 +582,8 @@ end
 
 local function OnRaidRowEnter()
     local settings = BootyRaiderDB
-    this.mosRaidHovered = true
-    if settings.raidListShowHoverBorder or this.mosProjectOutline then
+    this.bootyRaidHovered = true
+    if settings.raidListShowHoverBorder or this.bootyProjectOutline then
         Raider.UI.Components.SetProjectButtonOutline(this, settings.raidListShowHoverBorder, settings.raidListHoverBorderSize, settings.raidListHoverBorderColor)
     end
     if this.displayedMember and this.controller and not this.controller.isSelected(this.displayedMember) then
@@ -593,8 +593,8 @@ local function OnRaidRowEnter()
 end
 
 local function OnRaidRowLeave()
-    this.mosRaidHovered = nil
-    if this.mosProjectOutline then this.mosProjectOutline:Hide() end
+    this.bootyRaidHovered = nil
+    if this.bootyProjectOutline then this.bootyProjectOutline:Hide() end
     if this.displayedMember and this.controller and not this.controller.isSelected(this.displayedMember) then
         local color = BootyRaiderDB.raidListBackgroundColor
         Raider.UI.Components.SetAlternatingRowColor(this, color, this.visibleIndex, BootyRaiderDB.raidListOddLightness)
@@ -602,8 +602,8 @@ local function OnRaidRowLeave()
 end
 
 local function OnRaidMemberHide()
-    this.mosRaidHovered=nil
-    if this.mosProjectOutline then this.mosProjectOutline:Hide() end
+    this.bootyRaidHovered=nil
+    if this.bootyProjectOutline then this.bootyProjectOutline:Hide() end
     Raider.UI.Components.SetAtlasHighlight(this, false)
 end
 
@@ -684,7 +684,7 @@ function RaidManagement.CreateListRow(parent, index, controller)
         lootRow.hit:SetScript("OnEnter", OnLootItemEnter); lootRow.hit:SetScript("OnLeave", OnLootItemLeave); lootRow.hit:SetScript("OnClick", OnLootItemClick); lootRow.hit:Hide()
         row.lootRows[lootIndex] = lootRow
     end
-    row.lootScroll = Raider.UI.Components.CreateScrollFrame((parent.mosLootScrollPrefix or "BootyRaiderRaidLootScroll") .. index, row.lootPanel, "FauxScrollFrameTemplate")
+    row.lootScroll = Raider.UI.Components.CreateScrollFrame((parent.bootyLootScrollPrefix or "BootyRaiderRaidLootScroll") .. index, row.lootPanel, "FauxScrollFrameTemplate")
     row.lootScroll:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 8, -24); row.lootScroll:SetPoint("BOTTOMRIGHT", row.lootPanel, "BOTTOMRIGHT", -30, 8)
     row.lootScrollBar = getglobal(row.lootScroll:GetName() .. "ScrollBar")
     if row.lootScrollBar then
@@ -735,7 +735,7 @@ function RaidManagement.CreateListHeaders(page, onSort)
     page.listEnabled = {}; page.listPositions = {}; page.listWidths = {}
     page.headerLabels = { ui.name, ui.group, ui.class, ui.rank, ui.sr }
     local _, headerBaseSize = ui.name:GetFont()
-    page.mosHeaderBaseSize = headerBaseSize
+    page.bootyHeaderBaseSize = headerBaseSize
     page.listHeaderUI = ui
     return ui
 end
@@ -767,7 +767,7 @@ function RaidManagement.CreateGroupViewport(page)
     Raider.UI.Components.SetClassicButtonIcon(page.classicTwoButton, "list", 12, 7, 2); Raider.UI.Components.SetClassicButtonIcon(page.classicFourButton, "groups", 12, 7, 2)
     Raider.UI.Components.SetClassicButtonLabelOffset(page.classicListButton, 2); Raider.UI.Components.SetClassicButtonLabelOffset(page.classicGroupButton, 2)
     Raider.UI.Components.SetClassicButtonLabelOffset(page.classicTwoButton, 2); Raider.UI.Components.SetClassicButtonLabelOffset(page.classicFourButton, 2)
-    for _, button in ipairs({page.classicListButton, page.classicGroupButton, page.classicTwoButton, page.classicFourButton}) do button.mosSelectedTextColor = {1,0.82,0.28}; Raider.UI.Components.SetButtonTextColor(button, {1,1,1}) end
+    for _, button in ipairs({page.classicListButton, page.classicGroupButton, page.classicTwoButton, page.classicFourButton}) do button.bootySelectedTextColor = {1,0.82,0.28}; Raider.UI.Components.SetButtonTextColor(button, {1,1,1}) end
     return CreateGroupCanvas(page, "BootyRaiderRaidGroupScroll")
 end
 
@@ -900,21 +900,21 @@ end
 local function FilterCaptionWidth(page, button)
     local caption = button:GetText() or ""
     local font, size, flags = button.label:GetFont()
-    if button.mosRaidFilterCaption == caption and button.mosRaidFilterFont == font
-        and button.mosRaidFilterSize == size and button.mosRaidFilterFlags == flags then
-        return button.mosRaidFilterWidth
+    if button.bootyRaidFilterCaption == caption and button.bootyRaidFilterFont == font
+        and button.bootyRaidFilterSize == size and button.bootyRaidFilterFlags == flags then
+        return button.bootyRaidFilterWidth
     end
     -- A clipped field may report clipped native string bounds. Measure the
     -- full caption with one pooled, unbounded region, using the field's font.
-    local measure = page.mosRaidFilterMeasure
+    local measure = page.bootyRaidFilterMeasure
     if not measure then
         measure = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontHighlightSmall")
-        measure:SetWidth(0); measure:Hide(); page.mosRaidFilterMeasure = measure
+        measure:SetWidth(0); measure:Hide(); page.bootyRaidFilterMeasure = measure
     end
     measure:SetFont(font, size, flags); measure:SetText(caption)
     local width = math.max(84, math.ceil(measure:GetStringWidth()) + 30)
-    button.mosRaidFilterCaption, button.mosRaidFilterFont = caption, font
-    button.mosRaidFilterSize, button.mosRaidFilterFlags, button.mosRaidFilterWidth = size, flags, width
+    button.bootyRaidFilterCaption, button.bootyRaidFilterFont = caption, font
+    button.bootyRaidFilterSize, button.bootyRaidFilterFlags, button.bootyRaidFilterWidth = size, flags, width
     return width
 end
 
@@ -937,7 +937,7 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
         controls.modeButton:ClearAllPoints(); controls.modeButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -6, -8); controls.modeButton:SetWidth(18); controls.modeButton:SetHeight(18); Raider.UI.Components.SetWindowButtonAction(controls.modeButton, "close")
         controls.minimizeButton:ClearAllPoints(); controls.minimizeButton:SetPoint("RIGHT", controls.modeButton, "LEFT", -4, 0); controls.minimizeButton:SetWidth(18); controls.minimizeButton:SetHeight(18); Raider.UI.Components.SetWindowButtonAction(controls.minimizeButton, "minimize")
         Raider.UI.Components.SetClassicButtonCompact(controls.modeButton, true)
-        if controls.modeButton.mosClassicIconKey then Raider.UI.Components.SetClassicButtonIcon(controls.modeButton, nil) end
+        if controls.modeButton.bootyClassicIconKey then Raider.UI.Components.SetClassicButtonIcon(controls.modeButton, nil) end
         controls.searchLabel:ClearAllPoints(); controls.searchLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 4, -10); controls.searchLabel:SetWidth(52); controls.searchLabel:SetJustifyH("LEFT"); controls.searchLabel:SetText("LM Mode")
         page.lmConfigToggle:ClearAllPoints(); page.lmConfigToggle:SetPoint("RIGHT", controls.minimizeButton, "LEFT", -4, 0)
         controls.searchLabel:Hide(); controls.searchBox:Hide(); controls.classButton:Hide(); controls.rankButton:Hide()
@@ -954,22 +954,22 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
     controls.filterLabel:Hide()
     local filterBottom, filterWidth = 31, 0
     if settings.raidListShowFilters then
-        controls.classButton.mosFlowWidth = FilterCaptionWidth(page, controls.classButton)
-        controls.rankButton.mosFlowWidth = FilterCaptionWidth(page, controls.rankButton)
+        controls.classButton.bootyFlowWidth = FilterCaptionWidth(page, controls.classButton)
+        controls.rankButton.bootyFlowWidth = FilterCaptionWidth(page, controls.rankButton)
         controls.classButton:SetHeight(24); controls.rankButton:SetHeight(24); controls.resetButton:SetHeight(24)
-        local flow = page.mosRaidFilterFlow
+        local flow = page.bootyRaidFilterFlow
         if not flow then
-            controls.resetButton.mosFlowWidth = controls.resetButton:GetWidth()
-            flow = {controls.classButton, controls.rankButton, controls.resetButton}; page.mosRaidFilterFlow = flow
+            controls.resetButton.bootyFlowWidth = controls.resetButton:GetWidth()
+            flow = {controls.classButton, controls.rankButton, controls.resetButton}; page.bootyRaidFilterFlow = flow
         end
-        filterWidth = controls.classButton.mosFlowWidth + controls.rankButton.mosFlowWidth + controls.resetButton.mosFlowWidth + 16
+        filterWidth = controls.classButton.bootyFlowWidth + controls.rankButton.bootyFlowWidth + controls.resetButton.bootyFlowWidth + 16
         filterBottom = Raider.UI.Components.LayoutFlow(toolbar, flow, 6, 7, available, 8)
         Raider.UI.Components.FitButtonLabel(controls.classButton, math.max(1, controls.classButton:GetWidth() - 28))
         Raider.UI.Components.FitButtonLabel(controls.rankButton, math.max(1, controls.rankButton:GetWidth() - 28))
     end
     Raider.UI.Components.SetClassicButtonCompact(controls.modeButton, false)
     controls.modeButton:SetWidth(96); controls.modeButton:SetHeight(22)
-    if not controls.modeButton.mosClassicIconKey then Raider.UI.Components.SetClassicButtonIcon(controls.modeButton, "loot_tools", 13, 7, 0) end
+    if not controls.modeButton.bootyClassicIconKey then Raider.UI.Components.SetClassicButtonIcon(controls.modeButton, "loot_tools", 13, 7, 0) end
     controls.searchLabel:Hide()
     controls.searchBox:ClearAllPoints()
     local searchTop, searchWidth = 7, available - controls.refreshButton:GetWidth() - 4
@@ -991,7 +991,7 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
     controls.searchBox:SetWidth(page.classicSearchWidth)
     controls.refreshButton:ClearAllPoints(); controls.refreshButton:SetPoint("LEFT", controls.searchBox, "RIGHT", 4, 0)
     if page.filterToolbar then
-        page.filterToolbar.mosBorderOutsetLeft=4;page.filterToolbar.mosBorderOutsetRight=4;Raider.UI.Components.SetSurfaceHorizontalBorders(page.filterToolbar,false,true)
+        page.filterToolbar.bootyBorderOutsetLeft=4;page.filterToolbar.bootyBorderOutsetRight=4;Raider.UI.Components.SetSurfaceHorizontalBorders(page.filterToolbar,false,true)
         page.filterToolbar:ClearAllPoints(); page.filterToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -92 - submenuOffset); page.filterToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, -92 - submenuOffset)
         page.filterToolbar:SetHeight(38 + extraRows)
     end
@@ -1093,7 +1093,7 @@ function RaidManagement.CreateCompactGroupView(parent, dependencies)
     dependencies = dependencies or {}
     local page = Raider.UI.Components.CreateContainer(nil, parent)
     page:SetAllPoints(parent); page:Hide()
-    page.mosGroupLayout = true; page.mosGroupLeft = 0; page.mosGroupTop = 0; page.mosGroupBottom = 0
+    page.bootyGroupLayout = true; page.bootyGroupLeft = 0; page.bootyGroupTop = 0; page.bootyGroupBottom = 0
     page.isTestRaid = function() return false end
     page.getGroupSettings = dependencies.getGroupSettings
     page.canManageGroups = dependencies.canManageGroups
@@ -1135,9 +1135,9 @@ function RaidManagement.CreateCompactGroupView(parent, dependencies)
     end
     function controller:Render(currentMembers, width, height)
         members = currentMembers or {}
-        page.mosCompactGroupWidth = math.max(1, tonumber(width) or 1)
-        page.mosCompactGroupHeight = math.max(1, tonumber(height) or 1)
-        page:SetWidth(page.mosCompactGroupWidth); page:SetHeight(page.mosCompactGroupHeight)
+        page.bootyCompactGroupWidth = math.max(1, tonumber(width) or 1)
+        page.bootyCompactGroupHeight = math.max(1, tonumber(height) or 1)
+        page:SetWidth(page.bootyCompactGroupWidth); page:SetHeight(page.bootyCompactGroupHeight)
         page:Show(); page.groupFrame:Show()
         RaidManagement.RefreshGroupView(page)
     end
@@ -1158,7 +1158,7 @@ end
 
 function RaidManagement.ClearSessionHeader(page)
     RaidManagement.ResetIssueAttention(page)
-    page.classicRaidName:Hide(); page.classicRaidName.mosRaidName = nil; page.classicMeta:Hide(); page.classicMeta.mosRaidId = nil; page.classicSaved:Hide(); page.classicIssues:Hide(); page.classicSummary:Hide()
+    page.classicRaidName:Hide(); page.classicRaidName.bootyRaidName = nil; page.classicMeta:Hide(); page.classicMeta.bootyRaidId = nil; page.classicSaved:Hide(); page.classicIssues:Hide(); page.classicSummary:Hide()
     page.refreshControls.title:SetText("Raid"); if BootyRaiderDB and BootyRaiderDB.raidHideSectionHeader then page.refreshControls.title:Hide() else page.refreshControls.title:Show() end
 end
 
@@ -1201,11 +1201,11 @@ function RaidManagement.RefreshPage(renderer)
             if table.getn(issues.unmatchedNames) > 0 then issueCount = issueCount + 1 end
             if table.getn(issues.missingNames) > 0 then issueCount = issueCount + 1 end
             if table.getn(issues.invalidNames) > 0 then issueCount = issueCount + 1 end
-            page.classicRaidName.mosRaidName = attendance.raidName or "Unknown zone"; page.classicRaidName:SetText(page.classicRaidName.mosRaidName); page.classicRaidName:Show()
-            page.classicMeta.mosRaidId = tostring(raidId); page.classicMeta:SetText("|  " .. page.classicMeta.mosRaidId); page.classicMeta:Show()
-            page.classicSaved.mosRaidSavedText = savedText; page.classicSaved:SetText(savedText); page.classicSaved:Show()
+            page.classicRaidName.bootyRaidName = attendance.raidName or "Unknown zone"; page.classicRaidName:SetText(page.classicRaidName.bootyRaidName); page.classicRaidName:Show()
+            page.classicMeta.bootyRaidId = tostring(raidId); page.classicMeta:SetText("|  " .. page.classicMeta.bootyRaidId); page.classicMeta:Show()
+            page.classicSaved.bootyRaidSavedText = savedText; page.classicSaved:SetText(savedText); page.classicSaved:Show()
             RaidManagement.UpdateIssueAttention(page.classicIssues, issues)
-            if issueCount > 0 then page.classicIssues.mosRaidIssuesText = issueCount .. " issues"; page.classicIssues:SetText(page.classicIssues.mosRaidIssuesText); page.classicIssues:Show() else page.classicIssues:Hide() end
+            if issueCount > 0 then page.classicIssues.bootyRaidIssuesText = issueCount .. " issues"; page.classicIssues:SetText(page.classicIssues.bootyRaidIssuesText); page.classicIssues:Show() else page.classicIssues:Hide() end
             RestoreHeaderFont(page.classicRaidName); RestoreHeaderFont(page.classicMeta)
             local titleWidth = math.max(48, page.classicRaidName:GetStringWidth() + 4)
             local metaWidth = math.max(42, page.classicMeta:GetStringWidth() + 4)
@@ -1514,10 +1514,10 @@ function RaidManagement.ShowGroupView(page, rows, issues)
         local warningWidth = RaidManagement.LayoutSoftReserveWarnings(page, false, true, issues)
         page.groupFrame:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -72); page.groupFrame:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -24, 5)
     end
-    page.mosGroupLayout = true
-    page.mosGroupLeft = Raider.UI.Components.IsClassicSkin() and 10 or 6
-    page.mosGroupTop = Raider.UI.Components.IsClassicSkin() and (-100 - (page.classicSectionOffset or 0) - (page.classicActionOffset or 0) - (page.classicToolbarOffset or 0)) or -72
-    page.mosGroupBottom = Raider.UI.Components.IsClassicSkin() and 4 or 5
+    page.bootyGroupLayout = true
+    page.bootyGroupLeft = Raider.UI.Components.IsClassicSkin() and 10 or 6
+    page.bootyGroupTop = Raider.UI.Components.IsClassicSkin() and (-100 - (page.classicSectionOffset or 0) - (page.classicActionOffset or 0) - (page.classicToolbarOffset or 0)) or -72
+    page.bootyGroupBottom = Raider.UI.Components.IsClassicSkin() and 4 or 5
     page.groupFrame:Show(); if page.listScrollBar then page.listScrollBar:Hide() end
     page.refreshGroupView()
 end
@@ -1579,10 +1579,10 @@ function RaidManagement.RefreshListView(page, rows, members, selectedName, sortK
             visibleRowCount = math.max(1, math.min(table.getn(rows), 1 + math.floor((rowAreaHeight - expandedHeight) / rowStep)))
         else visibleRowCount = math.max(1, availableRows - 7) end
     end
-    if not lootMasterMode or page.mosLastLootSelection ~= selectedName then
+    if not lootMasterMode or page.bootyLastLootSelection ~= selectedName then
         RaidManagement.KeepSelectionVisible(scrollFrame, members, selectedName, visibleRowCount, rowStep)
     end
-    page.mosLastLootSelection = selectedName
+    page.bootyLastLootSelection = selectedName
     local offset = renderer.updateScrollFrame(scrollFrame, table.getn(members), visibleRowCount, rowStep)
     local lootMethod, raidLootMasterIndex = renderer.getLootMasterInfo()
     RaidManagement.RenderListRows(page, rows, members, offset, visibleRowCount, rowStep, rowStartY, lootMasterMode, tableLeft, tableWidth, lootMethod, raidLootMasterIndex, selectedName, renderer.shorten, expandedHeight)
@@ -1651,11 +1651,11 @@ function RaidManagement.ApplyGroupTileAppearance(panel, header, height, settings
     panel:SetBackdropBorderColor(0, 0, 0, 0)
     local UI = Raider.UI.Components
     if settings.raidGroupBorderTexture == "game" then
-        if panel.mosProjectOutline then panel.mosProjectOutline:Hide() end
+        if panel.bootyProjectOutline then panel.bootyProjectOutline:Hide() end
         UI.SetAtlasOutline(panel, settings.raidGroupShowBorder, groupOutlineArtwork, settings.raidGroupBorderSize, border, height, panel.outlineLevel)
     else
-        if panel.mosAtlasOutline then panel.mosAtlasOutline:Hide() end
-        if settings.raidGroupShowBorder or panel.mosProjectOutline then
+        if panel.bootyAtlasOutline then panel.bootyAtlasOutline:Hide() end
+        if settings.raidGroupShowBorder or panel.bootyProjectOutline then
             UI.SetProjectButtonOutline(panel, settings.raidGroupShowBorder, settings.raidGroupBorderSize, border, height, panel.outlineLevel)
         end
     end
@@ -1672,11 +1672,11 @@ end
 local function SetGroupSlotHover(slot, settings, hovered)
     local UI = Raider.UI.Components
     if settings.raidGroupMemberTexture == "game" then
-        if slot.mosProjectOutline then slot.mosProjectOutline:Hide() end
+        if slot.bootyProjectOutline then slot.bootyProjectOutline:Hide() end
         UI.SetAtlasHighlight(slot, hovered and settings.raidGroupShowHoverBorder, groupHoverArtwork, settings.raidGroupHoverBorderSize, settings.raidGroupHoverBorderColor)
     else
-        if slot.mosAtlasHighlight then UI.SetAtlasHighlight(slot, false, groupHoverArtwork, 1, settings.raidGroupHoverBorderColor) end
-        if settings.raidGroupShowHoverBorder or slot.mosProjectOutline then
+        if slot.bootyAtlasHighlight then UI.SetAtlasHighlight(slot, false, groupHoverArtwork, 1, settings.raidGroupHoverBorderColor) end
+        if settings.raidGroupShowHoverBorder or slot.bootyProjectOutline then
             UI.SetProjectButtonOutline(slot, hovered and settings.raidGroupShowHoverBorder, settings.raidGroupHoverBorderSize, settings.raidGroupHoverBorderColor)
         end
     end
@@ -1796,12 +1796,12 @@ function RaidManagement.FilterMembers(target, members, query, selectedClasses, s
 end
 
 function RaidManagement.MeasureListHeight(width, page)
-    return page.mosListMeasuredHeight
+    return page.bootyListMeasuredHeight
 end
 
 function RaidManagement.FitListHeaders(page, headerButtons, lootMasterMode)
     local scale = 1
-    local baseSize = lootMasterMode and 10 or (page.mosHeaderBaseSize or 12)
+    local baseSize = lootMasterMode and 10 or (page.bootyHeaderBaseSize or 12)
     local count = lootMasterMode and table.getn(headerButtons) or table.getn(page.listColumns)
     for index = 1, count do
         local button = lootMasterMode and headerButtons[index] or page.listColumns[index].button
@@ -1861,18 +1861,18 @@ function RaidManagement.LayoutListHeaders(page, headerButtons, sortKey, lootMast
     local bodyHeight = math.max(1, pageHeight + rowStartY - bottom)
     local count = memberCount or 0
     if not lootMasterMode and selectedName then count = count + 7 end
-    page.mosListMeasuredHeight = count * rowStep
+    page.bootyListMeasuredHeight = count * rowStep
     if lootMasterMode and selectedName then
-        page.mosListMeasuredHeight = page.mosListMeasuredHeight + RaidManagement.LootMasterExpandedHeight(bodyHeight, count) - rowStep
+        page.bootyListMeasuredHeight = page.bootyListMeasuredHeight + RaidManagement.LootMasterExpandedHeight(bodyHeight, count) - rowStep
     end
     local fullWidth = math.max(1, pageWidth - tableLeft - (lootMasterMode and 3 or 4))
     local resolvedWidth, _, overflow = Raider.UI.Components.ResolveScrollLayout(fullWidth, bodyHeight, 20, RaidManagement.MeasureListHeight, page)
-    page.mosListScrollGutter = overflow and 20 or 0
+    page.bootyListScrollGutter = overflow and 20 or 0
     local tableRight = tableLeft + resolvedWidth
     local availableWidth = math.max(1, tableRight - tableLeft)
     local tableWidth = availableWidth
     if lootMasterMode then
-        local columns = page.mosLootColumns or {}; page.mosLootColumns = columns
+        local columns = page.bootyLootColumns or {}; page.bootyLootColumns = columns
         local scale = math.min(1, math.max(1, tableWidth - 35) / 250)
         local fontSize
         if page.listRows and page.listRows[1] then local _, size = page.listRows[1].name:GetFont(); fontSize = size end
@@ -1932,7 +1932,7 @@ function RaidManagement.PositionListRow(page, row, rowY, lootMasterMode, tableLe
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", page, "TOPLEFT", tableLeft, rowY)
     if lootMasterMode then
-        local columns = page.mosLootColumns
+        local columns = page.bootyLootColumns
         local srWidth = columns and columns.srWidth or math.max(35, tableWidth - 250)
         local classX, rankX, srX = columns and columns.classX or 105, columns and columns.rankX or 170, columns and columns.srX or 250
         row.name:ClearAllPoints(); row.name:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0); row.name:SetWidth(columns and columns.nameWidth or 90)
@@ -1997,9 +1997,9 @@ local function SetListTextColor(row, color, shade)
 end
 
 function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMasterIndex, lootMasterMode, tableLeft, shorten)
-    if row.mosProjectOutline then
+    if row.bootyProjectOutline then
         local settings = BootyRaiderDB
-        Raider.UI.Components.SetProjectButtonOutline(row, row.mosRaidHovered and settings.raidListShowHoverBorder, settings.raidListHoverBorderSize, settings.raidListHoverBorderColor)
+        Raider.UI.Components.SetProjectButtonOutline(row, row.bootyRaidHovered and settings.raidListShowHoverBorder, settings.raidListHoverBorderSize, settings.raidListHoverBorderColor)
     end
     row.name:SetText(shorten(member.name, 22))
     local memberRank = tonumber(member.raidRank) or 0
@@ -2019,7 +2019,7 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
     local nameInset = leftPadding + (showRole and 17 or 0) + (showLootMaster and 14 or 0)
     row.name:ClearAllPoints()
     row.name:SetPoint("TOPLEFT", row, "TOPLEFT", (lootMasterMode and 0 or page.listPositions[1] - tableLeft) + nameInset, 0)
-    row.name:SetWidth(math.max(1, (lootMasterMode and (page.mosLootColumns and page.mosLootColumns.nameWidth or 90) or page.listWidths[1]) - nameInset))
+    row.name:SetWidth(math.max(1, (lootMasterMode and (page.bootyLootColumns and page.bootyLootColumns.nameWidth or 90) or page.listWidths[1]) - nameInset))
     row.group:SetText(tostring(member.subgroup or ""))
     row.level:SetText(tostring(member.level or ""))
     row.status:SetText(member.online and "Online" or "Offline")
@@ -2109,8 +2109,8 @@ function RaidManagement.CollapseListRow(row, visibleIndex, lootMasterMode, rowSt
 end
 
 function RaidManagement.HideListRow(row)
-    row.mosRaidHovered=nil
-    if row.mosProjectOutline then row.mosProjectOutline:Hide() end
+    row.bootyRaidHovered=nil
+    if row.bootyProjectOutline then row.bootyProjectOutline:Hide() end
     row.displayedMember = nil
     row.crown:Hide(); row.lootMasterIcon:Hide(); row.groupHit:Hide(); row.srHit:Hide(); row.srDelete:Hide(); row.srIcon:Hide(); row.srHit.itemId = nil; row:Hide()
     row.name:Hide(); row.level:Hide(); row.status:Hide(); row.group:Hide()
@@ -2280,14 +2280,14 @@ end
 local function OnGroupSlotEnter()
     if Raider.UI.Components.IsClassicSkin() then Raider.UI.Components.SetClassicRowShade(this, math.mod(this.slotIndex or 1, 2) == 0, true) end
     local settings = GroupSettings(this.groupPage)
-    this.mosRaidHovered = true
+    this.bootyRaidHovered = true
     SetGroupSlotHover(this, settings, true)
     local color = settings.raidGroupHoverColor; Raider.UI.Components.SetRowColor(this, color, 0.98)
     if Raider.dragRaidIndex then Raider.raidDropSlot = this end
 end
 
 local function OnGroupSlotLeave()
-    this.mosRaidHovered = nil
+    this.bootyRaidHovered = nil
     SetGroupSlotHover(this, GroupSettings(this.groupPage), false)
     if Raider.UI.Components.IsClassicSkin() then Raider.UI.Components.SetClassicRowShade(this, math.mod(this.slotIndex or 1, 2) == 0, false) end
     local settings = GroupSettings(this.groupPage)
@@ -2309,7 +2309,7 @@ end
 
 local function GroupGeometry(page, width, height)
     local db = GroupSettings(page)
-    if page.mosCompactGroupWidth and not page.getGroupSettings then
+    if page.bootyCompactGroupWidth and not page.getGroupSettings then
         return RaidManagement.CalculateGroupGeometry(width, height, width < 260 and 1 or 2, width, 20, true, true, 22, 6, db.raidGroupShowBorder)
     end
     local hidden = db.raidGroupHideEmptyGroups
@@ -2318,28 +2318,28 @@ local function GroupGeometry(page, width, height)
 end
 
 function RaidManagement.MeasureGroupHeight(width, page)
-    local geometry = GroupGeometry(page, width, page.mosGroupHeight)
+    local geometry = GroupGeometry(page, width, page.bootyGroupHeight)
     return geometry.contentHeight
 end
 
 function RaidManagement.ResolveGroupViewport(page)
     local width, height
-    if page.mosGroupLayout then
+    if page.bootyGroupLayout then
         local pageWidth, pageHeight = PageSpan(page)
-        width = pageWidth - page.mosGroupLeft - (page.mosCompactGroupWidth and 0 or 4)
-        height = pageHeight + page.mosGroupTop - page.mosGroupBottom
-    else width, height = PageSpan(page.groupFrame); width = width + (page.mosGroupScrollGutter or 0) end
+        width = pageWidth - page.bootyGroupLeft - (page.bootyCompactGroupWidth and 0 or 4)
+        height = pageHeight + page.bootyGroupTop - page.bootyGroupBottom
+    else width, height = PageSpan(page.groupFrame); width = width + (page.bootyGroupScrollGutter or 0) end
     width, height = math.max(1, width), math.max(1, height)
-    page.mosGroupHeight = height
+    page.bootyGroupHeight = height
     local overflow, maximum, measuredHeight
     width, measuredHeight, overflow, maximum = Raider.UI.Components.ResolveScrollLayout(width, height, 20, RaidManagement.MeasureGroupHeight, page)
-    page.mosGroupScrollGutter = overflow and 20 or 0
-    if page.mosGroupLayout then
+    page.bootyGroupScrollGutter = overflow and 20 or 0
+    if page.bootyGroupLayout then
         page.groupFrame:ClearAllPoints()
-        page.groupFrame:SetPoint("TOPLEFT", page, "TOPLEFT", page.mosGroupLeft, page.mosGroupTop)
-        page.groupFrame:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -(page.mosCompactGroupWidth and 0 or 4) - page.mosGroupScrollGutter, page.mosGroupBottom)
+        page.groupFrame:SetPoint("TOPLEFT", page, "TOPLEFT", page.bootyGroupLeft, page.bootyGroupTop)
+        page.groupFrame:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -(page.bootyCompactGroupWidth and 0 or 4) - page.bootyGroupScrollGutter, page.bootyGroupBottom)
     end
-    if page.mosCompactGroupWidth then
+    if page.bootyCompactGroupWidth then
         -- Wheel/clipping geometry uses the same supplied rectangle, even while
         -- native anchored descendants retain bounds from the preceding layout.
         page.groupFrame:SetWidth(width); page.groupFrame:SetHeight(height)
@@ -2373,7 +2373,7 @@ function RaidManagement.RefreshGroupView(page)
     local backgroundColor = settings.raidGroupBackgroundColor
     local textColor = settings.raidGroupTextColor
     local lootMethod, raidLootMasterIndex = renderer.getLootMasterInfo()
-    local compact = page.mosCompactGroupWidth ~= nil
+    local compact = page.bootyCompactGroupWidth ~= nil
     local legacyCompact = compact and not page.getGroupSettings
     local slotHeight = legacyCompact and 20 or tonumber(settings.raidGroupTileHeight) or 22
     local tileTextSize = legacyCompact and 10 or tonumber(settings.raidGroupTileTextSize) or 10
@@ -2413,7 +2413,7 @@ function RaidManagement.RefreshGroupView(page)
         SetFontSize(header, headerTextSize)
         local headerInset = 0
         header:ClearAllPoints(); header:SetPoint("TOPLEFT", panel, "TOPLEFT", headerInset, 0); header:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -headerInset, 0)
-        header.mosFitFontSize = headerTextSize
+        header.bootyFitFontSize = headerTextSize
         Raider.UI.Components.FitButtonLabel(header, math.max(1, panelWidth - headerInset * 2)); header:SetJustifyH("CENTER")
         if header.SetWordWrap then header:SetWordWrap(false) end
         header:SetHeight(math.max(1, headerHeight)); header:SetJustifyV("MIDDLE")
@@ -2427,19 +2427,19 @@ function RaidManagement.RefreshGroupView(page)
             local slotBottom = slotIndex == 5 and bottom or math.floor(top + headerHeight + slotIndex * slotHeight + 0.5)
             slot:ClearAllPoints(); slot:SetPoint("TOPLEFT", page.groupCanvas, "TOPLEFT", x, -slotTop); slot:SetWidth(panelWidth); slot:SetHeight(math.max(1, slotBottom - slotTop))
             Raider.UI.Components.SetAtlasSurface(slot, settings.raidGroupMemberTexture == "game" and groupMemberArtwork or nil)
-            SetGroupSlotHover(slot, settings, slot.mosRaidHovered)
+            SetGroupSlotHover(slot, settings, slot.bootyRaidHovered)
             if settings.raidGroupMemberTexture == "game" then slot.topEdge:Hide(); slot.bottomEdge:Hide()
             else slot.topEdge:Show(); slot.bottomEdge:Show() end
-            slot.mosGroupWidth = panelWidth
+            slot.bootyGroupWidth = panelWidth
             if visible then slot:Show() else slot:Hide() end
             if page.getGroupSettings then
-                slot.empty.mosFitFontSize = tileTextSize; Raider.UI.Components.FitButtonLabel(slot.empty, math.max(1, panelWidth - groupInset * 2 - 4)); slot.empty:SetJustifyH("CENTER")
+                slot.empty.bootyFitFontSize = tileTextSize; Raider.UI.Components.FitButtonLabel(slot.empty, math.max(1, panelWidth - groupInset * 2 - 4)); slot.empty:SetJustifyH("CENTER")
             end
             Raider.UI.Components.SetAlternatingRowColor(slot, backgroundColor, slotIndex, settings.raidGroupOddLightness)
             if settings.raidGroupMemberTexture == "game" then slot:SetBackdropBorderColor(0,0,0,0)
             else
                 slot:SetBackdropBorderColor(0.42,0.42,0.42,1)
-                if slot.mosRaidHovered then Raider.UI.Components.SetRowColor(slot, settings.raidGroupHoverColor, 0.98) end
+                if slot.bootyRaidHovered then Raider.UI.Components.SetRowColor(slot, settings.raidGroupHoverColor, 0.98) end
             end
             Raider.UI.Components.SetClassicRowShade(slot, math.mod(slotIndex, 2) == 0, false)
             slot.empty:SetTextColor(textColor[1] * 0.55, textColor[2] * 0.55, textColor[3] * 0.55); slot.offline:SetTextColor(textColor[1] * 0.55, textColor[2] * 0.55, textColor[3] * 0.55)
@@ -2499,7 +2499,7 @@ function RaidManagement.RefreshGroupView(page)
             local showRoleIcon = settings.raidGroupShowRoleIcon and (tonumber(raidRank) or 0) > 0
             local showLevel = not legacyCompact and online and settings.raidGroupShowLevel
             local showClass = not legacyCompact and settings.raidGroupShowClass
-            local slotWidth = slot.mosGroupWidth
+            local slotWidth = slot.bootyGroupWidth
             local showOffline = not online and (not page.getGroupSettings or not settings.raidGroupShowClass)
             local columns = RaidManagement.CalculateGroupSlotColumns(slotWidth, showRoleIcon, showLootMasterIcon, showLevel, showClass, showOffline, true)
             showRoleIcon, showLootMasterIcon = columns.showRoleIcon, columns.showLootIcon
@@ -2784,7 +2784,7 @@ function RaidManagement.CreateQuickActions(options, loadSelectedRaid)
         RaidManagement.UpdateActionAvailability(page, state.test)
         for index = 1, table.getn(specs or {}) do
             local spec = specs[index]
-            entries[index] = {id = spec.key, text = ToolCaption(spec), icon = spec.source and spec.source.mosClassicIconKey or spec.icon,
+            entries[index] = {id = spec.key, text = ToolCaption(spec), icon = spec.source and spec.source.bootyClassicIconKey or spec.icon,
                 enabled = state.canTools and SourceEnabled(spec.source)}
         end
         return entries
@@ -2873,7 +2873,7 @@ function RaidManagement.UpdateToolSubmenu(page)
     if not panel then
         local specs = ToolSpecs(page, key)
         panel = UI.CreateDropdownPanel(page, toggle, 230, 8 + table.getn(specs) * 24 + (table.getn(specs) - 1) * 4, 80)
-        panel.mosMinimumFrameLevel = page:GetFrameLevel() + 80
+        panel.bootyMinimumFrameLevel = page:GetFrameLevel() + 80
         UI.Window.ApplyProjectSurface(panel)
         UI.RegisterSkinCallback(function() UI.Window.ApplyProjectSurface(panel) end)
         panel:ClearAllPoints(); panel:SetPoint("TOPRIGHT", toggle, "BOTTOMRIGHT", 0, -2)
@@ -2917,10 +2917,10 @@ function RaidManagement.UpdateToolSubmenu(page)
 end
 
 local function PlaceRaidHeaderButton(page, button, width, y, left, scale)
-    button.mosCaptionBottomInset = 4
+    button.bootyCaptionBottomInset = 4
     Raider.UI.Components.SizeClassicButton(button, width, 26, scale)
-    local inset = button.mosClassicIconKey and ((button.mosClassicIconInset or 7) + (button.mosClassicIconSize or 13) + 3) or 0
-    button.mosLabelJustify = (button == page.classicSaved or inset > 0) and "LEFT" or "CENTER"
+    local inset = button.bootyClassicIconKey and ((button.bootyClassicIconInset or 7) + (button.bootyClassicIconSize or 13) + 3) or 0
+    button.bootyLabelJustify = (button == page.classicSaved or inset > 0) and "LEFT" or "CENTER"
     if width > 26 then Raider.UI.Components.FitButtonLabel(button, math.max(1, width - (inset > 0 and inset + 4 or 16))) end
     Raider.UI.Components.ApplyButtonCaptionBaseline(button)
     button:ClearAllPoints(); button:SetPoint("TOPLEFT", page, "TOPLEFT", left, y)
@@ -2936,7 +2936,7 @@ local function PlaceRaidHeaderLabel(page, control, width, y, left)
     local font, size, flags = label:GetFont()
     if size < 9 then label:SetFont(font, 9, flags) end
     if label.SetWordWrap then label:SetWordWrap(false) end
-    if control.label then control.mosCaptionBottomInset = 4; Raider.UI.Components.ApplyButtonCaptionBaseline(control)
+    if control.label then control.bootyCaptionBottomInset = 4; Raider.UI.Components.ApplyButtonCaptionBaseline(control)
     else label:SetHeight(22); label:SetJustifyV("BOTTOM") end
     return left + width + 8
 end
@@ -2952,16 +2952,16 @@ function RaidManagement.LayoutActions(page)
         RestoreHeaderFont(page.classicRaidName); RestoreHeaderFont(page.classicMeta)
         local nameLabel = page.classicRaidName.label or page.classicRaidName
         local metaLabel = page.classicMeta.label or page.classicMeta
-        local raidId = page.classicMeta.mosRaidId or string.gsub(metaLabel:GetText() or "", "^|%s*", "")
+        local raidId = page.classicMeta.bootyRaidId or string.gsub(metaLabel:GetText() or "", "^|%s*", "")
         metaLabel:SetText(raidId)
-        local raidName = page.classicRaidName.mosRaidName or string.gsub(nameLabel:GetText() or "", "^|%s*", "")
+        local raidName = page.classicRaidName.bootyRaidName or string.gsub(nameLabel:GetText() or "", "^|%s*", "")
         nameLabel:SetText("|  " .. raidName)
-        local savedText = page.classicSaved.mosRaidSavedText or page.classicSaved:GetText()
-        page.classicSaved.mosRaidSavedText = savedText
+        local savedText = page.classicSaved.bootyRaidSavedText or page.classicSaved:GetText()
+        page.classicSaved.bootyRaidSavedText = savedText
         page.classicSaved:SetText(savedText)
         if showIssues then
-            page.classicIssues.mosRaidIssuesText = page.classicIssues.mosRaidIssuesText or page.classicIssues:GetText()
-            page.classicIssues:SetText(page.classicIssues.mosRaidIssuesText)
+            page.classicIssues.bootyRaidIssuesText = page.classicIssues.bootyRaidIssuesText or page.classicIssues:GetText()
+            page.classicIssues:SetText(page.classicIssues.bootyRaidIssuesText)
         end
         page.exportButton.label:Show(); page.quitButton.label:Show()
         local nameWidth = math.max(48, nameLabel:GetStringWidth() + 4)
@@ -2986,7 +2986,7 @@ function RaidManagement.LayoutActions(page)
             local gaps = showIssues and 16 or 8
             if iconOnly then
                 if showIssues then
-                    page.classicIssues:SetText(string.gsub(page.classicIssues.mosRaidIssuesText, "[^%d].*$", ""))
+                    page.classicIssues:SetText(string.gsub(page.classicIssues.bootyRaidIssuesText, "[^%d].*$", ""))
                     left = PlaceRaidHeaderButton(page, page.classicIssues, 40, top - actionOffset, left, 1)
                 end
                 left = PlaceRaidHeaderButton(page, page.exportButton, 26, top - actionOffset, left, 1)
@@ -3489,7 +3489,7 @@ function RaidManagement.CreateLootMasterController(options)
 
     local function LayoutToolbar()
         local available = math.max(1, window:GetWidth() - 160)
-        title.mosFitFontSize = 12
+        title.bootyFitFontSize = 12
         title:ClearAllPoints(); title:SetPoint("TOPLEFT", window, "TOPLEFT", 6, window.minimized and -4 or -6)
         UI.FitButtonLabel(title, available); title:SetHeight(window.minimized and 22 or 18)
     end
@@ -3551,7 +3551,7 @@ function RaidManagement.CreateLootMasterController(options)
     local function Build()
         if compact then return end
         compact = UI.CreateContainer(nil, window); compact.detachedLootMaster = true
-        compact.mosLootScrollPrefix = "BootyRaiderDetachedLootScroll"
+        compact.bootyLootScrollPrefix = "BootyRaiderDetachedLootScroll"
         compact:SetPoint("TOPLEFT", window, "TOPLEFT", 4, -4); compact:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -4, 24)
         controller.page = compact
         local source = options.page.rowController
@@ -3811,7 +3811,7 @@ function RaidManagement.AttachActionHandlers(options)
     options.page.getRaidHistory = options.getRaidHistory
     local pendingDeleteRaidId = nil
     StaticPopupDialogs["BOOTY_RAIDER_DELETE_RAID_SNAPSHOT"] = {
-        mosProjectTitle = "Delete Raid", mosProjectOwner = options.page,
+        bootyProjectTitle = "Delete Raid", bootyProjectOwner = options.page,
         text = "Delete this saved raid snapshot?", button1 = "Delete", button2 = "Cancel",
         OnAccept = function()
             if pendingDeleteRaidId and options.deleteRaidSnapshot(pendingDeleteRaidId) then
@@ -4038,8 +4038,8 @@ function RaidManagement.AttachActionHandlers(options)
     -- Keep its pooled window while installing the page-specific callbacks.
     local previousRaidReminder = StaticPopupDialogs["BOOTY_RAIDER_START_RAID_REMINDER"]
     StaticPopupDialogs["BOOTY_RAIDER_START_RAID_REMINDER"] = {
-        mosProjectTitle = "Start Raid", mosProjectOwner = options.page,
-        mosProjectFrame = previousRaidReminder and previousRaidReminder.mosProjectFrame,
+        bootyProjectTitle = "Start Raid", bootyProjectOwner = options.page,
+        bootyProjectFrame = previousRaidReminder and previousRaidReminder.bootyProjectFrame,
         text = "You entered a raid instance without an active Raider raid session.",
         button1 = "No", button2 = "Start New Raid",
         OnAccept = function()

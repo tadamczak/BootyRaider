@@ -56,7 +56,7 @@ function NativeRaidTab.Create(options)
         savedTexture, savedCoords, appliedCoords, portraitOwned = nil, nil, nil, nil
     end
     local function ApplyPortrait()
-        if BootyRaiderDB.useMOSRaidLogo == false then RestorePortrait(); return end
+        if BootyRaiderDB.useBootyRaidLogo == false then RestorePortrait(); return end
         if portraitOwned then return end
         if portraitOwner ~= FriendsFrame then portrait, portraitOwner = nil, FriendsFrame end
         if not portrait and FriendsFrame.GetRegions then
@@ -104,8 +104,8 @@ function NativeRaidTab.Create(options)
         local count = inRaid and 3 or 2
         local available = math.max(count, width - gap * (count - 1))
         local first = math.max(1, math.floor(available / count))
-        panel.invite.mosFlowWidth, panel.ready.mosFlowWidth = first, first
-        panel.info.mosFlowWidth = available - first * (count - 1)
+        panel.invite.bootyFlowWidth, panel.ready.bootyFlowWidth = first, first
+        panel.info.bootyFlowWidth = available - first * (count - 1)
         if inRaid then panel.ready:Show() else panel.ready:Hide() end
         panel.toolbar:SetHeight(UI.LayoutFlow(panel.toolbar, inRaid and panel.toolbarControls or panel.preRaidControls, 0, 0, width, gap))
     end
@@ -118,7 +118,7 @@ function NativeRaidTab.Create(options)
         Raider.Modules.RaidManagement.ApplyGroupViewBackground(panel, settings, true)
         Raider.Modules.RaidManagement.ApplyGroupViewBackground(panel.toolbar, settings, true)
         for index = 1, table.getn(panel.toolbarControls) do
-            UI.SetButtonArtwork(panel.toolbarControls[index], BootyRaiderDB.nativeRaidButtonStyle ~= "mos" and buttonArtwork or nil)
+            UI.SetButtonArtwork(panel.toolbarControls[index], BootyRaiderDB.nativeRaidButtonStyle ~= "booty" and buttonArtwork or nil)
         end
         panel.invite:SetText(inRaid and "Add Member" or "Convert to Raid")
         ApplyPortrait()
@@ -201,11 +201,11 @@ function NativeRaidTab.Create(options)
         panel.toolbar = toolbar; panel.toolbarControls = { panel.invite, panel.ready, panel.info }
         panel.preRaidControls = {panel.invite, panel.info}
         for index = 1, table.getn(panel.toolbarControls) do
-            panel.toolbarControls[index].mosFlowLabelPadding = 6
+            panel.toolbarControls[index].bootyFlowLabelPadding = 6
             local label = panel.toolbarControls[index].label
             if label.SetWordWrap then label:SetWordWrap(false) end
         end
-        panel.invite.mosFlowFitLabel = true; panel.ready.mosFlowFitLabel = true; panel.info.mosFlowFitLabel = true
+        panel.invite.bootyFlowFitLabel = true; panel.ready.bootyFlowFitLabel = true; panel.info.bootyFlowFitLabel = true
         panel.invite:SetScript("OnClick", Invite)
         panel.ready:SetScript("OnClick", function() Raider.Services.Raid.ReadyCheck() end)
         panel.info:SetScript("OnClick", function() if options.openRaidInfo then options.openRaidInfo(FriendsFrame) end end)

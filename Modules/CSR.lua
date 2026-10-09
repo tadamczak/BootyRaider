@@ -28,7 +28,7 @@ local function CreateTestLab(owner, onChanged, onExit)
     for index = 1, 5 do dialog.logLines[index] = UI.CreateLabel(body, nil, "OVERLAY", "GameFontHighlightSmall") end
     local function Action(text, width, callback)
         local button = UI.CreateButton(body, nil, text, width, 26)
-        UI.StyleActionButton(button); button.mosFlowWidth = width
+        UI.StyleActionButton(button); button.bootyFlowWidth = width
         button:SetScript("OnClick", function() callback(dialog.state); dialog:Refresh() end)
         return button
     end
@@ -167,10 +167,10 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     end
     UI.StyleProjectPopup(controller.raidPanel)
     UI.StyleActionButton(controller.testButton)
-    controller.searchGroup=UI.CreateContainer(nil,page);controller.searchGroup:SetWidth(162);controller.searchGroup:SetHeight(26);controller.searchGroup.mosFlowWidth=162
+    controller.searchGroup=UI.CreateContainer(nil,page);controller.searchGroup:SetWidth(162);controller.searchGroup:SetHeight(26);controller.searchGroup.bootyFlowWidth=162
     controller.searchLabel:Hide()
     controller.search:SetParent(controller.searchGroup);controller.search:ClearAllPoints();controller.search:SetPoint("LEFT",controller.searchGroup,"LEFT",0,0);controller.search:SetWidth(162)
-    controller.raidFilter.mosFlowWidth=130;controller.raidFilter:SetHeight(26)
+    controller.raidFilter.bootyFlowWidth=130;controller.raidFilter:SetHeight(26)
     controller.flow={controller.raidFilter,controller.searchGroup}
     controller.headers={controller.playerHeader,controller.itemsHeader,controller.csrHeader}
     controller.measure=UI.CreateLabel(page,nil,"ARTWORK","GameFontHighlightSmall");controller.measure:SetAlpha(0)

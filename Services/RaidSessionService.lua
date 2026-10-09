@@ -40,7 +40,7 @@ function Session:CapturePendingRaid(getPendingId, getPendingName)
         attendance.snapshotId = getPendingId()
         attendance.raidName = getPendingName() or attendance.raidName
         attendance.sessionStartedAt = dependencies.now()
-        attendance.softReserveImport = { id = getPendingId(), origin = "mos", importedAt = dependencies.now(), unmatchedNames = {}, unmatchedReservations = {}, missingNames = {} }
+        attendance.softReserveImport = { id = getPendingId(), origin = "booty", importedAt = dependencies.now(), unmatchedNames = {}, unmatchedReservations = {}, missingNames = {} }
         attendance._sessionDraft = true
     end
     dependencies.database.StoreRaidAttendance(attendance)

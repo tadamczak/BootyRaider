@@ -3,6 +3,24 @@ local Raider = BootyRaider
 Raider.Database = Raider.Database or {}
 local Database = Raider.Database
 
+-- Read the previous durable spellings only at the owner initialization boundary.
+-- A canonical value, including false, always wins over an older preference.
+local legacyPreferenceKeys = {useBootyRaidTab = "useMOSRaidTab", useBootyRaidLogo = "useMOSRaidLogo"}
+local legacyOwnedKeys = {}
+for _, previous in pairs(legacyPreferenceKeys) do legacyOwnedKeys[previous] = true end
+function Database.GetLegacyPreferenceKey(key) return legacyPreferenceKeys[key] end
+function Database.NormalizeNativeRaidButtonStyle(value)
+    if value == "mos" then return "booty" end
+    return value
+end
+local function MigratePreferenceNames(store)
+    for key, previous in pairs(legacyPreferenceKeys) do
+        if store[key] == nil then store[key] = store[previous] end
+        store[previous] = nil
+    end
+    store.nativeRaidButtonStyle = Database.NormalizeNativeRaidButtonStyle(store.nativeRaidButtonStyle)
+end
+
 -- Native Raid settings use their own durable keys; they never inherit the main
 -- addon layout. Compact defaults fit all eight groups in the stock raid panel.
 local nativeRaidGroupFields = {
@@ -61,6 +79,7 @@ end
 
 local function InitializeDefaults(store)
     BootyRaiderDB = store
+    MigratePreferenceNames(store)
     if Raider.Services and Raider.Services.LootMessages then Raider.Services.LootMessages.EnsureDefaults(BootyRaiderDB) end
     if (tonumber(BootyRaiderDB.groupLayoutVersion) or 0) < 2 then
         BootyRaiderDB.raidGroupMargin = 0; BootyRaiderDB.nativeRaidGroupMargin = 0
@@ -107,9 +126,9 @@ local function InitializeDefaults(store)
     BootyRaiderDB.raidGroupOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidGroupOddLightness) or 5))
     BootyRaiderDB.raidListOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidListOddLightness) or 5))
     if BootyRaiderDB.raidHideSectionHeader == nil then BootyRaiderDB.raidHideSectionHeader = false end
-    if BootyRaiderDB.useMOSRaidTab == nil then BootyRaiderDB.useMOSRaidTab = false end
-    if BootyRaiderDB.useMOSRaidLogo == nil then BootyRaiderDB.useMOSRaidLogo = true end
-    if BootyRaiderDB.nativeRaidButtonStyle ~= "mos" then BootyRaiderDB.nativeRaidButtonStyle = "game" end
+    if BootyRaiderDB.useBootyRaidTab == nil then BootyRaiderDB.useBootyRaidTab = false end
+    if BootyRaiderDB.useBootyRaidLogo == nil then BootyRaiderDB.useBootyRaidLogo = true end
+    if BootyRaiderDB.nativeRaidButtonStyle ~= "booty" then BootyRaiderDB.nativeRaidButtonStyle = "game" end
     EnsureNativeRaidGroupSettings()
     if BootyRaiderDB.raidLiveTrackingEnabled == nil then BootyRaiderDB.raidLiveTrackingEnabled = false end
     local raidGroupColumns = tonumber(BootyRaiderDB.raidGroupColumns) or 2
@@ -168,14 +187,14 @@ local function InitializeDefaults(store)
 end
 
 local ownedExact = {
-    groupLayoutVersion=true, useMOSRaidTab=true, useMOSRaidLogo=true,
+    groupLayoutVersion=true, useBootyRaidTab=true, useBootyRaidLogo=true,
     outOfFocusOpacity=true, reyCoinPanelWidth=true, reyCoinPanelHeight=true,
     masterLootWindowWidth=true, masterLootWindowHeight=true,
     lootRulesByRank=true, highlyContestedItems=true, highlyContestedItemsCustomized=true,
     softReserveHistory=true, presentation=true,
 }
 function Database.OwnsField(key)
-    return type(key)=="string" and (ownedExact[key] or string.find(key,"^raid")
+    return type(key)=="string" and (ownedExact[key] or legacyOwnedKeys[key] or string.find(key,"^raid")
         or string.find(key,"^nativeRaid") or string.find(key,"^lm") or string.find(key,"^lootMaster") or string.find(key,"^csr")) and true or false
 end
 function Database.Ensure()

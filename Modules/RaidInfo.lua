@@ -81,7 +81,7 @@ function RaidInfo.Create(parent, service)
             bar:ClearAllPoints(); bar:SetWidth(16); bar:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -74); bar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -10, 26)
         end
         if scroll.UpdateScrollChildRect then scroll:UpdateScrollChildRect() end
-        UI.ApplyScrollRange(scroll, bar, maximum); scroll.mosRaidInfoMaximum = maximum
+        UI.ApplyScrollRange(scroll, bar, maximum); scroll.bootyRaidInfoMaximum = maximum
         if table.getn(entries) > 0 then empty:Hide(); scroll:Show()
         else empty:SetText(available and "You have no saved instances." or "Saved instance information is unavailable."); empty:Show(); scroll:Hide() end
     end
@@ -97,7 +97,7 @@ function RaidInfo.Create(parent, service)
     scroll:EnableMouseWheel(true)
     scroll:SetScript("OnMouseWheel", function()
         if not active then return end
-        local maximum = scroll.mosRaidInfoMaximum or 0
+        local maximum = scroll.bootyRaidInfoMaximum or 0
         local offset = math.max(0, math.min(maximum, scroll:GetVerticalScroll() - (tonumber(arg1) or 0) * 28))
         scroll:SetVerticalScroll(offset); if bar then bar:SetValue(offset) end
     end)

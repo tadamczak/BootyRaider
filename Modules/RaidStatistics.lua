@@ -252,7 +252,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     UI.SetSurfaceHorizontalBorders(controller.filterPanel,true,true)
     controller.filterTitle:Hide()
     local function Group(width)
-        local group=UI.CreateContainer(nil,controller.filterPanel);group:SetWidth(width);group:SetHeight(26);group.mosFlowWidth=width;return group
+        local group=UI.CreateContainer(nil,controller.filterPanel);group:SetWidth(width);group:SetHeight(26);group.bootyFlowWidth=width;return group
     end
     controller.searchGroup=Group(166)
     controller.searchLabel:Hide()
@@ -264,7 +264,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         field:SetParent(group);field:ClearAllPoints();field:SetPoint("LEFT",group,"LEFT",key=="from" and 32 or 16,0);field:SetWidth(76)
         picker:SetParent(group);picker:ClearAllPoints();picker:SetPoint("LEFT",field,"RIGHT",2,0);picker:SetWidth(18);picker:SetHeight(18)
     end
-    controller.raidFilter:SetHeight(26);controller.raidFilter.mosFlowWidth=130
+    controller.raidFilter:SetHeight(26);controller.raidFilter.bootyFlowWidth=130
     controller.flow={controller.raidFilter,controller.searchGroup,controller.fromGroup,controller.toGroup}
     for _,dialog in ipairs({controller.removeDialog,controller.editDialog}) do
         dialog:SetWidth(320)
@@ -419,9 +419,9 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
                 button.dateText:ClearAllPoints();button.dateText:SetPoint("LEFT",button,"LEFT",nameWidth+raidWidth,0);button.dateText:SetWidth(timeWidth-4);button.dateText:SetJustifyH("LEFT");button.dateText:SetText(date("%Y-%m-%d",tonumber(raid.savedAt) or 0));button.dateText:Show();button.allText:Hide()
                 button.allText:SetText(tostring(raid.id) .. " | " .. tostring(raid.raidName or "Unknown") .. " | " .. date("%Y-%m-%d",tonumber(raid.savedAt) or 0))
                 local selected = self.selectedHistoryIds[raid.id] and true or false; button:Show()
-                button.mosClassicSelected=false
+                button.bootyClassicSelected=false
                 Raider.UI.Components.StyleSelectableTableRow(button,math.mod(logicalIndex,2)==0,selected)
-            else button.mosClassicSelected=false;button.mosTableRowSelected=false;UI.SetProjectButtonOutline(button,false);button:Hide() end
+            else button.bootyClassicSelected=false;button.bootyTableRowSelected=false;UI.SetProjectButtonOutline(button,false);button:Hide() end
         end
         self.emptyHistory:ClearAllPoints();self.emptyHistory:SetPoint("TOPLEFT",page,"TOPLEFT",rect.x,-rect.y-4);self.emptyHistory:SetWidth(historyWidth)
         if not self.historyCollapsed and table.getn(entries)==0 then self.emptyHistory:Show() else self.emptyHistory:Hide() end

@@ -83,10 +83,15 @@ function Settings.Get()
         Field("outOfFocusOpacity","Out of focus opacity (%)","number",{"Addon UI","Raid","Loot Master Mode"},0,100)
         GroupFields("raidGroup",{"Addon UI","Raid","Layout","Group view"})
         GroupFields("nativeRaidGroup",{"Game UI","Layout","Raid","Group view"})
-        Field("useMOSRaidTab","Use BootyRaider as default Raid tab","checkbox",{"Game UI","Interface"})
-        Field("useMOSRaidLogo","Use Booty logo","checkbox",{"Game UI","Interface"},nil,nil,nil,function(store) return store.useMOSRaidTab==true end)
-        Field("nativeRaidButtonStyle","Action button style","choice",{"Game UI","Layout","Raid","Appearance"},nil,nil,
-            {{text="Game texture",value="game"},{text="Booty red",value="mos"}})
+        local nativeTab=Field("useBootyRaidTab","Use BootyRaider as default Raid tab","checkbox",{"Game UI","Interface"})
+        nativeTab.legacyKey=Raider.Database.GetLegacyPreferenceKey(nativeTab.key)
+        nativeTab.retiredKey=nativeTab.legacyKey
+        local nativeLogo=Field("useBootyRaidLogo","Use Booty logo","checkbox",{"Game UI","Interface"},nil,nil,nil,function(store) return store.useBootyRaidTab==true end)
+        nativeLogo.legacyKey=Raider.Database.GetLegacyPreferenceKey(nativeLogo.key)
+        nativeLogo.retiredKey=nativeLogo.legacyKey
+        local buttonStyle=Field("nativeRaidButtonStyle","Action button style","choice",{"Game UI","Layout","Raid","Appearance"},nil,nil,
+            {{text="Game texture",value="game"},{text="Booty red",value="booty"}})
+        buttonStyle.readSaved=Raider.Database.NormalizeNativeRaidButtonStyle
         local listPath={"Addon UI","Raid","Layout","List view","Display"}
         for _,definition in ipairs({{"Name","Show name"},{"Level","Show level"},{"Status","Show status"},{"Group","Show group"},
             {"Class","Show class"},{"GuildRank","Show guild rank"},{"SR","Show SR"},{"LootMaster","Show LM icon"},{"RoleIcon","Show role icon"},

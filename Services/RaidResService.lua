@@ -263,7 +263,7 @@ local function EnsureSnapshotImport(attendance)
     local importInfo = attendance.softReserveImport
     if not importInfo then
         attendance.snapshotId = attendance.snapshotId or ((attendance.raidName or "raid") .. "-" .. time())
-        importInfo = { id = attendance.snapshotId, origin = "mos", importedAt = time(), unmatchedNames = {}, unmatchedReservations = {}, missingNames = {} }
+        importInfo = { id = attendance.snapshotId, origin = "booty", importedAt = time(), unmatchedNames = {}, unmatchedReservations = {}, missingNames = {} }
         attendance.softReserveImport = importInfo
     end
     return importInfo
