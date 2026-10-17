@@ -29,8 +29,18 @@ local function SaveRequest(options, attendance)
     raidId = string.gsub(string.gsub(raidId, "^%s+", ""), "%s+$", "")
     if raidId == "" then return nil, "Raid ID is required." end
     if string.len(raidId) > 80 or string.find(raidId, "%c") then return nil, "Raid ID must contain at most 80 bytes without control characters." end
+    local previousEnd = attendance and tonumber(attendance.endedAt)
+    local modifyEnd = options.modifyRaidEndTime == true
+    if modifyEnd and not previousEnd then return nil,"This raid does not have an end time to modify." end
+    local endedAt = previousEnd
+    if modifyEnd then endedAt = tonumber(options.endedAt) end
+    if modifyEnd and (not endedAt or endedAt - endedAt ~= 0 or endedAt ~= math.floor(endedAt)) then
+        return nil,"Enter a valid raid end time."
+    end
     return {raidId = raidId, saveRaidStatistics = options.saveRaidStatistics and true or false,
-        saveAttendance = options.saveAttendance and true or false, saveCSR = options.saveCSR and true or false}
+        saveAttendance = options.saveAttendance and true or false, saveCSR = options.saveCSR and true or false,
+        saveRaidEndTime = not previousEnd and options.saveRaidEndTime == true or false,
+        modifyRaidEndTime = modifyEnd, endedAt = endedAt}
 end
 
 function Session:PrepareSave(options)
@@ -41,7 +51,8 @@ function Session:PrepareSave(options)
     local canonical, snapshot, statistic = self.dependencies.database.GetSavedRaidState(request.raidId)
     request.raidId = canonical or request.raidId
     local confirmation = {attendance = attendance, raidId = request.raidId, snapshot = snapshot, statistic = statistic,
-        saveRaidStatistics = request.saveRaidStatistics, saveAttendance = request.saveAttendance, saveCSR = request.saveCSR}
+        saveRaidStatistics = request.saveRaidStatistics, saveAttendance = request.saveAttendance, saveCSR = request.saveCSR,
+        saveRaidEndTime = request.saveRaidEndTime, modifyRaidEndTime = request.modifyRaidEndTime, endedAt = request.endedAt}
     self.preparedSave = confirmation
     request.confirmation = confirmation
     return request, canonical ~= nil
@@ -74,6 +85,7 @@ function Session:CapturePendingRaid(getPendingId, getPendingName)
         attendance.snapshotId = getPendingId()
         attendance.raidName = getPendingName() or attendance.raidName
         attendance.sessionStartedAt = dependencies.now()
+        attendance.createdAt = attendance.sessionStartedAt
         attendance.softReserveImport = { id = getPendingId(), origin = "booty", importedAt = dependencies.now(), unmatchedNames = {}, unmatchedReservations = {}, missingNames = {} }
         attendance._sessionDraft = true
         attendance.lootRules = dependencies.database.CopyLootRules(dependencies.database.GetDefaultLootRules())
@@ -158,7 +170,8 @@ function Session:Complete(saveOptions)
             if confirmation ~= self.preparedSave or not confirmation or confirmation.attendance ~= attendance
                 or confirmation.raidId ~= request.raidId or confirmation.snapshot ~= snapshot or confirmation.statistic ~= statistic
                 or confirmation.saveRaidStatistics ~= request.saveRaidStatistics or confirmation.saveAttendance ~= request.saveAttendance
-                or confirmation.saveCSR ~= request.saveCSR then
+                or confirmation.saveCSR ~= request.saveCSR or confirmation.saveRaidEndTime ~= request.saveRaidEndTime
+                or confirmation.modifyRaidEndTime ~= request.modifyRaidEndTime or confirmation.endedAt ~= request.endedAt then
                 self:CancelPreparedSave(confirmation)
                 return false, "The raid or save destination changed. Review the save options and try again."
             end
@@ -169,11 +182,17 @@ function Session:Complete(saveOptions)
         local staged, key, value = {}, nil, nil
         for key, value in pairs(attendance) do staged[key] = value end
         staged.snapshotId, staged._loadedSnapshotId = request.raidId, nil
-        local savedAt, previous = dependencies.now(), snapshot or statistic
+        local savedAt = dependencies.now()
+        local endedAt = request.saveRaidEndTime and savedAt or request.endedAt
+        local startedAt = tonumber(attendance.sessionStartedAt or attendance.createdAt)
+        if endedAt and (not startedAt or endedAt < startedAt or endedAt > savedAt) then
+            return false,"Raid end time must be between the raid start and the current time."
+        end
         staged.lastSavedAt, staged._sessionDraft = savedAt, nil
-        staged.createdAt = tonumber(previous and (previous.createdAt or previous.startedAt or previous.savedAt or previous.updatedAt)) or savedAt
+        staged.createdAt = tonumber(attendance.createdAt or attendance.sessionStartedAt) or savedAt
         staged.modifiedAt = savedAt
-        staged.duration = tonumber(attendance.duration) or math.max(0, savedAt - (tonumber(attendance.sessionStartedAt) or savedAt))
+        staged.endedAt = endedAt
+        staged.duration = endedAt and endedAt - startedAt or nil
         staged.saveOptions = {saveRaidStatistics = request.saveRaidStatistics, saveAttendance = request.saveAttendance, saveCSR = request.saveCSR}
         local entry
         if request.saveRaidStatistics or request.saveCSR then

@@ -483,12 +483,101 @@ function Database.UpdateRaidStatisticFlags(raidId, attendanceEnabled, csrEnabled
     return true
 end
 
-function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnabled)
+local function CleanRaidText(value)
+    return string.gsub(string.gsub(tostring(value or ""), "^%s+", ""), "%s+$", "")
+end
+
+local function CopySavedRecord(source)
+    if type(source) ~= "table" then return source end
+    local result = {}
+    for key, value in pairs(source) do result[key] = CopySavedRecord(value) end
+    return result
+end
+
+local function IsRaidType(value)
+    local service = Raider.Services and Raider.Services.RaidStatistics
+    if not service or not service.GetRaidNames then return false end
+    for _, name in ipairs(service.GetRaidNames()) do if value == name then return true end end
+    return false
+end
+
+-- Metadata edits rename one saved identity. They never load a session, copy a
+-- raid, or rewrite its source timestamps, rules and contribution choices.
+function Database.UpdateRaidMetadata(raidId, metadata)
+    Database.Ensure()
+    if type(metadata) ~= "table" then return false, "Raid details are required." end
+    local id = CleanRaidText(metadata.id)
+    local editDisplayName = metadata.displayName ~= nil
+    local displayName = CleanRaidText(metadata.displayName)
+    if id == "" then return false, "Raid ID is required." end
+    if string.len(id) > 80 or string.find(id, "%c") then return false, "Raid ID must contain at most 80 printable characters." end
+    if string.len(displayName) > 120 or string.find(displayName, "%c") then return false, "Name must contain at most 120 printable characters." end
+    if not IsRaidType(metadata.raidName) then return false, "Choose a valid raid type." end
+    local snapshotId, snapshot = FindSavedRaid(BootyRaiderDB.softReserveHistory, raidId)
+    local statisticId, statistic = FindSavedRaid(BootyRaiderDB.raidStatistics, raidId)
+    if not snapshot and not statistic then return false, "This saved raid no longer exists." end
+    local active = BootyRaiderDB.raidAttendance
+    local wanted = string.lower(tostring(raidId or ""))
+    local matchesActive = active and (string.lower(tostring(active.snapshotId or "")) == wanted
+        or string.lower(tostring(active._loadedSnapshotId or "")) == wanted)
+    if matchesActive and id ~= (snapshotId or statisticId) then
+        return false, "Finish or end the current raid before renaming its ID."
+    end
+    for _, history in ipairs({BootyRaiderDB.softReserveHistory or {}, BootyRaiderDB.raidStatistics or {}}) do
+        local targetId = FindSavedRaid(history, id)
+        if targetId and string.lower(tostring(targetId)) ~= string.lower(tostring(raidId)) then
+            return false, "This raid ID already exists. Choose a different ID."
+        end
+    end
+    local now = time()
+    local sources = {{BootyRaiderDB.softReserveHistory, snapshotId, snapshot}, {BootyRaiderDB.raidStatistics, statisticId, statistic}}
+    local replacements = {}
+    for index = 1, 2 do
+        local source = sources[index]
+        if source[3] then
+            local copy = CopySavedRecord(source[3])
+            copy.id = id
+            if editDisplayName then copy.displayName = displayName ~= "" and displayName or nil end
+            copy.raidName = metadata.raidName; copy.modifiedAt = now
+            replacements[index] = copy
+        end
+    end
+    local activeReplacement
+    if matchesActive then
+        -- Replace only the workspace owner; live member/loot references remain
+        -- valid, while a prepared Save bound to the former owner becomes stale.
+        activeReplacement = {}
+        for key, value in pairs(active) do activeReplacement[key] = value end
+        activeReplacement.raidName = metadata.raidName
+        if editDisplayName then activeReplacement.displayName = displayName ~= "" and displayName or nil end
+        if Database.onRaidAttendanceMetadataChanged then Database.onRaidAttendanceMetadataChanged(active, activeReplacement) end
+    end
+    for index = 1, 2 do
+        local source, replacement = sources[index], replacements[index]
+        if replacement then
+            local history, previousId = source[1], source[2]
+            history.raids[previousId] = nil; history.raids[id] = replacement
+            for orderIndex = 1, table.getn(history.order or {}) do
+                if history.order[orderIndex] == previousId then history.order[orderIndex] = id end
+            end
+        end
+    end
+    if activeReplacement then Database.StoreRaidAttendance(activeReplacement) end
+    return true, id
+end
+
+function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnabled,raidName)
     Database.Ensure()
     local history=BootyRaiderDB.raidStatistics
-    local entry=history and history.raids and history.raids[raidId]
+    local canonical,entry=FindSavedRaid(history,raidId)
     if not entry or type(members)~="table" then return false end
+    if raidName then
+        local updated, reason = Database.UpdateRaidMetadata(canonical, {id=canonical,raidName=raidName})
+        if not updated then return false, reason end
+        entry=history.raids[canonical]
+    end
     entry.members=members;entry.attendanceEnabled=attendanceEnabled and true or false;entry.csrEnabled=csrEnabled and true or false
+    entry.modifiedAt=time()
     return true
 end
 

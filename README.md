@@ -26,7 +26,11 @@ New sessions capture the physical raid independently of guild membership. Save R
 
 Loot Rules belong to the current raid. Unsaved changes do not change saved CSR. Saving an existing Raid ID asks before replacing it; a different ID creates an independent copy. Each raid keeps its own save choices. CSR uses only raids saved with **Save CSR** and their saved eligibility rules. Loading a saved raid accepts that session immediately.
 
-Saved raids show **Duration**, **Created At** and **Modified At**. Editing a saved raid preserves its duration; Save As creates a new record without changing the original raid date. The **Issues** button shows or hides Soft Reserve warnings.
+Saved raids show **Duration**, **Created At** and **Modified At**. Duration uses the recorded raid end and displays, for example, **1h 05min 09s**. **Save raid end time** records the end when saving; **Modify raid end time** enables changing an existing end in **DD.MM.YYYY HH:MM:SS** format. Without a recorded end, duration is **Unknown**. Editing or copying a raid preserves its original creation date and recorded end.
+
+Use **Edit** beside a saved raid to change its ID, optional name and raid type. Raid Stats also lets you change the type. Finish an active raid before renaming its ID. Saving metadata offers the usual reload prompt. The **Issues** button minimizes or restores Soft Reserve warnings.
+
+Loot Master message settings are grouped by topic. Each text field shows a complete example that updates while you edit, including your prefix and whisper preference.
 
 In Raid Stats, **Select all** selects or clears the currently filtered raids. Search also matches players and partial item names. Names saved with the raid are searchable even without the client cache; older records containing only item IDs need cached names.
 

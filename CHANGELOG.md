@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-dev.17 — 2026-10-17
+
+- Record and optionally edit the actual raid end time; format duration as hours, minutes and seconds.
+- Edit saved raid IDs, names and types from history and change raid type in Raid Stats.
+- Use Created At for CSR expiration and match nested tables to the Profiler style.
+- Minimize and restore warning cards with Issues.
+- Group Loot Master messages by topic and preview their full text while editing.
+
 ## 0.1.0-dev.16 — 2026-10-17
 
 - Close stale session prompts after saving or ending a raid and guard obsolete Continue actions.

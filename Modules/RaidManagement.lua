@@ -85,14 +85,15 @@ function RaidManagement.CreateChrome(page, callbacks)
     Raider.UI.Components.AttachTooltip(view.classicIssues, "Raid issues", "Review missing, invalid or unmatched Soft Reserves.")
     view.classicIssues:SetScript("OnClick", function()
         Raider.UI.Components.SetAttentionPulse(view.classicIssues, false)
-        local visible = page.softReserveWarning and page.softReserveWarning:IsShown()
-            or page.missingSoftReserveWarning and page.missingSoftReserveWarning:IsShown()
-            or page.invalidSoftReserveWarning and page.invalidSoftReserveWarning:IsShown()
-        page.bootyIssuesHidden = visible and true or false
+        local collapse = false
         for _, card in ipairs({page.softReserveWarning, page.missingSoftReserveWarning, page.invalidSoftReserveWarning}) do
-            card.userDismissed = false; card.userMinimized = false; card.forceExpanded = true
+            if card:IsShown() and not card.docked then collapse=true end
         end
-        if page.bootyIssuesHidden then RaidManagement.HideSoftReserveWarnings(page) end
+        page.bootyIssuesHidden = nil
+        RaidManagement.HideSoftReserveWarnings(page)
+        for _, card in ipairs({page.softReserveWarning, page.missingSoftReserveWarning, page.invalidSoftReserveWarning}) do
+            card.userDismissed = false; card.userMinimized = collapse; card.forceExpanded = not collapse
+        end
         if page.resizeRefresh then page.resizeRefresh() end
     end)
     page.classicRaidName = view.classicRaidName; page.classicMeta = view.classicMeta; page.classicSaved = view.classicSaved; page.classicIssues = view.classicIssues
@@ -407,6 +408,7 @@ function RaidManagement.CreateActionControls(page)
     controls.historyButtons = {}
     controls.historyDeleteButtons = {}
     controls.historyLoadButtons = {}
+    controls.historyEditButtons = {}
     controls.historyHeaders = {}
     for index, text in ipairs({"#", "Name", "Raid", "Duration", "Created At", "Modified At"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
     local historyIndex
@@ -428,6 +430,10 @@ function RaidManagement.CreateActionControls(page)
         load.historyIndex = historyIndex; load:Hide()
         Raider.UI.Components.AttachTooltip(load, "Load raid", "Open this saved raid snapshot.")
         controls.historyLoadButtons[historyIndex] = load
+        local edit = Raider.UI.Components.CreateIconButton(controls.historyCanvas, nil, "Interface\\Icons\\INV_Misc_Note_01", 18, 2)
+        edit.historyIndex = historyIndex; edit:Hide()
+        Raider.UI.Components.AttachTooltip(edit, "Edit raid", "Change this saved raid's ID, name and raid type.")
+        controls.historyEditButtons[historyIndex] = edit
     end
     controls.historyEmpty = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontDisable"); controls.historyEmpty:SetText("No raids to load"); controls.historyEmpty:Hide()
     controls.addStatistics = Raider.UI.Components.CreateButton(page, nil, "Add to Raid Statistics", 132, 22); controls.addStatistics:Hide()
@@ -1077,6 +1083,7 @@ function RaidManagement.MountChrome(page, chrome, actions)
         historyButtons = actions.historyButtons,
         historyDeleteButtons = actions.historyDeleteButtons,
         historyLoadButtons = actions.historyLoadButtons,
+        historyEditButtons = actions.historyEditButtons,
         historyHeaders = actions.historyHeaders,
         historyScroll = actions.historyScroll, historyCanvas = actions.historyCanvas,
         historyEmpty = actions.historyEmpty,
@@ -1397,7 +1404,6 @@ function RaidManagement.UpdateViewSelector(page, lootMasterMode)
 end
 
 function RaidManagement.LayoutSoftReserveWarnings(page, lootMasterMode, side, issues)
-    if page.bootyIssuesHidden then RaidManagement.HideSoftReserveWarnings(page); page.classicWarningBottom=0; return 0,0 end
     -- A full refresh shares its freshly computed issues with the header. Direct
     -- layout calls still resolve current data; no result is retained on the page.
     if not issues then
@@ -3847,6 +3853,13 @@ function RaidManagement.AttachActionHandlers(options)
     options.page.contestedItemsDialog = contestedItemsDialog
     options.page.softReserveImportDialog = importDialog
     options.page.getRaidHistory = options.getRaidHistory
+    local editRaidDialog = Raider.Modules.RaidEdit.Create("BootyRaiderEditRaidDialog", options.page, options.updateRaidMetadata,
+        function(previousId, nextId)
+            if options.page.selectedRaidHistoryId == previousId then options.page.selectedRaidHistoryId = nextId end
+            RaidManagement.ShowRaidHistoryControls(options.page, controls, options.isInRaid())
+            options.refresh()
+        end, options.showSavedPopup)
+    options.page.editRaidDialog = editRaidDialog
     local pendingDeleteRaidId = nil
     StaticPopupDialogs["BOOTY_RAIDER_DELETE_RAID_SNAPSHOT"] = {
         bootyProjectTitle = "Delete Raid", bootyProjectOwner = options.page,
@@ -3875,6 +3888,10 @@ function RaidManagement.AttachActionHandlers(options)
             if not snapshot then return end
             pendingDeleteRaidId = snapshot.id
             Raider.UI.Components.ShowOpaquePopup("BOOTY_RAIDER_DELETE_RAID_SNAPSHOT")
+        end)
+        controls.historyEditButtons[historyIndex]:SetScript("OnClick", function()
+            local snapshot = options.page.raidHistorySnapshots and options.page.raidHistorySnapshots[this.historyIndex]
+            if snapshot then editRaidDialog:Open(snapshot) end
         end)
     end
     local liveLoadDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderLiveLoad", "Live Tracking", "Yes", "refresh")
@@ -3948,7 +3965,7 @@ function RaidManagement.AttachActionHandlers(options)
     end)
     local sessionPrompt
     local saveDialog = Raider.UI.Components.CreateContainer("BootyRaiderSaveRaidSessionDialog", UIParent)
-    saveDialog:SetWidth(300); saveDialog:SetHeight(218); saveDialog:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+    saveDialog:SetWidth(340); saveDialog:SetHeight(250); saveDialog:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
     saveDialog:EnableMouse(true)
     saveDialog:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 6, right = 6, top = 6, bottom = 6 } })
     saveDialog:SetBackdropColor(0.03, 0.025, 0.02, 1)
@@ -3969,6 +3986,17 @@ function RaidManagement.AttachActionHandlers(options)
     saveDialog.statistics = CreateSaveCheckbox("Save raid statistics", -88)
     saveDialog.attendance = CreateSaveCheckbox("Save attendance", -116)
     saveDialog.csr = CreateSaveCheckbox("Save CSR", -144)
+    saveDialog.endTimeLabel = Raider.UI.Components.CreateLabel(saveDialog,nil,"OVERLAY","GameFontHighlightSmall")
+    saveDialog.endTimeLabel:SetPoint("TOPLEFT",saveDialog,"TOPLEFT",18,-70); saveDialog.endTimeLabel:SetText("Raid end time:")
+    saveDialog.raidEndTime = Raider.UI.Components.CreateFramedEditBox(saveDialog,nil,180)
+    saveDialog.raidEndTime:SetPoint("LEFT",saveDialog.endTimeLabel,"RIGHT",8,0);saveDialog.raidEndTime:SetMaxLetters(19);saveDialog.raidEndTime:SetAutoFocus(false)
+    saveDialog.endTimeCheck = CreateSaveCheckbox("Save raid end time", -70)
+    local function SyncEndTimeInput()
+        local editable = saveDialog.hasEndTime and saveDialog.endTimeCheck:GetChecked()
+        Raider.UI.Components.Settings.SetTextFieldEnabled(saveDialog.raidEndTime,editable)
+        if saveDialog.hasEndTime and not editable then saveDialog.raidEndTime:SetText(Raider.Services.RaidRes.FormatRaidEndTime(saveDialog.originalEndTime)) end
+    end
+    saveDialog.endTimeCheck:SetScript("OnClick",SyncEndTimeInput)
     local function SyncAttendanceOption()
         if saveDialog.statistics:GetChecked() then
             saveDialog.attendance:Enable(); saveDialog.attendance.label:SetTextColor(1, 1, 1)
@@ -4028,8 +4056,17 @@ function RaidManagement.AttachActionHandlers(options)
         local saveStatistics = saveDialog.statistics:GetChecked() and true or false
         local saveAttendance = saveStatistics and saveDialog.attendance:GetChecked() and true or false
         local saveCSR = saveDialog.csr:GetChecked() and true or false
+        local modifyEnd = saveDialog.hasEndTime and saveDialog.endTimeCheck:GetChecked() and true or false
+        local endedAt
+        if modifyEnd then
+            local message
+            endedAt,message = Raider.Services.RaidRes.ParseRaidEndTime(saveDialog.raidEndTime:GetText())
+            if not endedAt then SaveFailure(message);return end
+        end
         CancelPreparedSave()
-        local request, exists = options.prepareRaidSave({raidId=raidId,saveRaidStatistics=saveStatistics,saveAttendance=saveAttendance,saveCSR=saveCSR})
+        local request, exists = options.prepareRaidSave({raidId=raidId,saveRaidStatistics=saveStatistics,saveAttendance=saveAttendance,saveCSR=saveCSR,
+            saveRaidEndTime=not saveDialog.hasEndTime and saveDialog.endTimeCheck:GetChecked() and true or false,
+            modifyRaidEndTime=modifyEnd,endedAt=endedAt})
         if not request then SaveFailure(exists); return end
         pendingSaveRequest = request
         if exists then
@@ -4045,6 +4082,19 @@ function RaidManagement.AttachActionHandlers(options)
         local attendance=options.getAttendance and options.getAttendance()
         self.attendanceOwner=attendance
         local flags=attendance and attendance.saveOptions
+        self.originalEndTime=attendance and tonumber(attendance.endedAt)
+        self.hasEndTime=self.originalEndTime~=nil
+        local offset=self.hasEndTime and 28 or 0
+        self:SetHeight(250+offset)
+        self.endTimeCheck:ClearAllPoints();self.endTimeCheck:SetPoint("TOPLEFT",self,"TOPLEFT",18,-70-offset)
+        self.endTimeCheck.label:SetText(self.hasEndTime and "Modify raid end time" or "Save raid end time")
+        self.endTimeCheck:SetChecked(not self.hasEndTime and attendance and not attendance._loadedSnapshotId)
+        if self.hasEndTime then self.endTimeLabel:Show();self.raidEndTime:Show() else self.endTimeLabel:Hide();self.raidEndTime:Hide() end
+        self.error:ClearAllPoints();self.error:SetPoint("TOPLEFT",self,"TOPLEFT",18,-98-offset);self.error:SetWidth(304);self.error:SetHeight(22)
+        self.statistics:ClearAllPoints();self.statistics:SetPoint("TOPLEFT",self,"TOPLEFT",18,-126-offset)
+        self.attendance:ClearAllPoints();self.attendance:SetPoint("TOPLEFT",self,"TOPLEFT",18,-154-offset)
+        self.csr:ClearAllPoints();self.csr:SetPoint("TOPLEFT",self,"TOPLEFT",18,-182-offset)
+        SyncEndTimeInput()
         self.statistics:SetChecked(not flags or flags.saveRaidStatistics); self.attendance:SetChecked(not flags or flags.saveAttendance); self.csr:SetChecked(not flags or flags.saveCSR)
         self.raidId:SetText(attendance and (attendance.snapshotId or (attendance.softReserveImport and attendance.softReserveImport.id)) or "")
         self.error:Hide();SyncAttendanceOption(); self:Show();self.raidId:SetFocus();self.raidId:HighlightText()

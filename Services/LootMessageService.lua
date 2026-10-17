@@ -33,8 +33,20 @@ Messages.Definitions = {
 }
 Messages.SettingKeys = {}
 local definitions = {}
+local messageGroups = {
+    Prefix = "General",
+    ItemRoll = "Rolling", PlayerRoll = "Rolling", Reroll = "Rolling", Extended = "Rolling", Tie = "Rolling",
+    NoValidRolls = "Rolling", NoRolls = "Rolling", Stopped = "Rolling", Countdown = "Rolling",
+    WrongRoll = "Rolling", CannotRoll = "Rolling",
+    SRPlayers = "Soft Reserves", SRLink = "Soft Reserves", MissingSR = "Soft Reserves",
+    InvalidSR = "Soft Reserves", InvalidSRNotice = "Soft Reserves",
+    TradeWinner = "Loot", SRWinner = "Loot", Winner = "Loot", RaidWinner = "Loot",
+    RaidUnavailable = "Loot", TradeConfirmed = "Loot",
+    RulesHeader = "Loot rules", RankRules = "Loot rules",
+}
 for index = 1, table.getn(Messages.Definitions) do
     local definition = Messages.Definitions[index]
+    definition.group = assert(messageGroups[definition[1]], "Loot message has no settings group.")
     definition.textKey = "lmMessage" .. definition[1] .. "Text"
     definition.enabledKey = "lmMessage" .. definition[1] .. "Enabled"
     definitions[definition[1]] = definition
@@ -54,18 +66,29 @@ function Messages.EnsureDefaults(settings)
     end
 end
 
-local function Text(definition)
-    local settings = BootyRaiderDB or {}
-    if settings[definition.enabledKey] == false then return nil end
-    local value = settings[definition.textKey]
+local function Text(definition, settings, drafts, includeDisabled)
+    settings = settings or BootyRaiderDB or {}
+    if not includeDisabled and settings[definition.enabledKey] == false then return nil end
+    local value = drafts and drafts[definition.textKey]
+    if value == nil then value = settings[definition.textKey] end
     return type(value) == "string" and value or definition[3]
 end
 
-function Messages.Prefix(message)
-    local prefix = Text(definitions.Prefix)
+local function Prefixed(message, settings, drafts)
+    local prefix = Text(definitions.Prefix, settings, drafts)
     if not prefix or prefix == "" then return message end
     prefix = string.gsub(prefix, "[%c]", " ")
     return prefix .. " " .. message
+end
+
+function Messages.Prefix(message) return Prefixed(message) end
+
+local function Expand(template, values)
+    local message = string.gsub(template, "%%([%a]+)", function(variable)
+        local value = values and values[variable]
+        return value ~= nil and tostring(value) or "%" .. variable
+    end)
+    return string.gsub(message, "[%c]", " ")
 end
 
 function Messages.Format(key, values, withoutPrefix)
@@ -73,13 +96,34 @@ function Messages.Format(key, values, withoutPrefix)
     if not definition then return nil, "Unknown Loot Master message." end
     local template = Text(definition)
     if not template then return nil end
-    local message = string.gsub(template, "%%([%a]+)", function(variable)
-        local value = values and values[variable]
-        return value ~= nil and tostring(value) or "%" .. variable
-    end)
-    message = string.gsub(message, "[%c]", " ")
+    local message = Expand(template, values)
     if not string.find(message, "%S") then return nil end
     return withoutPrefix and message or Messages.Prefix(message)
+end
+
+local previewValues = {
+    item = "[Azuresong Mageblade]", rolls = "MS (100), OS (99), RC (101), SR (102), Tmog (98)",
+    seconds = 15, players = "Playerone, Playertwo", player = "Playerone", recipient = "Playertwo",
+    value = 97, roll = "SR", count = 40, rank = "Chimp", rights = "SR, Reycoin, CSR",
+    reason = "use a selected roll type", link = "https://softres.it/raid/example",
+}
+
+-- Preview uses the same expansion and prefix rules without sending chat or
+-- changing durable settings. Disabled templates remain visible for editing.
+function Messages.Preview(key, settings, drafts)
+    local definition = definitions[key]
+    if not definition then return nil, "Unknown Loot Master message." end
+    settings = settings or BootyRaiderDB or {}
+    local sample = definition == definitions.Prefix and definitions.ItemRoll or definition
+    local template = Text(sample, settings, drafts, true)
+    local text = Expand(template, previewValues)
+    if string.find(text, "%S") then text = Prefixed(text, settings, drafts) else text = "" end
+    local caption = "Example"
+    if settings[definition.enabledKey] == false then caption = caption .. " (disabled)"
+    elseif definition.whisperKey and settings[definition.whisperKey] == true then
+        caption = caption .. " (whisper to " .. previewValues[definition.whisperRecipient] .. ")"
+    end
+    return caption .. ": " .. (text ~= "" and text or "(empty message; nothing will be sent)")
 end
 
 -- Split long captions into native chat messages without cutting item links.

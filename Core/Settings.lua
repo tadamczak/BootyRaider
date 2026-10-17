@@ -123,14 +123,16 @@ function Settings.Get()
         Field("lmAutoLootExceptions","Auto loot exceptions","text",{"Addon UI","Raid","Loot Master Mode","Auto loot"})
         Field("lmAutoLootInclusions","Auto loot inclusions","text",{"Addon UI","Raid","Loot Master Mode","Auto loot"})
         for _,definition in ipairs(Raider.Services.LootMessages.Definitions) do
-            Field(definition.enabledKey,"Send "..definition[2],"checkbox",{"Addon Messages","Loot Master",definition[2]})
-            local enabledKey=definition.enabledKey
+            local path={"Addon Messages","Loot Master",definition.group,definition[2]}
+            Field(definition.enabledKey,"Send "..definition[2],"checkbox",path)
+            local enabledKey,messageKey=definition.enabledKey,definition[1]
             if definition.whisperKey then
-                Field(definition.whisperKey,"Send in whisper","checkbox",{"Addon Messages","Loot Master",definition[2]},nil,nil,nil,
+                Field(definition.whisperKey,"Send in whisper","checkbox",path,nil,nil,nil,
                     function(store) return store[enabledKey]~=false end,"Send only to the player concerned, instead of raid chat.")
             end
-            Field(definition.textKey,definition[2],"text",{"Addon Messages","Loot Master",definition[2]},nil,nil,nil,
+            local message=Field(definition.textKey,definition[2],"text",path,nil,nil,nil,
                 function(store) return store[enabledKey]~=false end,"Available variables: "..(definition[4]~="" and definition[4] or "none")..". Variables are optional.")
+            message.preview=function(store,drafts) return Raider.Services.LootMessages.Preview(messageKey,store,drafts) end
         end
     end
     return {id="raider",label="Raid",db=db,fields=fields,onChange=Raider.OnSettingChanged}
