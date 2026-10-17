@@ -109,6 +109,9 @@ function Screen.Create(parent, host)
         shareMissingSrNames=Raider.Services.Raid.SendRaidWarningList,getAttendance=Runtime.GetAttendance,
         getRaidHistory=Raider.Database.GetSoftReserveHistory,raidIdExists=function(id) return Runtime.session:RaidIdExists(id) end,
         deleteRaidSnapshot=Raider.Database.DeleteSoftReserveSnapshot,loadRaidSnapshot=function(id) return Runtime.session:LoadSnapshot(id) end,
+        prepareRaidSave=function(options) return Runtime.session:PrepareSave(options) end,
+        cancelRaidSave=function(confirmation) return Runtime.session:CancelPreparedSave(confirmation) end,
+        acceptLoadedRaid=Runtime.AcceptLoadedSnapshot,
         setHistoricalLoaded=function(value) Runtime.historicalLoaded=value and true or false end,getRules=Rules,
         saveRules=function(rules)
             if Runtime.IsTestRaid() then Raider.Services.TestRaid.SaveLootRules(rules) else Raider.Database.SaveLootRules(rules) end

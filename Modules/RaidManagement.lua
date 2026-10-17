@@ -3866,7 +3866,9 @@ function RaidManagement.AttachActionHandlers(options)
         if options.loadRaidSnapshot(options.page.selectedRaidHistoryId) then
             if resumeTracking then Raider.Database.SetSetting("raidLiveTrackingEnabled", false); options.setLiveTracking(false) end
             RaidManagement.ResetIssueAttention(options.page)
-            options.beginRaidSession(); options.setHistoricalLoaded(true); options.setScanReady(true); options.refresh()
+            options.beginRaidSession()
+            if options.acceptLoadedRaid then options.acceptLoadedRaid() end
+            options.setHistoricalLoaded(true); options.setScanReady(true); options.refresh()
             if resumeTracking and not (options.hasPendingRaidTransition and options.hasPendingRaidTransition()) then
                 options.setLiveTracking(false)
                 liveLoadDialog:Open("Do you want to refresh saved raid data with current raid? Pressing No turns off Live Tracking option in Settings. Remember to turn it on if desired.", function()
@@ -3941,6 +3943,41 @@ function RaidManagement.AttachActionHandlers(options)
     saveDialog.cancel:SetPoint("BOTTOMLEFT", saveDialog, "BOTTOMLEFT", 12, 12)
     saveDialog.save = Raider.UI.Components.CreateButton(saveDialog, nil, "Save Raid", 112, 24)
     saveDialog.save:SetPoint("BOTTOMRIGHT", saveDialog, "BOTTOMRIGHT", -12, 12)
+    local pendingSaveRequest
+    local overwriteDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderOverwriteRaid", "Replace Saved Raid", "Replace", "save")
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(overwriteDialog, saveDialog) end
+    saveDialog.overwriteDialog = overwriteDialog
+    local function CancelPreparedSave()
+        if pendingSaveRequest and options.cancelRaidSave then options.cancelRaidSave(pendingSaveRequest.confirmation) end
+        pendingSaveRequest = nil
+    end
+    local overwriteHide = overwriteDialog:GetScript("OnHide")
+    overwriteDialog:SetScript("OnHide", function()
+        if overwriteHide then overwriteHide() end
+        if not overwriteDialog.accepting then CancelPreparedSave() end
+    end)
+    overwriteDialog.yes:SetScript("OnClick", function()
+        local callback = overwriteDialog.onYes
+        overwriteDialog.accepting = true; overwriteDialog:Hide(); overwriteDialog.accepting = nil
+        if callback then callback() end
+    end)
+    local function SaveFailure(message)
+        saveDialog.error:SetText(message or "The raid could not be saved."); saveDialog.error:Show()
+    end
+    local function SubmitSave(request)
+        pendingSaveRequest = nil
+        local saved, failure = options.saveRaidSession(request)
+        if saved == true then saveDialog.transitionContext = nil; saveDialog:Hide()
+        else
+            if options.cancelRaidSave then options.cancelRaidSave(request.confirmation) end
+            SaveFailure(failure)
+        end
+    end
+    local saveHide = saveDialog:GetScript("OnHide")
+    saveDialog:SetScript("OnHide", function()
+        if saveHide then saveHide() end
+        CancelPreparedSave(); overwriteDialog:Hide(); saveDialog.attendanceOwner = nil
+    end)
     saveDialog.cancel:SetScript("OnClick", function()
         saveDialog:Hide()
         if saveDialog.transitionContext and sessionPrompt then sessionPrompt:Show() end
@@ -3949,16 +3986,29 @@ function RaidManagement.AttachActionHandlers(options)
     saveDialog.save:SetScript("OnClick", function()
         local raidId=string.gsub(tostring(saveDialog.raidId:GetText() or ""),"^%s+","");raidId=string.gsub(raidId,"%s+$","")
         if raidId=="" then saveDialog.error:SetText("Raid ID is required.");saveDialog.error:Show();return end
-        if options.raidIdExists and options.raidIdExists(raidId) then saveDialog.error:SetText("This Raid ID is already saved.");saveDialog.error:Show();return end
+        if options.getAttendance() ~= saveDialog.attendanceOwner then SaveFailure("The active raid changed. Reopen Save Raid before saving."); return end
         local saveStatistics = saveDialog.statistics:GetChecked() and true or false
         local saveAttendance = saveStatistics and saveDialog.attendance:GetChecked() and true or false
         local saveCSR = saveDialog.csr:GetChecked() and true or false
-        if options.saveRaidSession({raidId=raidId,saveRaidStatistics=saveStatistics,saveAttendance=saveAttendance,saveCSR=saveCSR})~=false then saveDialog.transitionContext=nil; saveDialog:Hide()
-        else saveDialog.error:SetText("Raid ID could not be saved.");saveDialog.error:Show() end
+        CancelPreparedSave()
+        local request, exists = options.prepareRaidSave({raidId=raidId,saveRaidStatistics=saveStatistics,saveAttendance=saveAttendance,saveCSR=saveCSR})
+        if not request then SaveFailure(exists); return end
+        pendingSaveRequest = request
+        if exists then
+            overwriteDialog:Open("Replace saved raid '" .. request.raidId .. "'? Its saved data and statistics will use these save options.", function()
+                local confirmed = pendingSaveRequest
+                if not confirmed then return end
+                confirmed.overwrite = true; SubmitSave(confirmed)
+            end, CancelPreparedSave)
+        else SubmitSave(request) end
     end)
     saveDialog.Open = function(self)
-        self.statistics:SetChecked(1); self.attendance:SetChecked(1); self.csr:SetChecked(1)
-        local attendance=options.getAttendance and options.getAttendance();self.raidId:SetText(attendance and (attendance.snapshotId or (attendance.softReserveImport and attendance.softReserveImport.id)) or "")
+        CancelPreparedSave(); overwriteDialog:Hide()
+        local attendance=options.getAttendance and options.getAttendance()
+        self.attendanceOwner=attendance
+        local flags=attendance and attendance.saveOptions
+        self.statistics:SetChecked(not flags or flags.saveRaidStatistics); self.attendance:SetChecked(not flags or flags.saveAttendance); self.csr:SetChecked(not flags or flags.saveCSR)
+        self.raidId:SetText(attendance and (attendance.snapshotId or (attendance.softReserveImport and attendance.softReserveImport.id)) or "")
         self.error:Hide();SyncAttendanceOption(); self:Show();self.raidId:SetFocus();self.raidId:HighlightText()
     end
     options.page.OpenSaveDialog = function(contextKey) saveDialog.transitionContext=contextKey;saveDialog:Open() end

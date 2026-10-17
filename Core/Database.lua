@@ -77,9 +77,47 @@ local function BorderSize(value)
     return math.max(1, math.min(6, math.floor(value)))
 end
 
+function Database.CopyLootRules(rules)
+    local saved = {}
+    local rank, rule
+    for rank, rule in pairs(rules or {}) do
+        if type(rule) == "table" then
+            saved[rank] = { sr = rule.sr and true or false, reyCoin = rule.reyCoin and true or false,
+                csr = rule.csr and true or false, highlyContested = rule.highlyContested and true or false }
+        end
+    end
+    return saved
+end
+
+local function FreezeLootRules(record, defaults)
+    if type(record) == "table" and type(record.lootRules) ~= "table" then record.lootRules = Database.CopyLootRules(defaults) end
+end
+
+local function FreezeLegacyLootRules(store)
+    if (tonumber(store.raidLootRulesVersion) or 0) >= 1 then return end
+    -- Old records did not retain their rules. Freeze the existing calculation
+    -- baseline once; later edits cannot rewrite an unknown historical choice.
+    local defaults = type(store.lootRulesByRank) == "table" and store.lootRulesByRank or {}
+    FreezeLootRules(store.raidAttendance, defaults)
+    local _, key
+    for _, key in ipairs({"softReserveHistory", "raidStatistics"}) do
+        local history = store[key]
+        if type(history) == "table" then
+            local _, record
+            if type(history.raids) == "table" then
+                for _, record in pairs(history.raids) do FreezeLootRules(record, defaults) end
+            else
+                for _, record in ipairs(history) do FreezeLootRules(record, defaults) end
+            end
+        end
+    end
+    store.raidLootRulesVersion = 1
+end
+
 local function InitializeDefaults(store)
     BootyRaiderDB = store
     MigratePreferenceNames(store)
+    FreezeLegacyLootRules(store)
     if Raider.Services and Raider.Services.LootMessages then Raider.Services.LootMessages.EnsureDefaults(BootyRaiderDB) end
     if (tonumber(BootyRaiderDB.groupLayoutVersion) or 0) < 2 then
         BootyRaiderDB.raidGroupMargin = 0; BootyRaiderDB.nativeRaidGroupMargin = 0
@@ -191,7 +229,7 @@ local ownedExact = {
     outOfFocusOpacity=true, reyCoinPanelWidth=true, reyCoinPanelHeight=true,
     masterLootWindowWidth=true, masterLootWindowHeight=true,
     lootRulesByRank=true, highlyContestedItems=true, highlyContestedItemsCustomized=true,
-    softReserveHistory=true, presentation=true,
+    softReserveHistory=true, presentation=true, raidLootRulesVersion=true,
 }
 function Database.OwnsField(key)
     return type(key)=="string" and (ownedExact[key] or legacyOwnedKeys[key] or string.find(key,"^raid")
@@ -242,31 +280,37 @@ end
 
 function Database.StoreRaidAttendance(attendance)
     Database.Ensure()
+    if attendance then Database.EnsureRaidLootRules(attendance) end
     local previous = BootyRaiderDB.raidAttendance
     BootyRaiderDB.raidAttendance = attendance
     if Database.onRaidAttendanceChanged then Database.onRaidAttendanceChanged(previous, attendance) end
     return attendance
 end
 
-function Database.GetLootRules()
+function Database.GetDefaultLootRules()
     Database.Ensure()
     if type(BootyRaiderDB.lootRulesByRank) ~= "table" then BootyRaiderDB.lootRulesByRank = {} end
     return BootyRaiderDB.lootRulesByRank
 end
 
+function Database.EnsureRaidLootRules(attendance)
+    if type(attendance) ~= "table" then return nil end
+    if type(attendance.lootRules) ~= "table" then FreezeLootRules(attendance, Database.GetDefaultLootRules()) end
+    return attendance.lootRules
+end
+
+function Database.GetLootRules()
+    Database.Ensure()
+    local attendance = BootyRaiderDB.raidAttendance
+    if attendance then return Database.EnsureRaidLootRules(attendance) end
+    return Database.GetDefaultLootRules()
+end
+
 function Database.SaveLootRules(rules)
     Database.Ensure()
-    local saved = {}
-    local rankIndex, rule
-    for rankIndex, rule in pairs(rules or {}) do
-        saved[rankIndex] = {
-            sr = rule.sr and true or false,
-            reyCoin = rule.reyCoin and true or false,
-            csr = rule.csr and true or false,
-            highlyContested = rule.highlyContested and true or false,
-        }
-    end
-    BootyRaiderDB.lootRulesByRank = saved
+    local saved = Database.CopyLootRules(rules)
+    local attendance = BootyRaiderDB.raidAttendance
+    if attendance then attendance.lootRules = saved else BootyRaiderDB.lootRulesByRank = saved end
 end
 
 local defaultHighlyContestedItems = {
@@ -306,6 +350,7 @@ end
 function Database.StoreSoftReserveSnapshot(snapshot)
     Database.Ensure()
     if not snapshot or not snapshot.id then return false end
+    if type(snapshot.lootRules) ~= "table" then FreezeLootRules(snapshot, Database.GetDefaultLootRules()) end
     if type(BootyRaiderDB.softReserveHistory) ~= "table" then BootyRaiderDB.softReserveHistory = { order = {}, raids = {} } end
     local history = BootyRaiderDB.softReserveHistory
     if type(history.order) ~= "table" then history.order = {} end
@@ -324,10 +369,10 @@ function Database.GetSoftReserveHistory()
     local history = BootyRaiderDB.softReserveHistory
     local snapshots = {}
     if not history or not history.order or not history.raids then return snapshots end
-    local index
+    local index, defaults = nil, BootyRaiderDB.lootRulesByRank
     for index = 1, math.min(10, table.getn(history.order)) do
         local snapshot = history.raids[history.order[index]]
-        if snapshot then table.insert(snapshots, snapshot) end
+        if snapshot then FreezeLootRules(snapshot, defaults); table.insert(snapshots, snapshot) end
     end
     return snapshots
 end
@@ -355,6 +400,7 @@ end
 function Database.StoreRaidStatistic(entry)
     Database.Ensure()
     if not entry or not entry.id then return false end
+    if type(entry.lootRules) ~= "table" then FreezeLootRules(entry, Database.GetDefaultLootRules()) end
     if type(BootyRaiderDB.raidStatistics) ~= "table" then BootyRaiderDB.raidStatistics = { order = {}, raids = {} } end
     local history = BootyRaiderDB.raidStatistics
     if type(history.order) ~= "table" then history.order = {} end
@@ -371,24 +417,49 @@ function Database.GetRaidStatistics()
     local result = {}
     local history = BootyRaiderDB.raidStatistics
     if not history or type(history.order) ~= "table" or type(history.raids) ~= "table" then return result end
-    local index
+    local index, defaults = nil, BootyRaiderDB.lootRulesByRank
     for index = 1, table.getn(history.order) do
         local entry = history.raids[history.order[index]]
-        if entry then result[table.getn(result) + 1] = entry end
+        if entry then FreezeLootRules(entry, defaults); result[table.getn(result) + 1] = entry end
     end
     return result
+end
+
+local function FindSavedRaid(history, raidId)
+    if type(history) ~= "table" or type(history.raids) ~= "table" then return nil end
+    local wanted = string.lower(tostring(raidId or ""))
+    if wanted == "" then return nil end
+    local id, record
+    for id, record in pairs(history.raids) do
+        if string.lower(tostring(id)) == wanted then return id, record end
+    end
 end
 
 function Database.DeleteRaidStatistic(raidId)
     Database.Ensure()
     local history = BootyRaiderDB.raidStatistics
-    if not raidId or not history or type(history.order) ~= "table" or type(history.raids) ~= "table" or not history.raids[raidId] then return false end
+    raidId = FindSavedRaid(history, raidId)
+    if not raidId or type(history.order) ~= "table" then return false end
     history.raids[raidId] = nil
     local index
     for index = table.getn(history.order), 1, -1 do
         if history.order[index] == raidId then table.remove(history.order, index) end
     end
     return true
+end
+
+function Database.GetSavedRaidState(raidId)
+    Database.Ensure()
+    local snapshotId, snapshot = FindSavedRaid(BootyRaiderDB.softReserveHistory, raidId)
+    local statisticId, statistic = FindSavedRaid(BootyRaiderDB.raidStatistics, raidId)
+    if snapshot and type(snapshot.lootRules) ~= "table" then FreezeLootRules(snapshot, Database.GetDefaultLootRules()) end
+    if statistic and type(statistic.lootRules) ~= "table" then FreezeLootRules(statistic, Database.GetDefaultLootRules()) end
+    return snapshotId or statisticId, snapshot, statistic
+end
+
+function Database.ResolveRaidId(raidId)
+    local canonical = Database.GetSavedRaidState(raidId)
+    return canonical
 end
 
 function Database.HasRaidStatistic(raidId)
