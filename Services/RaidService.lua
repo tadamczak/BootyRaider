@@ -1218,6 +1218,8 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         createdAt = preservePrevious and previousAttendance.createdAt or nil,
         modifiedAt = preservePrevious and previousAttendance.modifiedAt or nil,
         duration = preservePrevious and previousAttendance.duration or nil,
+        endedAt = preservePrevious and previousAttendance.endedAt or nil,
+        displayName = preservePrevious and previousAttendance.displayName or nil,
         nextLootRecordId = preservePrevious and previousAttendance.nextLootRecordId or 0,
     }
     -- Publish provenance only after the entire capture succeeds. Departed

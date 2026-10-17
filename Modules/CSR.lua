@@ -101,6 +101,21 @@ local function ClearArray(values)
     for index = table.getn(values), 1, -1 do values[index] = nil end
 end
 
+local reportRowColor, reportSectionColor = {1, 1, 1}, {0.015, 0.015, 0.015}
+local function ReportFont(label)
+    local font, _, flags = label:GetFont()
+    label:SetFont(font, 10 + (UI.GetTextSizeDelta(label:GetParent()) or 0), flags)
+end
+
+local function StyleReportRow(row, index, accordion, header)
+    UI.SetRowColor(row, accordion and reportSectionColor or reportRowColor,
+        accordion and 1 or header and 0 or math.mod(index, 2) == 0 and 0.14 or 0.025)
+    UI.SetProjectButtonOutline(row, accordion)
+    row.bootyTableRowHover:Hide(); row.bootyTableRowSelection:Hide()
+    row.bootyTableRowSelected = false; row.bootyTableRowHovered = nil
+    row:EnableMouse(not header)
+end
+
 function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistics)
     local page = UI.CreateResponsiveCanvas(host, "BootyRaiderCSRPage")
     local controller = { page = page, rows = {}, detailRows = {}, detailLines = {}, viewButtons = {},
@@ -180,7 +195,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     controller.empty = UI.CreateLabel(page, nil, "OVERLAY", "GameFontDisableSmall")
     controller.empty:SetText("No matching Soft Reserves.")
     controller.sourceColumns = {
-        { field = "no", text = "No", desiredWidth = 30, minimumWidth = 22, fraction = 0.04 },
+        { field = "no", text = "#", desiredWidth = 30, minimumWidth = 22, fraction = 0.04 },
         { field = "raid", text = "Raid", desiredWidth = 300, minimumWidth = 45, fraction = 0.55 },
         { field = "date", text = "Date", desiredWidth = 92, minimumWidth = 65, fraction = 0.15 },
         { field = "expires", text = "Expires in", desiredWidth = 74, minimumWidth = 54, fraction = 0.12 },
@@ -283,16 +298,22 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     function controller:AcquireRow(index)
         if self.rows[index] then return self.rows[index] end
         local row = UI.CreateControl(nil, self.canvas)
-        row.name = UI.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall")
-        row.label = UI.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall")
-        row.csr = UI.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall")
-        row.iconRegion = UI.CreateTexture(row, nil, "ARTWORK"); row.iconRegion:SetWidth(19); row.iconRegion:SetHeight(19)
-        row.itemHit = UI.CreateControl(nil, row); row.itemHit.ownerRow = row
+        -- Only the fixed-height family heading owns its fill/outline. The
+        -- transparent wrapper can grow around independently styled children.
+        row.heading = UI.CreateControl(nil, row)
+        row.heading:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0); row.heading:SetHeight(24)
+        UI.StyleSelectableTableRow(row.heading, false, false)
+        row.heading.ownerRow = row
+        row.heading:SetScript("OnClick", function() if this.ownerRow.node then controller:Toggle(this.ownerRow.node) end end)
+        row.name = UI.CreateLabel(row.heading, nil, "OVERLAY", "GameFontHighlightSmall")
+        row.label = UI.CreateLabel(row.heading, nil, "OVERLAY", "GameFontHighlightSmall")
+        row.csr = UI.CreateLabel(row.heading, nil, "OVERLAY", "GameFontHighlightSmall")
+        for _, label in ipairs({row.name, row.label, row.csr}) do ReportFont(label) end
+        row.iconRegion = UI.CreateTexture(row.heading, nil, "ARTWORK"); row.iconRegion:SetWidth(19); row.iconRegion:SetHeight(19)
+        row.itemHit = UI.CreateControl(nil, row.heading); row.itemHit.ownerRow = row
         row.itemHit:SetScript("OnEnter", function() UI.ShowItemTooltip(this) end)
         row.itemHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row.itemHit:SetScript("OnClick", function() if this.ownerRow.node then controller:Toggle(this.ownerRow.node) end end)
-        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
-        UI.RegisterSkinnedSurface(row, "row", { bgFile = "Interface\\Buttons\\WHITE8X8" }, {0,0,0,0}, {0,0,0,0})
         row:SetScript("OnClick", OnRowClick); self.rows[index] = row
         return row
     end
@@ -300,10 +321,10 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         local row = self.detailRows[index]
         if row then row:SetParent(owner); return row end
         row = UI.CreateControl(nil, owner); row.labels = {}; row.headers = {}; row.visibleHeaders = {}
-        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
-        UI.RegisterSkinnedSurface(row, "row", { bgFile = "Interface\\Buttons\\WHITE8X8" }, {0,0,0,0}, {0,0,0,0})
+        UI.StyleSelectableTableRow(row, false, false)
         for cell = 1, 5 do
             row.labels[cell] = UI.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall")
+            ReportFont(row.labels[cell])
             local header = UI.Table.CreateHeader(row, nil, "", 0, 0, 20, nil, false)
             header:SetScript("OnClick", OnSort); row.headers[cell] = header
         end
@@ -319,7 +340,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         return row
     end
     local function SetSourceWidths(width)
-        UI.Table.AllocateColumnWidths(controller.sourceColumns, math.max(5, width - 58))
+        UI.Table.AllocateColumnWidths(controller.sourceColumns, math.max(5, width - 72))
     end
     local function AppendDetail(entry, kind, node, source, indent, height)
         entry.count = entry.count + 1
@@ -330,28 +351,30 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         entry.height = entry.height + height
     end
     local function AppendSources(entry, node, width, indent)
-        AppendDetail(entry, "sourceHeader", node, nil, indent, 22)
-        SetSourceWidths(math.max(1, width - indent - 4))
-        for _, source in ipairs(node.sources) do
-            local raidWidth = math.max(1, controller.sourceColumns[2].width - 4)
+        AppendDetail(entry, "sourceHeader", node, nil, indent, 26)
+        SetSourceWidths(math.max(1, width - indent))
+        for index, source in ipairs(node.sources) do
+            local raidWidth = math.max(1, controller.sourceColumns[2].width - 8)
             controller.measure:SetWidth(raidWidth); controller.measure:SetText(source.texts[2])
             local height = math.max(24, UI.MeasureTextHeight(controller.measure, raidWidth) + 8)
-            AppendDetail(entry, "source", node, source, indent, height)
+            AppendDetail(entry, "source", node, source, indent, height + 2)
+            entry.details[entry.count].stripe = index
         end
     end
     local function MeasureRows(width, self)
         local total = 0
+        ReportFont(self.measure)
         for index, node in ipairs(self.nodes) do
             local entry = self.layoutRows[index]
             if not entry then entry = { details = {} }; self.layoutRows[index] = entry end
-            entry.y, entry.node, entry.count, entry.height = total, node, 0, 24
+            entry.y, entry.node, entry.count, entry.height = total, node, 0, 26
             if self:IsExpanded(node) then
-                if node.kind == "pair" then AppendSources(entry, node, width, 4)
+                if node.kind == "pair" then AppendSources(entry, node, width, 16)
                 else
-                    AppendDetail(entry, "pairHeader", node, nil, 12, 22)
+                    AppendDetail(entry, "pairHeader", node, nil, 16, 26)
                     for _, child in ipairs(node.children) do
-                        AppendDetail(entry, "pair", child, nil, 12, 24)
-                        if self:IsExpanded(child) then AppendSources(entry, child, width, 24) end
+                        AppendDetail(entry, "pair", child, nil, 16, 26)
+                        if self:IsExpanded(child) then AppendSources(entry, child, width, 32) end
                     end
                 end
             end
@@ -379,31 +402,33 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     end
     function controller:Layout() UI.LayoutResponsiveCanvas(page, LayoutContent, self) end
     local function HeaderCells(row, fields, widths, tableKey)
-        local x = 4
+        local x = 8
         for index, field in ipairs(fields) do
             local header = row.headers[index]
             header:ClearAllPoints(); header:SetPoint("TOPLEFT", row, "TOPLEFT", x, 0)
             header:SetWidth(widths[index]); header:SetHeight(22)
             header.tableKey, header.sortKey = tableKey, field.field
             header.label:SetText(field.text); header:Show(); x = x + widths[index]
+            header.label:SetTextColor(unpack(UI.Theme.colors.goldText))
             row.visibleHeaders[index] = header
         end
         for index = table.getn(row.visibleHeaders), table.getn(fields) + 1, -1 do row.visibleHeaders[index] = nil end
-        UI.Table.FitHeaders(row.visibleHeaders, 12)
+        UI.Table.FitHeaders(row.visibleHeaders, 10 + (UI.GetTextSizeDelta(row) or 0))
     end
     local function ItemIcon(row, itemId, x)
-        row.itemId = itemId; row.iconRegion:ClearAllPoints(); row.iconRegion:SetPoint("TOPLEFT", row, "TOPLEFT", x, -2)
+        local owner = row.heading or row
+        row.itemId = itemId; row.iconRegion:ClearAllPoints(); row.iconRegion:SetPoint("TOPLEFT", owner, "TOPLEFT", x, -2)
         row.itemHit.itemId, row.itemHit.iconRegion = itemId, row.iconRegion
         row.iconRegion:SetTexture(type(GetItemIcon) == "function" and GetItemIcon(itemId) or "Interface\\Icons\\INV_Misc_QuestionMark")
         row.iconRegion:Show(); row.itemHit:Show()
     end
     local function RenderDetail(row, detail, width)
         row.node, row.source, row.kind, row.itemId = nil, detail.source and detail.source.raid, detail.kind, nil
-        for index = 1, 5 do row.labels[index]:Hide(); row.headers[index]:Hide() end
+        for index = 1, 5 do ReportFont(row.labels[index]); row.labels[index]:Hide(); row.headers[index]:Hide() end
         row.view:Hide(); row.iconRegion:Hide(); row.itemHit:Hide()
         if detail.kind == "source" or detail.kind == "sourceHeader" then
             SetSourceWidths(width)
-            local x = 4
+            local x = 8
             if detail.kind == "sourceHeader" then
                 local widths = {}
                 for index, column in ipairs(controller.sourceColumns) do widths[index] = column.width end
@@ -412,28 +437,31 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                 local raid = detail.source.raid
                 for index, column in ipairs(controller.sourceColumns) do
                     local label = row.labels[index]
-                    UI.Table.Cell(label, row, x, column.width - 4, row:GetHeight(), detail.source.texts[index])
+                    UI.Table.Cell(label, row, x, column.width - 8, row:GetHeight(), detail.source.texts[index])
+                    label:SetTextColor(1, 1, 1)
                     if index == 2 and label.SetWordWrap then label:SetWordWrap(true) end
                     label:Show(); x = x + column.width
                 end
-                row.view:ClearAllPoints(); row.view:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+                row.view:ClearAllPoints(); row.view:SetPoint("RIGHT", row, "RIGHT", -8, 0)
                 row.view.raidId = raid.id; row.view:Show()
             end
         elseif detail.kind == "pairHeader" then
             HeaderCells(row, {{field = controller.groupMode == "player" and "item" or "name", text = controller.groupMode == "player" and "Item" or "Player"},
-                {field = "csr", text = "CSR"}}, {width - 48, 40}, detail.node.key)
+                {field = "csr", text = "CSR"}}, {width - 64, 48}, detail.node.key)
         else
             local player = detail.node.player
             row.node = detail.node
             local prefix = controller:IsExpanded(detail.node) and "- " or "+ "
             local label = controller.groupMode == "player" and ItemText(player) or player.name
-            UI.Table.Cell(row.labels[1], row, 4, width - 50, 23, prefix .. label); row.labels[1]:Show()
-            UI.Table.Cell(row.labels[2], row, width - 42, 38, 23, tostring(player.csr)); row.labels[2]:Show()
+            UI.Table.Cell(row.labels[1], row, 8, width - 64, 24, prefix .. label); row.labels[1]:Show()
+            row.labels[1]:SetTextColor(unpack(UI.Theme.colors.goldText))
+            UI.Table.Cell(row.labels[2], row, width - 48, 40, 24, tostring(player.csr)); row.labels[2]:Show()
+            row.labels[2]:SetTextColor(1, 1, 1)
             if controller.groupMode == "player" then
-                ItemIcon(row, player.itemId, 16)
-                UI.Table.Cell(row.labels[1], row, 40, width - 86, 23, prefix .. label)
+                ItemIcon(row, player.itemId, 8)
+                UI.Table.Cell(row.labels[1], row, 32, width - 88, 24, prefix .. label)
                 row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-                row.itemHit:SetWidth(width - 44); row.itemHit:SetHeight(23)
+                row.itemHit:SetWidth(width - 56); row.itemHit:SetHeight(24)
             end
         end
     end
@@ -465,9 +493,10 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         for index, header in ipairs(self.headers) do
             header:ClearAllPoints(); header:SetPoint("TOPLEFT", page, "TOPLEFT", 8 + starts[index], -self.headerTop)
             header:SetWidth(widths[index]); header:SetHeight(20); header.label:SetText(texts[index])
+            header.label:SetTextColor(unpack(UI.Theme.colors.goldText))
             header.tableKey, header.sortKey = "root:" .. self.groupMode, fields[index]
         end
-        UI.Table.FitHeaders(self.headers, 12)
+        UI.Table.FitHeaders(self.headers, 10 + (UI.GetTextSizeDelta(page) or 0))
         local top, bottom = self.scroll:GetVerticalScroll(), self.scroll:GetVerticalScroll() + self.bodyHeight
         for _, detail in ipairs(self.detailRows) do detail:Hide() end
         local used, detailUsed = 0, 0
@@ -478,37 +507,44 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                 local row, node = self:AcquireRow(used), entry.node
                 row.node, row.player = node, node.player
                 row:ClearAllPoints(); row:SetPoint("TOPLEFT", self.canvas, "TOPLEFT", 0, -entry.y)
-                row:SetWidth(width); row:SetHeight(entry.height - 1)
+                row:SetWidth(width); row:SetHeight(entry.height - 2)
+                row.heading:SetWidth(width)
+                ReportFont(row.name); ReportFont(row.label); ReportFont(row.csr)
                 row.iconRegion:Hide(); row.itemHit:Hide(); row.itemId = nil
                 local prefix = self:IsExpanded(node) and "- " or "+ "
                 if node.player then
-                    UI.Table.Cell(row.name, row, 6, nameWidth - 8, 23, prefix .. node.player.name)
-                    UI.Table.Cell(row.label, row, nameWidth + 24, itemWidth - 28, 23, ItemText(node.player))
-                    UI.Table.Cell(row.csr, row, width - csrWidth, csrWidth - 4, 23, tostring(node.player.csr))
-                    ItemIcon(row, node.player.itemId, nameWidth)
-                    row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row, "TOPLEFT", nameWidth, 0)
-                    row.itemHit:SetWidth(itemWidth); row.itemHit:SetHeight(23)
+                    UI.Table.Cell(row.name, row.heading, 8, nameWidth - 16, 24, prefix .. node.player.name)
+                    UI.Table.Cell(row.label, row.heading, nameWidth + 32, itemWidth - 40, 24, ItemText(node.player))
+                    UI.Table.Cell(row.csr, row.heading, width - csrWidth, csrWidth - 8, 24, tostring(node.player.csr))
+                    ItemIcon(row, node.player.itemId, nameWidth + 8)
+                    row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row.heading, "TOPLEFT", nameWidth, 0)
+                    row.itemHit:SetWidth(itemWidth); row.itemHit:SetHeight(24)
                 else
                     local itemMode = self.groupMode == "item"
-                    UI.Table.Cell(row.name, row, itemMode and 30 or 6, nameWidth - (itemMode and 34 or 8), 23,
+                    UI.Table.Cell(row.name, row.heading, itemMode and 32 or 8, nameWidth - (itemMode and 40 or 16), 24,
                         prefix .. (itemMode and UI.GetItemLabel(node.itemId) or node.name))
-                    UI.Table.Cell(row.label, row, nameWidth + 4, itemWidth - 8, 23, tostring(table.getn(node.children)))
-                    UI.Table.Cell(row.csr, row, width - csrWidth, csrWidth - 4, 23, tostring(node.csr))
+                    UI.Table.Cell(row.label, row.heading, nameWidth + 8, itemWidth - 16, 24, tostring(table.getn(node.children)))
+                    UI.Table.Cell(row.csr, row.heading, width - csrWidth, csrWidth - 8, 24, tostring(node.csr))
                     if itemMode then
-                        ItemIcon(row, node.itemId, 6)
-                        row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-                        row.itemHit:SetWidth(nameWidth); row.itemHit:SetHeight(23)
+                        ItemIcon(row, node.itemId, 8)
+                        row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row.heading, "TOPLEFT", 0, 0)
+                        row.itemHit:SetWidth(nameWidth); row.itemHit:SetHeight(24)
                     end
                 end
-                UI.ApplyRowBackground(row, index, self:IsExpanded(node))
+                row.name:SetTextColor(unpack(UI.Theme.colors.goldText))
+                row.label:SetTextColor(1, 1, 1); row.csr:SetTextColor(1, 1, 1)
+                StyleReportRow(row.heading, index, true, false)
                 for detailIndex = 1, entry.count do
                     local detail = entry.details[detailIndex]
                     if entry.y + detail.y + detail.height > top and entry.y + detail.y < bottom then
                         detailUsed = detailUsed + 1
                         local child = self:AcquireDetail(detailUsed, row)
                         child:ClearAllPoints(); child:SetPoint("TOPLEFT", row, "TOPLEFT", detail.indent, -detail.y)
-                        child:SetWidth(math.max(1, width - detail.indent - 4)); child:SetHeight(detail.height - 1)
-                        RenderDetail(child, detail, child:GetWidth()); UI.ApplyRowBackground(child, detailIndex, false); child:Show()
+                        child:SetWidth(math.max(1, width - detail.indent)); child:SetHeight(detail.height - 2)
+                        RenderDetail(child, detail, child:GetWidth())
+                        StyleReportRow(child, detail.kind == "source" and detail.stripe or detailIndex,
+                            detail.kind == "pair", detail.kind == "sourceHeader" or detail.kind == "pairHeader")
+                        child:Show()
                     end
                 end
                 row:Show()

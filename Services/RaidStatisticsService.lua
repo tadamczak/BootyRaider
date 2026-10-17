@@ -19,12 +19,14 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
     if not raidId then return nil end
     saveOptions = saveOptions or {}
     local now = time()
+    local startedAt, endedAt = tonumber(attendance.sessionStartedAt), tonumber(attendance.endedAt)
     local entry = {
-        id = raidId, raidName = attendance.raidName or "Unknown zone", savedAt = now, members = {},
+        id = raidId, displayName = attendance.displayName, raidName = attendance.raidName or "Unknown zone", savedAt = now, members = {},
         startedAt = attendance.sessionStartedAt,
-        createdAt = attendance.createdAt or attendance.lastSavedAt or now,
+        endedAt = endedAt,
+        createdAt = attendance.createdAt or startedAt or attendance.lastSavedAt or now,
         modifiedAt = attendance.modifiedAt or attendance.lastSavedAt or now,
-        duration = attendance.duration or math.max(0, (attendance.lastSavedAt or now) - (attendance.sessionStartedAt or now)),
+        duration = startedAt and endedAt and endedAt >= startedAt and endedAt - startedAt or nil,
         statisticsEnabled = saveOptions.saveRaidStatistics ~= false,
         attendanceEnabled = saveOptions.saveAttendance ~= false,
         csrEnabled = saveOptions.saveCSR == true,
@@ -157,7 +159,7 @@ local function MatchesItems(items, query)
 end
 
 local function MatchesSearch(entry, query)
-    if query == "" or Contains(entry.id, query) or Contains(entry.raidName or "Other", query) then return true end
+    if query == "" or Contains(entry.id, query) or Contains(entry.displayName, query) or Contains(entry.raidName or "Other", query) then return true end
     local index
     for index = 1, table.getn(entry.members or {}) do
         local member = entry.members[index]

@@ -111,6 +111,8 @@ function Screen.Create(parent, host)
         deleteRaidSnapshot=Raider.Database.DeleteSoftReserveSnapshot,loadRaidSnapshot=function(id) return Runtime.session:LoadSnapshot(id) end,
         prepareRaidSave=function(options) return Runtime.session:PrepareSave(options) end,
         cancelRaidSave=function(confirmation) return Runtime.session:CancelPreparedSave(confirmation) end,
+        updateRaidMetadata=Raider.Database.UpdateRaidMetadata,
+        showSavedPopup=function() UI.ShowOpaquePopup("BOOTY_RAIDER_ATTENDANCE_RELOAD") end,
         acceptLoadedRaid=Runtime.AcceptLoadedSnapshot,
         setHistoricalLoaded=function(value) Runtime.historicalLoaded=value and true or false end,getRules=Rules,
         saveRules=function(rules)

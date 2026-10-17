@@ -155,7 +155,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
             controller:Refresh()
         end
     end)
-    controller.editDialog = CreateModal("BootyRaiderEditRaidStatisticDialog", "Save raid changes", 205)
+    controller.editDialog = CreateModal("BootyRaiderEditRaidStatisticDialog", "Save raid changes", 275)
     local function CreateEditCheckbox(label, y)
         local checkbox = Raider.UI.Components.CreateCheckButton(nil, controller.editDialog, "UICheckButtonTemplate")
         checkbox:SetPoint("TOPLEFT", controller.editDialog, "TOPLEFT", 18, y); checkbox:SetWidth(22); checkbox:SetHeight(22)
@@ -165,6 +165,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.editDialog.message=UI.CreateLabel(controller.editDialog,nil,"OVERLAY","GameFontHighlightSmall");controller.editDialog.message:SetPoint("TOPLEFT",controller.editDialog,"TOPLEFT",18,-46);controller.editDialog.message:SetWidth(324);controller.editDialog.message:SetText("Save the edited attendance and Soft Reserve values for this raid?")
     controller.editDialog.attendance = CreateEditCheckbox("Save Attendance", -86)
     controller.editDialog.csr = CreateEditCheckbox("Save CSR", -116)
+    Raider.Modules.RaidEdit.AttachRaidSelector(controller.editDialog, -150, -169)
     controller.editDialog.cancel = Raider.UI.Components.CreateButton(controller.editDialog, nil, "Cancel", 86, 24); controller.editDialog.cancel:SetPoint("BOTTOMLEFT", controller.editDialog, "BOTTOMLEFT", 72, 18)
     controller.editDialog.save = Raider.UI.Components.CreateButton(controller.editDialog, nil, "Save", 86, 24); controller.editDialog.save:SetPoint("BOTTOMRIGHT", controller.editDialog, "BOTTOMRIGHT", -72, 18)
     controller.editDialog.cancel:SetScript("OnClick", function() controller.editDialog:Hide() end)
@@ -172,7 +173,6 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         local raidId = controller.editDialog.raidId
         local attendanceEnabled = controller.editDialog.attendance:GetChecked() and true or false
         local csrEnabled = controller.editDialog.csr:GetChecked() and true or false
-        controller.editDialog:Hide()
         if raidId and controller.updateEntry then
             local members, memberIndex = {}, nil
             for memberIndex = 1, table.getn(controller.editMembers or {}) do
@@ -180,7 +180,14 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
                 member.attendanceText = nil; member.srItemText = nil
                 members[memberIndex] = member
             end
-            if controller.updateEntry(raidId,members,attendanceEnabled,csrEnabled) then controller.editMode=false;controller.editMembers=nil;controller:Refresh() end
+            local saved, reason = controller.updateEntry(raidId,members,attendanceEnabled,csrEnabled,controller.editDialog.selectedRaidName)
+            if saved then
+                controller.editDialog:Hide();controller.editMode=false;controller.editMembers=nil;controller:Refresh()
+                if StaticPopupDialogs and StaticPopupDialogs["BOOTY_RAIDER_ATTENDANCE_RELOAD"] then
+                    local popup = UI.ShowOpaquePopup("BOOTY_RAIDER_ATTENDANCE_RELOAD")
+                    if popup and UI.WindowStack then UI.WindowStack.Raise(popup, page) end
+                end
+            else controller.editDialog.message:SetText(reason or "Unable to save this raid.") end
         end
     end)
     local function OnEditRaid()
@@ -217,7 +224,8 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
             if itemText~="" and not itemId then controller.editError:SetText("SR must contain a numeric Item ID.");controller.editError:Show();return end
             member.name=name;member.attendance=attendance;member.attendanceText=tostring(attendance);member.srItemText=itemId and tostring(itemId) or "";member.srItems=itemId and {{itemId=itemId,count=1}} or {};member.srCount=itemId and 1 or 0
         end
-        controller.editError:Hide();controller.editDialog.raidId=controller.editingRaidId;controller.editDialog.attendance:SetChecked(controller.editingEntry.attendanceEnabled~=false and 1 or nil);controller.editDialog.csr:SetChecked(controller.editingEntry.csrEnabled~=false and 1 or nil);controller.editDialog:Show()
+        controller.editError:Hide();controller.editDialog.raidId=controller.editingRaidId;controller.editDialog.attendance:SetChecked(controller.editingEntry.attendanceEnabled~=false and 1 or nil);controller.editDialog.csr:SetChecked(controller.editingEntry.csrEnabled~=false and 1 or nil)
+        controller.editDialog:SetRaidType(controller.editingEntry.raidName);controller.editDialog.message:SetText("Save the edited attendance and Soft Reserve values for this raid?");controller.editDialog:Show()
     end)
     UI.Window.StyleProjectDialog(controller.removeDialog); UI.Window.StyleProjectDialog(controller.editDialog)
     controller.playerHeader = Raider.UI.Components.Table.CreateHeader(page, nil, "Player", 264, -150, 120, nil, false)
@@ -445,7 +453,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
                 button:ClearAllPoints();button:SetPoint("TOPLEFT",page,"TOPLEFT",rect.x,-rect.y-(index-1)*28);button:SetWidth(historyWidth)
                 button.raidId = raid.id
                 local nameWidth=math.floor(historyWidth*0.38);local raidWidth=math.floor(historyWidth*0.34);local timeWidth=historyWidth-nameWidth-raidWidth
-                button.idText:ClearAllPoints();button.idText:SetPoint("LEFT",button,"LEFT",6,0);button.idText:SetWidth(nameWidth-8);button.idText:SetJustifyH("LEFT");button.idText:SetText(tostring(raid.id));button.idText:Show()
+                button.idText:ClearAllPoints();button.idText:SetPoint("LEFT",button,"LEFT",6,0);button.idText:SetWidth(nameWidth-8);button.idText:SetJustifyH("LEFT");button.idText:SetText(tostring(raid.displayName or raid.id));button.idText:Show()
                 button.zoneText:ClearAllPoints();button.zoneText:SetPoint("LEFT",button,"LEFT",nameWidth,0);button.zoneText:SetWidth(raidWidth-4);button.zoneText:SetJustifyH("LEFT");button.zoneText:SetText(tostring(raid.raidName or "Unknown"));button.zoneText:Show()
                 button.dateText:ClearAllPoints();button.dateText:SetPoint("LEFT",button,"LEFT",nameWidth+raidWidth,0);button.dateText:SetWidth(timeWidth-4);button.dateText:SetJustifyH("LEFT");button.dateText:SetText(date("%Y-%m-%d",tonumber(raid.savedAt) or 0));button.dateText:Show();button.allText:Hide()
                 button.allText:SetText(tostring(raid.id) .. " | " .. tostring(raid.raidName or "Unknown") .. " | " .. date("%Y-%m-%d",tonumber(raid.savedAt) or 0))

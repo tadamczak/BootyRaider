@@ -31,8 +31,9 @@ end
 
 local function GetSavedAt(raid)
     if not raid then return 0 end
-    -- Re-saving an old raid must not renew its sixty-day eligibility window.
-    return tonumber(raid.startedAt) or tonumber(raid.createdAt) or tonumber(raid.savedAt) or tonumber(raid.completedAt) or 0
+    -- Created At owns the sixty-day window. Start/save dates are only legacy
+    -- fallbacks; later metadata edits must never renew eligibility.
+    return tonumber(raid.createdAt) or tonumber(raid.startedAt) or tonumber(raid.savedAt) or tonumber(raid.completedAt) or 0
 end
 
 local function GetReserveCount(member)

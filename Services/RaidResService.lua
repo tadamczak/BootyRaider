@@ -664,11 +664,32 @@ end
 function RaidResService.GetSnapshotTimes(snapshot)
     local createdAt = tonumber(snapshot.createdAt or snapshot.startedAt or snapshot.savedAt or snapshot.updatedAt)
     local modifiedAt = tonumber(snapshot.modifiedAt or snapshot.savedAt or snapshot.updatedAt) or createdAt
-    local duration = tonumber(snapshot.duration)
-    if not duration and snapshot.startedAt and (snapshot.savedAt or snapshot.updatedAt) then
-        duration = (tonumber(snapshot.savedAt or snapshot.updatedAt) or 0) - (tonumber(snapshot.startedAt) or 0)
-    end
-    return createdAt, modifiedAt, duration and math.max(0, duration) or nil
+    local startedAt = tonumber(snapshot.sessionStartedAt or snapshot.startedAt or snapshot.createdAt)
+    local endedAt = tonumber(snapshot.endedAt)
+    local duration = startedAt and endedAt and endedAt >= startedAt and endedAt - startedAt or nil
+    return createdAt, modifiedAt, duration
+end
+
+function RaidResService.FormatDuration(duration)
+    duration = tonumber(duration)
+    if not duration then return "Unknown" end
+    duration = math.max(0, math.floor(duration))
+    return string.format("%dh %02dmin %02ds", math.floor(duration / 3600), math.floor(math.mod(duration,3600) / 60), math.mod(duration,60))
+end
+
+function RaidResService.FormatRaidEndTime(endedAt)
+    return endedAt and date("%d.%m.%Y %H:%M:%S", endedAt) or ""
+end
+
+function RaidResService.ParseRaidEndTime(value)
+    if type(value) ~= "string" then return nil,"Enter the raid end time as DD.MM.YYYY HH:MM:SS." end
+    local _,_,day,month,year,hour,minute,second = string.find(value,"^(%d%d)%.(%d%d)%.(%d%d%d%d) (%d%d):(%d%d):(%d%d)$")
+    if not day then return nil,"Enter the raid end time as DD.MM.YYYY HH:MM:SS." end
+    day,month,year,hour,minute,second = tonumber(day),tonumber(month),tonumber(year),tonumber(hour),tonumber(minute),tonumber(second)
+    if month<1 or month>12 or day<1 or day>31 or hour>23 or minute>59 or second>59 then return nil,"The raid end time is not a valid date." end
+    local ok,stamp = pcall(time,{year=year,month=month,day=day,hour=hour,min=minute,sec=second})
+    if not ok or not stamp or date("%d.%m.%Y %H:%M:%S",stamp) ~= value then return nil,"The raid end time is not a valid date." end
+    return stamp
 end
 
 function RaidResService.BuildSnapshot(attendance)
@@ -680,7 +701,9 @@ function RaidResService.BuildSnapshot(attendance)
     snapshot.saveOptions = CopySaveOptions(attendance.saveOptions)
     snapshot.createdAt = attendance.createdAt or attendance.sessionStartedAt or attendance.scannedAt
     snapshot.modifiedAt = attendance.modifiedAt or attendance.lastSavedAt or snapshot.updatedAt
-    snapshot.duration = attendance.duration or (attendance.sessionStartedAt and math.max(0, snapshot.modifiedAt - attendance.sessionStartedAt))
+    snapshot.endedAt, snapshot.displayName = attendance.endedAt, attendance.displayName
+    local _,_,duration = RaidResService.GetSnapshotTimes(attendance)
+    snapshot.duration = duration
     local index, itemIndex, savedNames = nil, nil, {}
     for index = 1, table.getn(attendance.members or {}) do
         local member = attendance.members[index]
@@ -776,11 +799,12 @@ function RaidResService.RestoreSnapshot(snapshot)
     end
     local createdAt, modifiedAt, duration = RaidResService.GetSnapshotTimes(snapshot)
     local attendance = {
-        addonVersion = Raider.version, scannedAt = snapshot.updatedAt, scannedAtText = snapshot.updatedAt and date("%Y-%m-%d %H:%M:%S", snapshot.updatedAt) or "", sessionStartedAt = snapshot.startedAt or snapshot.updatedAt, lastSavedAt = snapshot.savedAt or snapshot.updatedAt,
+        addonVersion = Raider.version, scannedAt = snapshot.updatedAt, scannedAtText = snapshot.updatedAt and date("%Y-%m-%d %H:%M:%S", snapshot.updatedAt) or "", sessionStartedAt = snapshot.startedAt or snapshot.createdAt or snapshot.updatedAt, lastSavedAt = snapshot.savedAt or snapshot.updatedAt,
         raidName = snapshot.raidName, snapshotId = snapshot.id, updatedBy = UnitName("player"), members = members, departedMembers = departedMembers, nextLootRecordId = nextLootRecordId,
         lootRules = Raider.Database.CopyLootRules(snapshot.lootRules or Raider.Database.GetDefaultLootRules()),
         saveOptions = CopySaveOptions(snapshot.saveOptions),
         createdAt = createdAt, modifiedAt = modifiedAt, duration = duration,
+        endedAt = snapshot.endedAt, displayName = snapshot.displayName,
         softReserveImport = { id = snapshot.raidResId or snapshot.id, origin = snapshot.source, url = snapshot.srUrl or "", rollForExport = snapshot.rollForExport or "", importedAt = snapshot.updatedAt, unmatchedNames = unmatchedNames, unmatchedReservations = unmatched, missingNames = missingNames },
         _loadedSnapshotId = snapshot.id,
         _sessionDraft = true,

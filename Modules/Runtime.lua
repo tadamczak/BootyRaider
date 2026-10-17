@@ -249,6 +249,7 @@ function Runtime.Initialize(host)
         Runtime.diagnosticsWrapped=true
     end
     Raider.Database.onRaidAttendanceChanged=Raider.Services.Raid.OnRaidAttendanceChanged
+    Raider.Database.onRaidAttendanceMetadataChanged=Raider.Services.Raid.PreserveLootSession
     Runtime.session=Raider.Services.RaidSession.Create({database=Raider.Database,raid=Raider.Services.Raid,raidRes=Raider.Services.RaidRes,
         raidStatistics=Raider.Services.RaidStatistics,testRaid=Raider.Services.TestRaid,now=function() return time() end})
     Runtime.sessionController=Raider.Modules.RaidSessionController.Create({state=Raider,session=Runtime.session,
