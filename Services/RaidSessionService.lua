@@ -169,7 +169,11 @@ function Session:Complete(saveOptions)
         local staged, key, value = {}, nil, nil
         for key, value in pairs(attendance) do staged[key] = value end
         staged.snapshotId, staged._loadedSnapshotId = request.raidId, nil
-        staged.lastSavedAt, staged._sessionDraft = dependencies.now(), nil
+        local savedAt, previous = dependencies.now(), snapshot or statistic
+        staged.lastSavedAt, staged._sessionDraft = savedAt, nil
+        staged.createdAt = tonumber(previous and (previous.createdAt or previous.startedAt or previous.savedAt or previous.updatedAt)) or savedAt
+        staged.modifiedAt = savedAt
+        staged.duration = tonumber(attendance.duration) or math.max(0, savedAt - (tonumber(attendance.sessionStartedAt) or savedAt))
         staged.saveOptions = {saveRaidStatistics = request.saveRaidStatistics, saveAttendance = request.saveAttendance, saveCSR = request.saveCSR}
         local entry
         if request.saveRaidStatistics or request.saveCSR then

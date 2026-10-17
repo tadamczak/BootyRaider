@@ -9,6 +9,7 @@ local function GroupSettings(page)
 end
 
 function RaidManagement.ResetIssueAttention(page)
+    page.bootyIssuesHidden = nil
     local button = page.classicIssues
     if not button then return end
     button.bootyIssueKeys = nil; button.bootyIssueScratch = nil
@@ -84,9 +85,14 @@ function RaidManagement.CreateChrome(page, callbacks)
     Raider.UI.Components.AttachTooltip(view.classicIssues, "Raid issues", "Review missing, invalid or unmatched Soft Reserves.")
     view.classicIssues:SetScript("OnClick", function()
         Raider.UI.Components.SetAttentionPulse(view.classicIssues, false)
-        if page.softReserveWarning then page.softReserveWarning.userDismissed = false; page.softReserveWarning.userMinimized = false; page.softReserveWarning.forceExpanded = true end
-        if page.missingSoftReserveWarning then page.missingSoftReserveWarning.userDismissed = false; page.missingSoftReserveWarning.userMinimized = false; page.missingSoftReserveWarning.forceExpanded = true end
-        if page.invalidSoftReserveWarning then page.invalidSoftReserveWarning.userDismissed = false; page.invalidSoftReserveWarning.userMinimized = false; page.invalidSoftReserveWarning.forceExpanded = true end
+        local visible = page.softReserveWarning and page.softReserveWarning:IsShown()
+            or page.missingSoftReserveWarning and page.missingSoftReserveWarning:IsShown()
+            or page.invalidSoftReserveWarning and page.invalidSoftReserveWarning:IsShown()
+        page.bootyIssuesHidden = visible and true or false
+        for _, card in ipairs({page.softReserveWarning, page.missingSoftReserveWarning, page.invalidSoftReserveWarning}) do
+            card.userDismissed = false; card.userMinimized = false; card.forceExpanded = true
+        end
+        if page.bootyIssuesHidden then RaidManagement.HideSoftReserveWarnings(page) end
         if page.resizeRefresh then page.resizeRefresh() end
     end)
     page.classicRaidName = view.classicRaidName; page.classicMeta = view.classicMeta; page.classicSaved = view.classicSaved; page.classicIssues = view.classicIssues
@@ -160,11 +166,40 @@ function RaidManagement.CreateChrome(page, callbacks)
     view.reyCoinCanvas = Raider.UI.Components.CreateContainer(nil, view.reyCoinScroll)
     view.reyCoinCanvas:SetWidth(130); view.reyCoinCanvas:SetHeight(1)
     view.reyCoinScroll:SetScrollChild(view.reyCoinCanvas)
+    local function MeasureReyCoin(width)
+        view.reyCoinCanvas:SetWidth(width)
+        return math.max(1, (view.reyCoinCount or 0) * 25)
+    end
+    local function RenderReyCoinRows()
+        if view.reyCoinRendering then return end
+        view.reyCoinRendering = true
+        local width, height = Raider.UI.Components.GetFrameSpan(view.reyCoinPanel)
+        width, height = math.max(1, width - 12), math.max(1, height - 90)
+        view.reyCoinScroll:SetWidth(width); view.reyCoinScroll:SetHeight(height)
+        local _, contentHeight = Raider.UI.Components.ResolveScrollLayout(width, height, 0, MeasureReyCoin)
+        view.reyCoinCanvas:SetHeight(contentHeight)
+        local slots = Raider.UI.Components.CalculateVisibleRows(height, 0, 25, 40, 0)
+        local maximum = math.max(0, ((view.reyCoinCount or 0) - slots) * 25)
+        local offset = math.min(maximum, math.floor(view.reyCoinScroll:GetVerticalScroll() / 25) * 25)
+        view.reyCoinScroll:SetVerticalScroll(offset)
+        Raider.UI.Components.ApplyScrollRange(view.reyCoinScroll, nil, maximum)
+        view.reyCoinScroll.bootyMaximumScroll = maximum
+        for index = 1, table.getn(view.reyCoinRows) do
+            local row, top = view.reyCoinRows[index], (index - 1) * 25 - offset
+            row:ClearAllPoints(); row:SetPoint("TOPLEFT", view.reyCoinScroll, "TOPLEFT", 0, -top); row:SetWidth(width)
+            -- Native 1.12 scroll children can draw elevated rows outside their
+            -- viewport. Only complete, explicitly positioned rows are shown.
+            if index <= (view.reyCoinCount or 0) and top >= 0 and top + 24 <= height then row:Show() else row:Hide() end
+        end
+        view.reyCoinRendering = nil
+    end
+    page.RenderReyCoinRows = RenderReyCoinRows
     view.reyCoinScroll:EnableMouseWheel(true)
     view.reyCoinScroll:SetScript("OnMouseWheel", function()
-        local maximum = math.max(0, view.reyCoinCanvas:GetHeight() - view.reyCoinScroll:GetHeight())
-        view.reyCoinScroll:SetVerticalScroll(math.max(0, math.min(maximum, view.reyCoinScroll:GetVerticalScroll() - arg1 * 24)))
+        view.reyCoinScroll:SetVerticalScroll(math.max(0, math.min(view.reyCoinScroll.bootyMaximumScroll or 0, view.reyCoinScroll:GetVerticalScroll() - arg1 * 25)))
+        RenderReyCoinRows()
     end)
+    view.reyCoinScroll:SetScript("OnVerticalScroll", RenderReyCoinRows)
     view.reyCoinRows = {}
     page.reyCoinScroll = view.reyCoinScroll
     page.reyCoinCanvas = view.reyCoinCanvas
@@ -201,18 +236,18 @@ function RaidManagement.CreateChrome(page, callbacks)
         end
         local index
         for index = count + 1, table.getn(view.reyCoinRows) do view.reyCoinRows[index]:Hide() end
-        view.reyCoinCanvas:SetHeight(math.max(1, count * 25))
+        view.reyCoinCount = count
+        RenderReyCoinRows()
     end
     page.RefreshReyCoinList = RefreshReyCoinList
     Raider.Services.Raid.onReyCoinChanged = function()
         if view.reyCoinPanel:IsShown() then RefreshReyCoinList() end
     end
     for index = 1, 40 do
-        local row = Raider.UI.Components.CreateContainer(nil, view.reyCoinCanvas)
+        local row = Raider.UI.Components.CreateContainer(nil, view.reyCoinPanel)
         row.shade = Raider.UI.Components.CreateTexture(row, nil, "BACKGROUND"); row.shade:SetAllPoints(row)
         row.shade:SetTexture(1,1,1, math.mod(index,2)==0 and 0.09 or 0)
-        row:SetHeight(24); row:SetPoint("TOPLEFT", view.reyCoinCanvas, "TOPLEFT", 0, -(index - 1) * 25)
-        row:SetPoint("RIGHT", view.reyCoinCanvas, "RIGHT", 0, 0)
+        row:SetHeight(24); row:SetPoint("TOPLEFT", view.reyCoinScroll, "TOPLEFT", 0, -(index - 1) * 25)
         row.label = Raider.UI.Components.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall")
         row.label:SetPoint("LEFT", row, "LEFT", 2, 0); row.label:SetPoint("RIGHT", row, "RIGHT", -18, 0)
         row.label:SetJustifyH("LEFT")
@@ -257,9 +292,9 @@ function RaidManagement.CreateChrome(page, callbacks)
     view.reyCoinScroll:SetPoint("BOTTOMRIGHT", view.reyCoinPanel, "BOTTOMRIGHT", -6, 61)
     RaidManagement.AttachReyCoinAdd(view, RefreshReyCoinList)
     view.reyCoinPanel:SetScript("OnSizeChanged", function()
-        view.reyCoinCanvas:SetWidth(math.max(1, view.reyCoinPanel:GetWidth() - 12))
         local width = math.max(40, (view.reyCoinPanel:GetWidth() - 64) / 2)
         view.reyCoinInput:SetWidth(width); view.reyCoinItem:SetWidth(width)
+        RenderReyCoinRows()
     end)
     view.reyCoinToggle = Raider.UI.Components.CreateButton(page, nil, "", 18, 18)
     Raider.UI.Components.SetClassicButtonCompact(view.reyCoinToggle, true)
@@ -373,13 +408,15 @@ function RaidManagement.CreateActionControls(page)
     controls.historyDeleteButtons = {}
     controls.historyLoadButtons = {}
     controls.historyHeaders = {}
-    for index, text in ipairs({"#", "Name", "Raid", "Time"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
+    for index, text in ipairs({"#", "Name", "Raid", "Duration", "Created At", "Modified At"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
     local historyIndex
     for historyIndex = 1, 10 do
         local button = Raider.UI.Components.CreateSelectionButton(controls.historyCanvas, nil, "", 380, 26); button.historyIndex = historyIndex; button:Hide()
         Raider.UI.Components.SetButtonLabelInsets(button, 8, 126)
         button.number = Raider.UI.Components.CreateLabel(button, nil, "OVERLAY", "GameFontHighlightSmall")
         button.savedAt = Raider.UI.Components.CreateLabel(button, nil, "OVERLAY", "GameFontHighlightSmall")
+        button.createdAt = Raider.UI.Components.CreateLabel(button, nil, "OVERLAY", "GameFontHighlightSmall")
+        button.duration = Raider.UI.Components.CreateLabel(button, nil, "OVERLAY", "GameFontHighlightSmall")
         button.raidName = Raider.UI.Components.CreateLabel(button, nil, "OVERLAY", "GameFontHighlightSmall")
         button.savedAt:SetPoint("RIGHT", button, "RIGHT", -8, 0); button.savedAt:SetWidth(112); button.savedAt:SetJustifyH("RIGHT"); button.savedAt:SetTextColor(0.78, 0.78, 0.72)
         controls.historyButtons[historyIndex] = button
@@ -1360,6 +1397,7 @@ function RaidManagement.UpdateViewSelector(page, lootMasterMode)
 end
 
 function RaidManagement.LayoutSoftReserveWarnings(page, lootMasterMode, side, issues)
+    if page.bootyIssuesHidden then RaidManagement.HideSoftReserveWarnings(page); page.classicWarningBottom=0; return 0,0 end
     -- A full refresh shares its freshly computed issues with the header. Direct
     -- layout calls still resolve current data; no result is retained on the page.
     if not issues then
@@ -3995,7 +4033,7 @@ function RaidManagement.AttachActionHandlers(options)
         if not request then SaveFailure(exists); return end
         pendingSaveRequest = request
         if exists then
-            overwriteDialog:Open("Replace saved raid '" .. request.raidId .. "'? Its saved data and statistics will use these save options.", function()
+            overwriteDialog:Open("Raid with '" .. request.raidId .. "' already exists. Are you sure you want to override it?", function()
                 local confirmed = pendingSaveRequest
                 if not confirmed then return end
                 confirmed.overwrite = true; SubmitSave(confirmed)

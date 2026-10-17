@@ -55,8 +55,12 @@ function Runtime.RequestRaidScan()
 end
 function Runtime.SaveSession(options)
     local saved,failure=Runtime.sessionController:Complete(options)
-    if saved then Runtime.RefreshViews() end
+    if saved then Runtime.CloseSessionPrompts(); Runtime.RefreshViews() end
     return saved,failure
+end
+function Runtime.QuitSession()
+    Runtime.sessionController:Quit()
+    Runtime.CloseSessionPrompts()
 end
 function Runtime.AcceptLoadedSnapshot()
     -- Loading the same saved ID can occur after a zone change. Re-observe the
@@ -123,7 +127,15 @@ end
 local function HideTransitionPrompt()
     if Runtime.transitionPrompt then Runtime.transitionPrompt:Hide() end
 end
+function Runtime.CloseSessionPrompts()
+    if Runtime.worldContext then Runtime.worldContext:CancelConfirmation() end
+    HideTransitionPrompt()
+    local view=Runtime.views.raid
+    if view and view.HideSessionTransitionPrompt then view:HideSessionTransitionPrompt() end
+end
 local function ShowTransitionPrompt(contextKey)
+    local attendance=Raider.Database.GetRaidAttendance()
+    if not Raider.raidSessionDraft or not Raider.Services.RaidRes.HasSession(attendance) then Runtime.CloseSessionPrompts(); return false end
     Runtime.sessionController:ConfirmTransition(contextKey)
     if not Runtime.transitionPrompt then
         local dialog=UI.Window.CreateProjectConfirmation("BootyRaiderSessionTransition","Raid session is still active","Continue Session","raids",{modal=false})
@@ -145,6 +157,7 @@ local function ShowTransitionPrompt(contextKey)
         or "You left the raid context. Continue this session, or save and end it?"
     dialog.contextKey=contextKey
     dialog:Open(message,function()
+        if Raider.Database.GetRaidAttendance()~=attendance or not Raider.raidSessionDraft then Runtime.CloseSessionPrompts(); return end
         Runtime.sessionController:Continue(contextKey)
         if string.find(contextKey or "","different-raid-context|",1,true)==1 then
             Runtime.OpenView("raid")
@@ -153,6 +166,7 @@ local function ShowTransitionPrompt(contextKey)
         end
         Runtime.RefreshViews()
     end,function()
+        if Raider.Database.GetRaidAttendance()~=attendance or not Raider.raidSessionDraft then Runtime.CloseSessionPrompts(); return end
         Runtime.OpenView("raid")
         local view=Runtime.GetView("raid")
         if view and view.OpenSaveDialog then view:OpenSaveDialog(contextKey) end
@@ -228,7 +242,7 @@ function Runtime.Initialize(host)
         Raider.Services.Raid.CaptureRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.CaptureRoster,1)
         Raider.Services.Raid.RecordLoot=Raider.Diagnostics.Wrap("Loot message",Raider.Services.Raid.RecordLoot,2)
         Raider.Services.RaidStatistics.BuildSummary=Raider.Diagnostics.Wrap("Raid summary",Raider.Services.RaidStatistics.BuildSummary,2)
-        Raider.Services.CSR.BuildSummary=Raider.Diagnostics.Wrap("CSR model",Raider.Services.CSR.BuildSummary,7)
+        Raider.Services.CSR.BuildSummary=Raider.Diagnostics.Wrap("CSR model",Raider.Services.CSR.BuildSummary,8)
         Raider.Services.RaidRes.Import=Raider.Diagnostics.Wrap("SR import",Raider.Services.RaidRes.Import,3)
         Raider.Services.RaidRes.BuildSnapshot=Raider.Diagnostics.Wrap("SR snapshot",Raider.Services.RaidRes.BuildSnapshot,1)
         Raider.Modules.RaidManagement.RefreshPage=Raider.Diagnostics.Wrap("Raid refresh",Raider.Modules.RaidManagement.RefreshPage,1)

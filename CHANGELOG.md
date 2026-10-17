@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-dev.16 — 2026-10-17
+
+- Close stale session prompts after saving or ending a raid and guard obsolete Continue actions.
+- Show saved-raid duration, creation and modification dates; clarify overwrite confirmation.
+- Keep Reycoin rows inside their window and toggle warnings with the Issues button.
+- Add filtered Select all, left-aligned headings and item-name search to Raid Stats.
+- Retain CSR history, show optional archives and group by player or item with sortable source tables.
+
 ## 0.1.0-dev.15 — 2026-10-17
 
 - Keep Loot Rules and save choices independent for each raid.

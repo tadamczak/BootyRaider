@@ -1215,6 +1215,9 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         softReserveImport = preservePrevious and previousAttendance.softReserveImport or nil,
         lootRules = preservePrevious and previousAttendance.lootRules or nil,
         saveOptions = preservePrevious and previousAttendance.saveOptions or nil,
+        createdAt = preservePrevious and previousAttendance.createdAt or nil,
+        modifiedAt = preservePrevious and previousAttendance.modifiedAt or nil,
+        duration = preservePrevious and previousAttendance.duration or nil,
         nextLootRecordId = preservePrevious and previousAttendance.nextLootRecordId or 0,
     }
     -- Publish provenance only after the entire capture succeeds. Departed

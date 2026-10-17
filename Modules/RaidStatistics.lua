@@ -53,7 +53,7 @@ end
 function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     local page=UI.CreateResponsiveCanvas(host,"BootyRaiderRaidStatisticsPage")
     local isHostVisible = host.IsVisible or host.IsShown
-    local controller = { page = page, getEntries = getEntries, deleteEntry = deleteEntry, updateEntry = updateEntry, selectedHistoryIds = {}, raidButtons = {}, rows = {}, filteredEntries = {}, selectedRaids = {}, visibleHistoryIds = {}, modelDirty = true, summaryDirty = true, emptySummary = { players = {} } }
+    local controller = { page = page, getEntries = getEntries, deleteEntry = deleteEntry, updateEntry = updateEntry, selectedHistoryIds = {}, raidButtons = {}, rows = {}, filteredEntries = {}, selectedRaids = {}, visibleHistoryIds = {}, availableHistoryIds = {}, modelDirty = true, summaryDirty = true, emptySummary = { players = {} } }
     page.statisticsController = controller
     host.statisticsController = controller
     controller.itemDialog = Raider.UI.Components.CreateItemListDialog("BootyRaiderRaidStatisticsItems")
@@ -78,7 +78,10 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     Raider.UI.Components.AttachTooltip(controller.historyToggle, "Saved raids", "Collapse or restore the saved raid list.")
     controller.historyToggle:SetScript("OnClick", function() controller.historyCollapsed = not controller.historyCollapsed; controller:Render() end)
     controller.historyHeaders = {}
-    for index, text in ipairs({"Name", "Raid", "Time"}) do controller.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold") end
+    for index, text in ipairs({"Name", "Raid", "Time"}) do
+        controller.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold")
+        controller.historyHeaders[index]:SetJustifyH("LEFT")
+    end
     controller.fromLabel = Raider.UI.Components.CreateLabel(controller.filterPanel, nil, "OVERLAY", "GameFontHighlightSmall"); controller.fromLabel:SetPoint("TOPLEFT", controller.filterPanel, "TOPLEFT", 10, -38); controller.fromLabel:SetText("From")
     controller.fromDate = Raider.UI.Components.CreateFramedEditBox(controller.filterPanel, nil, 80); controller.fromDate:SetPoint("TOPLEFT", controller.filterPanel, "TOPLEFT", 48, -33); controller.fromDate:SetMaxLetters(10); controller.fromDate:EnableKeyboard(false)
     controller.datePicker = Raider.UI.Components.CreateDatePicker("BootyRaiderRaidStatisticsDatePicker")
@@ -265,7 +268,14 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         picker:SetParent(group);picker:ClearAllPoints();picker:SetPoint("LEFT",field,"RIGHT",2,0);picker:SetWidth(18);picker:SetHeight(18)
     end
     controller.raidFilter:SetHeight(26);controller.raidFilter.bootyFlowWidth=130
-    controller.flow={controller.raidFilter,controller.searchGroup,controller.fromGroup,controller.toGroup}
+    controller.selectAllGroup=Group(100)
+    controller.selectAll=UI.CreateCheckButton(nil,controller.selectAllGroup,"UICheckButtonTemplate")
+    controller.selectAll:SetWidth(22);controller.selectAll:SetHeight(22);controller.selectAll:SetPoint("LEFT",controller.selectAllGroup,"LEFT",0,0)
+    controller.selectAll.label=UI.CreateLabel(controller.selectAll,nil,"OVERLAY","GameFontHighlightSmall")
+    controller.selectAll.label:SetPoint("LEFT",controller.selectAll,"RIGHT",2,0);controller.selectAll.label:SetText("Select all");controller.selectAll.label:SetJustifyH("LEFT")
+    UI.BindCheckboxLabel(controller.selectAll,function(check) controller:SetFilteredSelection(check:GetChecked()) end)
+    UI.AttachTooltip(controller.selectAll,"Select all","Select or deselect every raid currently shown by these filters.")
+    controller.flow={controller.raidFilter,controller.searchGroup,controller.fromGroup,controller.toGroup,controller.selectAllGroup}
     for _,dialog in ipairs({controller.removeDialog,controller.editDialog}) do
         dialog:SetWidth(320)
         if not dialog.close then dialog.close=UI.CreateWindowButton(dialog,nil,"close");dialog.close:SetPoint("TOPRIGHT",dialog,"TOPRIGHT",-6,-6);dialog.close:SetScript("OnClick",function() this:GetParent():Hide() end) end
@@ -313,10 +323,6 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         local historyHeight=stacked and math.max(56,math.min(84,math.floor((remaining-100)/28)*28)) or remaining-44
         self.listTitle:ClearAllPoints();self.listTitle:SetPoint("TOPLEFT",page,"TOPLEFT",8,-top);self.listTitle:SetWidth(historyWidth);self.listTitle:SetJustifyH("LEFT")
         self.historyToggle:SetWidth(18);self.historyToggle:SetHeight(18);self.historyToggle:ClearAllPoints();self.historyToggle:SetPoint("TOPLEFT",page,"TOPLEFT",8+historyWidth-18,-top);UI.SetChevronButtonIcon(self.historyToggle,self.historyCollapsed and "right" or "left",11)
-        local headerX=8
-        local headerName=math.floor(historyWidth*0.38);local headerRaid=math.floor(historyWidth*0.34);local headerTime=historyWidth-headerName-headerRaid
-        local headerWidths={headerName,headerRaid,headerTime}
-        for index=1,3 do local header=self.historyHeaders[index];header:ClearAllPoints();header:SetPoint("TOPLEFT",page,"TOPLEFT",headerX,-top-24);header:SetWidth(headerWidths[index]);header:SetHeight(18);headerX=headerX+headerWidths[index] end
         self.historyRect=self.historyRect or {}
         self.historyRect.x=8;self.historyRect.y=top+44;self.historyRect.width=historyWidth;self.historyRect.height=historyHeight
         local playerX=self.historyCollapsed and 34 or (stacked and 8 or 8+historyWidth+12)
@@ -368,12 +374,18 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     -- rebuild its summary; viewport work binds the retained model directly.
     function controller:RebuildModel()
         if self.modelDirty then
-            local entries, filterError = Raider.Services.RaidStatistics.FilterEntries(self.getEntries(), self.fromDate:GetText(), self.toDate:GetText(), self.filteredEntries, self.selectedRaids, self.search:GetText())
+            local available = self.getEntries()
+            local raidId
+            for raidId in pairs(self.availableHistoryIds) do self.availableHistoryIds[raidId] = nil end
+            for index = 1, table.getn(available or {}) do
+                local entry = available[index]
+                if entry.statisticsEnabled ~= false then self.availableHistoryIds[entry.id] = true end
+            end
+            local entries, filterError = Raider.Services.RaidStatistics.FilterEntries(available, self.fromDate:GetText(), self.toDate:GetText(), self.filteredEntries, self.selectedRaids, self.search:GetText())
             if not entries then
                 for index = table.getn(self.filteredEntries), 1, -1 do table.remove(self.filteredEntries, index) end
             end
             self.filterError = filterError
-            local raidId
             for raidId in pairs(self.visibleHistoryIds) do self.visibleHistoryIds[raidId] = nil end
             for index = 1, table.getn(self.filteredEntries) do
                 local entry = self.filteredEntries[index]
@@ -382,13 +394,25 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         end
         local visibleIds, selectedRaid, selectedCount = self.visibleHistoryIds, nil, 0
         for raidId in pairs(self.selectedHistoryIds) do
-            if not visibleIds[raidId] then self.selectedHistoryIds[raidId] = nil
-            else selectedCount = selectedCount + 1; selectedRaid = visibleIds[raidId] end
+            if not self.availableHistoryIds[raidId] then self.selectedHistoryIds[raidId] = nil
+            elseif visibleIds[raidId] then selectedCount = selectedCount + 1; selectedRaid = visibleIds[raidId] end
         end
         self.selectedCount = selectedCount
+        local visibleCount = table.getn(self.filteredEntries)
+        self.selectAll:SetChecked(visibleCount > 0 and selectedCount == visibleCount)
+        if visibleCount > 0 then self.selectAll:Enable() else self.selectAll:Disable() end
         self.singleRaid = selectedCount == 1 and selectedRaid or nil
         self.summary = selectedCount > 0 and Raider.Services.RaidStatistics.BuildSummary(self.filteredEntries, self.selectedHistoryIds) or self.emptySummary
         self.modelDirty = false; self.summaryDirty = false
+    end
+    function controller:SetFilteredSelection(selected)
+        if self.modelDirty then self:RebuildModel() end
+        if table.getn(self.filteredEntries) == 0 then self.selectAll:SetChecked(false);return end
+        self.editMode=false;self.editMembers=nil
+        for index=1,table.getn(self.filteredEntries) do
+            self.selectedHistoryIds[self.filteredEntries[index].id]=selected and true or nil
+        end
+        self.summaryDirty=true;self:Render()
     end
     function controller:RenderHeader()
         local filterError, selectedCount, singleRaid = self.filterError, self.selectedCount, self.singleRaid
@@ -407,6 +431,13 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         if self.historyCollapsed then
             self.raidScroll:Hide();UI.SetScrollBarVisible(getglobal("BootyRaiderRaidStatisticsHistoryScrollScrollBar"),false)
         else raidOffset,visibleRaids,historyWidth=UI.Table.LayoutViewport(self.raidScroll,page,rect.x,rect.y,rect.width,rect.height,table.getn(entries),28,table.getn(self.raidButtons)) end
+        local nameWidth=math.floor(historyWidth*0.38);local raidWidth=math.floor(historyWidth*0.34)
+        local starts={6,nameWidth,nameWidth+raidWidth};local widths={nameWidth-8,raidWidth-4,historyWidth-nameWidth-raidWidth-4}
+        for index=1,3 do
+            local header=self.historyHeaders[index]
+            header:ClearAllPoints();header:SetPoint("TOPLEFT",page,"TOPLEFT",rect.x+starts[index],-rect.y+20)
+            header:SetWidth(math.max(1,widths[index]));header:SetHeight(18);header:SetJustifyH("LEFT")
+        end
         for index = 1, table.getn(self.raidButtons) do
             local button, logicalIndex = self.raidButtons[index], raidOffset + index
             local raid = entries[logicalIndex]

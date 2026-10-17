@@ -128,7 +128,7 @@ function Screen.Create(parent, host)
         requestRosterScan=Runtime.RequestRaidScan,saveRaidRoster=Runtime.CaptureActiveRoster,
         beginRaidSession=function() Runtime.sessionController:Begin();Runtime.worldContext.Update() end,
         startNewRaid=function(id,name) return Runtime.sessionController:StartNew(id,name) end,
-        saveRaidSession=Runtime.SaveSession,quitRaidSession=function() Runtime.sessionController:Quit() end,
+        saveRaidSession=Runtime.SaveSession,quitRaidSession=Runtime.QuitSession,
         continueRaidSession=function(context) Runtime.sessionController:Continue(context) end,
         dismissRaidSessionTransition=function(context) Runtime.sessionController:DismissTransition(context) end,
         hasPendingRaidTransition=function() return Raider.raidSessionTransitionPending end,
@@ -144,6 +144,7 @@ function Screen.Create(parent, host)
     function controller:Show() if not Raider.active then return end;SizePage();lifecycle:Show();Refresh() end
     function controller:Hide() page:Hide();lifecycle:Hide() end
     function controller:Refresh() Refresh() end
+    function controller:HideSessionTransitionPrompt() page.HideSessionTransitionPrompt() end
     function controller:OnResize() SizePage();Refresh() end
     function controller:OnRosterUpdate() lifecycle:OnRosterUpdate() end
     function controller:SyncTrackingSetting(skipRefresh) lifecycle:SyncTrackingSetting(skipRefresh) end
