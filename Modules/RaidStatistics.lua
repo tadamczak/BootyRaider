@@ -4,6 +4,9 @@ local UI = Raider.UI.Components
 Raider.Modules = Raider.Modules or {}
 local RaidStatistics = {}
 Raider.Modules.RaidStatistics = RaidStatistics
+local function CanManageHistory()
+    return Raider.Services.RankPolicy.CanManageHistory()
+end
 
 local function OnRaidSelect()
     local controller = this.statisticsController
@@ -78,7 +81,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     Raider.UI.Components.AttachTooltip(controller.historyToggle, "Saved raids", "Collapse or restore the saved raid list.")
     controller.historyToggle:SetScript("OnClick", function() controller.historyCollapsed = not controller.historyCollapsed; controller:Render() end)
     controller.historyHeaders = {}
-    for index, text in ipairs({"Name", "Raid", "Time"}) do
+    for index, text in ipairs({"Raid ID", "Raid Type", "Time"}) do
         controller.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold")
         controller.historyHeaders[index]:SetJustifyH("LEFT")
     end
@@ -148,6 +151,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.removeDialog.remove = Raider.UI.Components.CreateButton(controller.removeDialog, nil, "Remove", 86, 24); controller.removeDialog.remove:SetPoint("BOTTOMRIGHT", controller.removeDialog, "BOTTOMRIGHT", -72, 18)
     controller.removeDialog.cancel:SetScript("OnClick", function() controller.removeDialog:Hide() end)
     controller.removeDialog.remove:SetScript("OnClick", function()
+        if not CanManageHistory() then controller.removeDialog:Hide(); controller:Refresh(); return end
         local raidId = controller.removeDialog.raidId
         controller.removeDialog:Hide()
         if raidId and controller.deleteEntry and controller.deleteEntry(raidId) then
@@ -170,6 +174,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.editDialog.save = Raider.UI.Components.CreateButton(controller.editDialog, nil, "Save", 86, 24); controller.editDialog.save:SetPoint("BOTTOMRIGHT", controller.editDialog, "BOTTOMRIGHT", -72, 18)
     controller.editDialog.cancel:SetScript("OnClick", function() controller.editDialog:Hide() end)
     controller.editDialog.save:SetScript("OnClick", function()
+        if not CanManageHistory() then controller.editDialog:Hide(); controller.editMode=false; controller.editMembers=nil; controller:Refresh(); return end
         local raidId = controller.editDialog.raidId
         local attendanceEnabled = controller.editDialog.attendance:GetChecked() and true or false
         local csrEnabled = controller.editDialog.csr:GetChecked() and true or false
@@ -191,6 +196,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         end
     end)
     local function OnEditRaid()
+        if not CanManageHistory() then return end
         local raidId = this.raidId
         local entries = controller.getEntries()
         local entry, entryIndex
@@ -201,6 +207,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         controller.editMode=true;controller.editError:Hide();controller:Render()
     end
     local function OnRemoveRaid()
+        if not CanManageHistory() then return end
         controller.removeDialog.raidId = this.raidId
         controller.removeDialog.message:SetText("Remove raid " .. tostring(this.raidId or "") .. " from Raid Statistics and CSR history?")
         local messageHeight=math.max(32,UI.MeasureTextHeight(controller.removeDialog.message,controller.removeDialog:GetWidth()-16))
@@ -210,10 +217,12 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.headerEdit:SetScript("OnClick", OnEditRaid); controller.headerRemove:SetScript("OnClick", OnRemoveRaid)
     controller.editCancel:SetScript("OnClick",function() controller.editMode=false;controller.editMembers=nil;controller.editError:Hide();controller:Render() end)
     controller.editAdd:SetScript("OnClick",function()
+        if not CanManageHistory() then return end
         local member={name="",class="",guildRank="Guest",lootRank="Guest",attendance=1,attendanceText="1",srItemText="",srCount=0,lootCount=0,srItems={},lootItems={}}
         table.insert(controller.editMembers,member);controller.scroll.offset=math.max(0,table.getn(controller.editMembers)-table.getn(controller.rows));controller:Render()
     end)
     controller.editSave:SetScript("OnClick",function()
+        if not CanManageHistory() then controller.editMode=false;controller.editMembers=nil;controller:Refresh();return end
         local rowIndex
         for rowIndex=1,table.getn(controller.rows) do UpdateEditMember(controller.rows[rowIndex]) end
         for rowIndex=1,table.getn(controller.editMembers or {}) do
@@ -423,12 +432,18 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         self.summaryDirty=true;self:Render()
     end
     function controller:RenderHeader()
+        local canManage = CanManageHistory()
+        if not canManage then
+            self.editMode=false;self.editMembers=nil;self.editingEntry=nil;self.editingRaidId=nil
+            self.editDialog:Hide();self.removeDialog:Hide()
+        end
         local filterError, selectedCount, singleRaid = self.filterError, self.selectedCount, self.singleRaid
         self.showResultStatus=filterError or selectedCount > 0
         if filterError then self.filterStatus:SetText(filterError);self.filterStatus:Show();self.headerEdit:Hide(); self.headerRemove:Hide()
         elseif singleRaid then self.filterStatus:SetText("|cffffd147" .. tostring(singleRaid.raidName or "Unknown zone") .. "|r |cffffffff| " .. tostring(singleRaid.id) .. " | " .. date("%Y-%m-%d", tonumber(singleRaid.savedAt) or 0) .. "|r"); self.filterStatus:Show();self.headerEdit.raidId = singleRaid.id; self.headerRemove.raidId = singleRaid.id; self.headerEdit:Show(); self.headerRemove:Show()
         elseif selectedCount > 1 then self.filterStatus:SetText("|cffffd147Selected:|r |cffffffff" .. selectedCount .. "|r");self.filterStatus:Show();self.headerEdit:Hide();self.headerRemove:Hide()
         else self.filterStatus:SetText("");self.filterStatus:Hide(); self.headerEdit:Hide(); self.headerRemove:Hide() end
+        if not canManage then self.headerEdit:Hide(); self.headerRemove:Hide() end
         if self.editMode then self.headerEdit:Hide();self.headerRemove:Hide();self.editAdd:Show();self.editSave:Show();self.editCancel:Show()
         else self.editAdd:Hide();self.editSave:Hide();self.editCancel:Hide();self.editError:Hide() end
     end
@@ -453,7 +468,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
                 button:ClearAllPoints();button:SetPoint("TOPLEFT",page,"TOPLEFT",rect.x,-rect.y-(index-1)*28);button:SetWidth(historyWidth)
                 button.raidId = raid.id
                 local nameWidth=math.floor(historyWidth*0.38);local raidWidth=math.floor(historyWidth*0.34);local timeWidth=historyWidth-nameWidth-raidWidth
-                button.idText:ClearAllPoints();button.idText:SetPoint("LEFT",button,"LEFT",6,0);button.idText:SetWidth(nameWidth-8);button.idText:SetJustifyH("LEFT");button.idText:SetText(tostring(raid.displayName or raid.id));button.idText:Show()
+                button.idText:ClearAllPoints();button.idText:SetPoint("LEFT",button,"LEFT",6,0);button.idText:SetWidth(nameWidth-8);button.idText:SetJustifyH("LEFT");button.idText:SetText(tostring(raid.id));button.idText:Show()
                 button.zoneText:ClearAllPoints();button.zoneText:SetPoint("LEFT",button,"LEFT",nameWidth,0);button.zoneText:SetWidth(raidWidth-4);button.zoneText:SetJustifyH("LEFT");button.zoneText:SetText(tostring(raid.raidName or "Unknown"));button.zoneText:Show()
                 button.dateText:ClearAllPoints();button.dateText:SetPoint("LEFT",button,"LEFT",nameWidth+raidWidth,0);button.dateText:SetWidth(timeWidth-4);button.dateText:SetJustifyH("LEFT");button.dateText:SetText(date("%Y-%m-%d",tonumber(raid.savedAt) or 0));button.dateText:Show();button.allText:Hide()
                 button.allText:SetText(tostring(raid.id) .. " | " .. tostring(raid.raidName or "Unknown") .. " | " .. date("%Y-%m-%d",tonumber(raid.savedAt) or 0))

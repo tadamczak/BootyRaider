@@ -31,6 +31,17 @@ function Runtime.RefreshViews()
     local _,view
     for _,view in pairs(Runtime.views) do if view.Refresh then view:Refresh() end end
 end
+function Runtime.WantsGuildDirectory()
+    if not Raider.active then return false end
+    if Raider.Services.Raid.IsInRaid() then return true end
+    for _,view in pairs(Runtime.views) do
+        if view and view.page and view.page:IsVisible() then return true end
+    end
+    return false
+end
+function Runtime.RequestHistoryAuthority()
+    if BootyLib.Runtime and BootyLib.Runtime.RefreshDirectory then BootyLib.Runtime.RefreshDirectory(true) end
+end
 function Runtime.OnGuildDirectoryUpdated()
     if not Raider.active then return end
     if not Runtime.IsTestRaid() then Raider.Services.Raid.RefreshGuildRanks(Raider.Database.GetRaidAttendance()) end
@@ -362,11 +373,12 @@ function Runtime.Stop()
 end
 local function ApplySettingChanges(keys)
     if not Runtime.initialized or not Raider.active then return end
-    local native,tracking,autoLoot=false,false,false
+    local native,tracking,autoLoot,csr=false,false,false,false
     for key in pairs(keys) do
         if key=="profile" or key=="useBootyRaidTab" or key=="useBootyRaidLogo" or string.find(key,"^nativeRaid") then native=true end
         if key=="profile" or key=="raidLiveTrackingEnabled" then tracking=true end
         if key=="profile" or string.find(key,"^lmAutoLoot") then autoLoot=true end
+        if key=="profile" or string.find(key,"^csr") then csr=true end
     end
     if native then Runtime.nativeRaidTab:Sync() end
     if autoLoot then Raider.Modules.MasterLootWindow.ApplyAutoLootSetting() end
@@ -375,6 +387,7 @@ local function ApplySettingChanges(keys)
         if tracking and view.SyncTrackingSetting then view:SyncTrackingSetting(true) end
         view:Refresh()
     end
+    if csr and Runtime.views.csr then Runtime.views.csr:Refresh() end
 end
 function Runtime.BeginSettingsBatch()
     Runtime.settingsBatchDepth=(Runtime.settingsBatchDepth or 0)+1

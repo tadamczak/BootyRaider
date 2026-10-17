@@ -75,6 +75,8 @@ function Settings.Get()
             "Refresh the physical raid roster while the Raid view or Loot Master window is visible. Session loot recording remains active until the session is paused or ended.")
         Field("raidHideSectionHeader","Hide section header","checkbox",{"Addon UI","Raid","General"})
         Field("raidClassColors","Use class colors","checkbox",{"Addon UI","Raid","General"})
+        Field("csrShowClassIcon","Show class icon","checkbox",{"Addon UI","CSR","Display"})
+        Field("csrUseClassColors","Use class colors","checkbox",{"Addon UI","CSR","Display"})
         local chat=Field("chatActionLogs","Show action messages in chat","checkbox",{"Addon UI","Raid","General"})
         chat.get=function() return Raider.Database.GetSetting("chatActionLogs") end
         chat.set=function(value) return Raider.Database.SetSetting("chatActionLogs",value) end

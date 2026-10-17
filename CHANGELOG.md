@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-dev.18 — 2026-10-17
+
+- Archive individual CSR sources and reactivate manually archived sources before expiration.
+- Restrict CSR changes and saved raid editing/removal to current Officer Wukong and Mukla ranks.
+- Add CSR class icons/colors, align nested columns and compact the archive filter.
+- Use Raid ID / Raid Type and give duration more space in saved raid history.
+
 ## 0.1.0-dev.17 — 2026-10-17
 
 - Record and optionally edit the actual raid end time; format duration as hours, minutes and seconds.

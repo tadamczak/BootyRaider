@@ -161,6 +161,8 @@ local function InitializeDefaults(store)
     if type(BootyRaiderDB.lmAutoLootInclusions) ~= "string" then BootyRaiderDB.lmAutoLootInclusions = "" end
     if tonumber(BootyRaiderDB.outOfFocusOpacity) == nil then BootyRaiderDB.outOfFocusOpacity = 100 end
     if BootyRaiderDB.raidClassColors == nil then BootyRaiderDB.raidClassColors = true end
+    if BootyRaiderDB.csrShowClassIcon == nil then BootyRaiderDB.csrShowClassIcon = true end
+    if BootyRaiderDB.csrUseClassColors == nil then BootyRaiderDB.csrUseClassColors = true end
     BootyRaiderDB.raidGroupOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidGroupOddLightness) or 5))
     BootyRaiderDB.raidListOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidListOddLightness) or 5))
     if BootyRaiderDB.raidHideSectionHeader == nil then BootyRaiderDB.raidHideSectionHeader = false end
@@ -405,6 +407,19 @@ function Database.StoreRaidStatistic(entry)
     local history = BootyRaiderDB.raidStatistics
     if type(history.order) ~= "table" then history.order = {} end
     if type(history.raids) ~= "table" then history.raids = {} end
+    local previous = history.raids[entry.id]
+    if previous and type(previous.csrArchived) == "table" then
+        -- Archive choices belong to this saved raid identity. New Save As IDs
+        -- start independently; ordinary overwrites retain officer decisions.
+        local archived = {}
+        for player, items in pairs(previous.csrArchived) do
+            if type(items) == "table" then
+                archived[player] = {}
+                for itemId, value in pairs(items) do if value == true then archived[player][itemId] = true end end
+            end
+        end
+        entry.csrArchived = archived
+    end
     local index
     for index = table.getn(history.order), 1, -1 do if history.order[index] == entry.id then table.remove(history.order, index) end end
     table.insert(history.order, 1, entry.id); history.raids[entry.id] = entry
@@ -436,7 +451,7 @@ local function FindSavedRaid(history, raidId)
     end
 end
 
-function Database.DeleteRaidStatistic(raidId)
+local function RemoveRaidStatistic(raidId)
     Database.Ensure()
     local history = BootyRaiderDB.raidStatistics
     raidId = FindSavedRaid(history, raidId)
@@ -445,6 +460,68 @@ function Database.DeleteRaidStatistic(raidId)
     local index
     for index = table.getn(history.order), 1, -1 do
         if history.order[index] == raidId then table.remove(history.order, index) end
+    end
+    return true
+end
+
+function Database.CanManageHistory()
+    local policy = Raider.Services and Raider.Services.RankPolicy
+    if policy and policy.CanManageHistory then return policy.CanManageHistory() end
+    return false, "Guild permissions are unavailable."
+end
+
+function Database.DeleteRaidStatistic(raidId)
+    local allowed, reason = Database.CanManageHistory()
+    if not allowed then return false, reason end
+    return RemoveRaidStatistic(raidId)
+end
+
+-- This operation is reserved for the session controller after it validates the
+-- Save/overwrite destination. A stale or unrelated attendance owner is rejected.
+function Database.RemoveRaidStatisticForSave(raidId, attendance)
+    Database.Ensure()
+    if not attendance or BootyRaiderDB.raidAttendance ~= attendance then return false, "The raid session changed." end
+    return RemoveRaidStatistic(raidId)
+end
+
+function Database.SetCSRSourceArchived(raidId, playerName, itemId, archived, selectedRaids)
+    local allowed, reason = Database.CanManageHistory()
+    if not allowed then return false, reason end
+    if type(archived) ~= "boolean" then return false, "Choose Archive or Activate." end
+    if selectedRaids ~= nil and type(selectedRaids) ~= "table" then return false, "Invalid raid filter." end
+    itemId = tonumber(itemId)
+    if not itemId or itemId < 1 or itemId > 2147483647 or itemId ~= math.floor(itemId) then
+        return false, "A valid item ID is required."
+    end
+    Database.Ensure()
+    local canonical, entry = FindSavedRaid(BootyRaiderDB.raidStatistics, raidId)
+    if not entry then return false, "This saved raid no longer exists." end
+    local service = Raider.Services and Raider.Services.CSR
+    if not service then return false, "CSR history is unavailable." end
+    -- The visible CSR ledger is scoped by raid-type filters, including receipt
+    -- resets. Recheck the same context rather than rejecting a visible source
+    -- because an award outside that selected ledger cleared the global view.
+    local summary = service.BuildSummary(Database.GetRaidStatistics(), nil, time(), nil, nil, selectedRaids, nil, true)
+    local wanted, source = string.lower(tostring(playerName or "")), nil
+    for _, player in ipairs(summary.players) do
+        if string.lower(tostring(player.name or "")) == wanted and player.itemId == itemId then
+            for _, candidate in ipairs(player.raids) do if candidate.id == canonical then source = candidate end end
+        end
+    end
+    if not source then return false, "This CSR source is no longer available." end
+    if archived and source.status ~= "ACTIVE" then return false, "This CSR source is already archived." end
+    if not archived and (source.expired or not source.manuallyArchived) then
+        return false, "Only unexpired manually archived CSR can be activated."
+    end
+    local records = entry.csrArchived
+    if archived then
+        if type(records) ~= "table" then records = {}; entry.csrArchived = records end
+        if type(records[wanted]) ~= "table" then records[wanted] = {} end
+        records[wanted][itemId] = true
+    elseif type(records) == "table" and type(records[wanted]) == "table" then
+        records[wanted][itemId] = nil
+        if not next(records[wanted]) then records[wanted] = nil end
+        if not next(records) then entry.csrArchived = nil end
     end
     return true
 end
@@ -474,6 +551,8 @@ function Database.HasRaidStatistic(raidId)
 end
 
 function Database.UpdateRaidStatisticFlags(raidId, attendanceEnabled, csrEnabled)
+    local allowed, reason = Database.CanManageHistory()
+    if not allowed then return false, reason end
     Database.Ensure()
     local history = BootyRaiderDB.raidStatistics
     local entry = history and history.raids and history.raids[raidId]
@@ -504,6 +583,8 @@ end
 -- Metadata edits rename one saved identity. They never load a session, copy a
 -- raid, or rewrite its source timestamps, rules and contribution choices.
 function Database.UpdateRaidMetadata(raidId, metadata)
+    local allowed, reason = Database.CanManageHistory()
+    if not allowed then return false, reason end
     Database.Ensure()
     if type(metadata) ~= "table" then return false, "Raid details are required." end
     local id = CleanRaidText(metadata.id)
@@ -567,6 +648,8 @@ function Database.UpdateRaidMetadata(raidId, metadata)
 end
 
 function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnabled,raidName)
+    local allowed, reason = Database.CanManageHistory()
+    if not allowed then return false, reason end
     Database.Ensure()
     local history=BootyRaiderDB.raidStatistics
     local canonical,entry=FindSavedRaid(history,raidId)

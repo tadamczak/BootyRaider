@@ -22,11 +22,12 @@ end
 
 local function MeasureHistory(width, controls)
     local page, snapshots, actionY = controls.historyPage, controls.historyPage.raidHistorySnapshots, controls.historyActionY
+    local canEdit = Raider.Services.RankPolicy.CanManageHistory()
     local dataWidth = math.max(60, width - 74)
     local numberWidth = 28
     local remainingWidth = math.max(32, dataWidth - numberWidth)
-    local nameWidth, raidWidth = math.floor(remainingWidth * 0.24), math.floor(remainingWidth * 0.22)
-    local durationWidth, createdWidth = math.floor(remainingWidth * 0.12), math.floor(remainingWidth * 0.21)
+    local nameWidth, raidWidth = math.floor(remainingWidth * 0.24), math.floor(remainingWidth * 0.14)
+    local durationWidth, createdWidth = math.floor(remainingWidth * 0.20), math.floor(remainingWidth * 0.21)
     local modifiedWidth = remainingWidth - nameWidth - raidWidth - durationWidth - createdWidth
     local widths = {numberWidth, nameWidth, raidWidth, durationWidth, createdWidth, modifiedWidth}
     local x = 8
@@ -48,7 +49,7 @@ local function MeasureHistory(width, controls)
             local durationX = numberWidth + nameWidth + raidWidth
             local height = math.max(26,
                 Cell(button.number, button, 4, numberWidth - 6, tostring(index)),
-                Cell(button.label, button, numberWidth, nameWidth, tostring(snapshot.displayName or snapshot.id or "Unknown")),
+                Cell(button.label, button, numberWidth, nameWidth, tostring(snapshot.id or "Unknown")),
                 Cell(button.raidName, button, numberWidth + nameWidth, raidWidth, snapshot.raidName or "Unknown zone"),
                 Cell(button.duration, button, durationX, durationWidth, durationText),
                 Cell(button.createdAt, button, durationX + durationWidth, createdWidth, createdAt and date("%Y-%m-%d %H:%M", createdAt) or "Unknown"),
@@ -58,9 +59,10 @@ local function MeasureHistory(width, controls)
             load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(16); deleteButton:SetHeight(16)
             load:ClearAllPoints(); load:SetPoint("LEFT", button, "RIGHT", 4, 0); load:Show()
             if edit then
-                edit:SetWidth(18); edit:SetHeight(18); edit:ClearAllPoints(); edit:SetPoint("LEFT", load, "RIGHT", 4, 0); edit:Show()
+                edit:SetWidth(18); edit:SetHeight(18); edit:ClearAllPoints(); edit:SetPoint("LEFT", load, "RIGHT", 4, 0)
+                if canEdit then edit:Show() else edit:Hide() end
             end
-            deleteButton:ClearAllPoints(); deleteButton:SetPoint("LEFT", edit or load, "RIGHT", 4, 0); deleteButton:Show()
+            deleteButton:ClearAllPoints(); deleteButton:SetPoint("LEFT", canEdit and edit or load, "RIGHT", 4, 0); deleteButton:Show()
             y = y - height - 2
         else button.number:Hide(); button:Hide(); load:Hide(); deleteButton:Hide(); if edit then edit:Hide() end end
     end
