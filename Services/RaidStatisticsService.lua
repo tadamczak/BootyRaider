@@ -22,7 +22,8 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
         id = raidId, raidName = attendance.raidName or "Unknown zone", savedAt = time(), members = {},
         statisticsEnabled = saveOptions.saveRaidStatistics ~= false,
         attendanceEnabled = saveOptions.saveAttendance ~= false,
-        csrEnabled = saveOptions.saveCSR ~= false,
+        csrEnabled = saveOptions.saveCSR == true,
+        lootRules = Raider.Database.CopyLootRules(Raider.Database.EnsureRaidLootRules(attendance)),
     }
     local memberIndex, lootIndex, itemIndex, collectionIndex
     local includedNames = {}

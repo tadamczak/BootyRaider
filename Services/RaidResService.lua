@@ -655,11 +655,19 @@ local function HasRecordedLootState(member)
         or (member.srConsumedAt and next(member.srConsumedAt) ~= nil))
 end
 
+local function CopySaveOptions(options)
+    if type(options) ~= "table" then return nil end
+    return { saveRaidStatistics = options.saveRaidStatistics == true,
+        saveAttendance = options.saveAttendance == true, saveCSR = options.saveCSR == true }
+end
+
 function RaidResService.BuildSnapshot(attendance)
     if not attendance or type(attendance.members) ~= "table" then return nil end
     local importInfo = EnsureSnapshotImport(attendance)
     if not importInfo.id and not attendance.snapshotId then return nil end
     local snapshot = { version = 4, id = attendance.snapshotId or importInfo.id, raidResId = importInfo.id, srUrl = importInfo.url, rollForExport = importInfo.rollForExport, raidName = attendance.raidName, source = importInfo.origin or "raidres", startedAt = attendance.sessionStartedAt or attendance.scannedAt, savedAt = attendance.lastSavedAt, updatedAt = time(), assignedCount = 0, unmatched = {}, missingNames = {}, members = {}, nextLootRecordId = tonumber(attendance.nextLootRecordId) or 0 }
+    snapshot.lootRules = Raider.Database.CopyLootRules(Raider.Database.EnsureRaidLootRules(attendance))
+    snapshot.saveOptions = CopySaveOptions(attendance.saveOptions)
     local index, itemIndex, savedNames = nil, nil, {}
     for index = 1, table.getn(attendance.members or {}) do
         local member = attendance.members[index]
@@ -756,6 +764,8 @@ function RaidResService.RestoreSnapshot(snapshot)
     local attendance = {
         addonVersion = Raider.version, scannedAt = snapshot.updatedAt, scannedAtText = snapshot.updatedAt and date("%Y-%m-%d %H:%M:%S", snapshot.updatedAt) or "", sessionStartedAt = snapshot.startedAt or snapshot.updatedAt, lastSavedAt = snapshot.savedAt or snapshot.updatedAt,
         raidName = snapshot.raidName, snapshotId = snapshot.id, updatedBy = UnitName("player"), members = members, departedMembers = departedMembers, nextLootRecordId = nextLootRecordId,
+        lootRules = Raider.Database.CopyLootRules(snapshot.lootRules or Raider.Database.GetDefaultLootRules()),
+        saveOptions = CopySaveOptions(snapshot.saveOptions),
         softReserveImport = { id = snapshot.raidResId or snapshot.id, origin = snapshot.source, url = snapshot.srUrl or "", rollForExport = snapshot.rollForExport or "", importedAt = snapshot.updatedAt, unmatchedNames = unmatchedNames, unmatchedReservations = unmatched, missingNames = missingNames },
         _loadedSnapshotId = snapshot.id,
         _sessionDraft = true,

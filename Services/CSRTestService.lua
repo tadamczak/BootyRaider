@@ -15,6 +15,7 @@ local function AddEntry(state, srItemId, lootItemId)
     if lootItemId then member.lootItems[1] = { itemId = lootItemId, count = 1 } end
     table.insert(state.entries, {
         id = "csr-test-" .. state.sequence, raidName = "CSR Test Raid", savedAt = state.now,
+        csrEnabled = true, lootRules = { silverback = { csr = true }, macaque = { csr = false } },
         members = { member },
     })
     state.now = state.now + 60
@@ -76,5 +77,5 @@ function TestLab.AdvanceDays(state, days)
 end
 
 function TestLab.BuildSummary(state, target)
-    return Raider.Services.CSR.BuildSummary(state.entries, { silverback = { csr = true }, macaque = { csr = false } }, state.now, target)
+    return Raider.Services.CSR.BuildSummary(state.entries, nil, state.now, target)
 end

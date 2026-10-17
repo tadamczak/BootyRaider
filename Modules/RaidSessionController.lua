@@ -37,7 +37,8 @@ function RaidSessionController.Create(dependencies)
     end
 
     function controller:Complete(saveOptions)
-        if not session:Complete(saveOptions) then return false end
+        local saved, failure = session:Complete(saveOptions)
+        if not saved then return false, failure end
         state.raidSessionDraft = false; state.raidSessionPaused = true; state.raidLiveTracking = false
         state.raidScanReady = false; state.raidSessionContinuedContext = nil
         state.raidSessionTransitionPending = false; state.raidSessionMismatchContext = nil
@@ -139,6 +140,13 @@ function RaidSessionController.Create(dependencies)
         if not state.raidSessionDraft or not session.GetPhysicalTransition then return nil end
         local contextKey, ready = session:GetPhysicalTransition()
         state.raidPhysicalRosterReady = ready
+        if ready and state.raidSessionAwaitingPhysicalAcceptance == "loaded-snapshot" then
+            if session.AcceptPhysicalRaid and session:AcceptPhysicalRaid() == false then
+                state.raidSessionContinuedContext = "outside-raid-context"
+                if session.ConfirmPhysicalDeparture then session:ConfirmPhysicalDeparture() end
+            end
+            state.raidSessionAwaitingPhysicalAcceptance = nil; contextKey = nil
+        end
         if ready and contextKey and contextKey == state.raidSessionAwaitingPhysicalAcceptance then
             session:AcceptPhysicalRaid()
             state.raidSessionAwaitingPhysicalAcceptance = nil; contextKey = nil
@@ -148,6 +156,14 @@ function RaidSessionController.Create(dependencies)
         state.raidSessionTransitionPending = not ready or state.raidSessionMismatchContext ~= nil
         if state.raidSessionTransitionPending then state.raidLiveTracking = false end
         return state.raidSessionMismatchContext
+    end
+
+    function controller:AcceptLoadedSnapshot()
+        if session.ResetPhysicalRaid then session:ResetPhysicalRaid() end
+        state.raidSessionContinuedContext = nil; state.raidSessionMismatchContext = nil
+        state.raidSessionAwaitingPhysicalAcceptance = "loaded-snapshot"
+        local contextKey = self:GetTransitionContext()
+        return state.raidPhysicalRosterReady ~= false and contextKey == nil
     end
 
     function controller:SetTransitionPending(contextKey)

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-dev.15 — 2026-10-17
+
+- Keep Loot Rules and save choices independent for each raid.
+- Confirm replacement of an existing Raid ID; a different ID creates a separate copy.
+- Calculate CSR only from opted-in saved raids and their saved eligibility rules.
+- Accept an explicitly loaded session without immediately requesting continuation.
+
 ## 0.1.0-dev.14 — 2026-10-17
 
 - Offer Transmog rolls only for the supported armor slots and weapons.

@@ -54,9 +54,21 @@ function Runtime.RequestRaidScan()
     return true
 end
 function Runtime.SaveSession(options)
-    local saved=Runtime.sessionController:Complete(options)
+    local saved,failure=Runtime.sessionController:Complete(options)
     if saved then Runtime.RefreshViews() end
-    return saved
+    return saved,failure
+end
+function Runtime.AcceptLoadedSnapshot()
+    -- Loading the same saved ID can occur after a zone change. Re-observe the
+    -- current context before acknowledging it, rather than keeping its old zone.
+    Runtime.worldContext:CancelConfirmation()
+    Runtime.worldContext.context.active=false
+    Runtime.worldContext.Update()
+    local accepted=Runtime.sessionController:AcceptLoadedSnapshot()
+    if Runtime.transitionPrompt then Runtime.transitionPrompt:Hide() end
+    Runtime.worldContext:CancelConfirmation()
+    Runtime.worldContext.Update()
+    return accepted
 end
 function Runtime.IsBusy()
     local loot=Raider.Modules.MasterLootWindow

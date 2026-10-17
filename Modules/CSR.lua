@@ -280,7 +280,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     end
     function controller:Refresh()
         if not host:IsShown() then return end
-        if self.testMode then Raider.Services.CSRTest.BuildSummary(self.testLab.state,self.summary) else Raider.Services.CSR.BuildSummary(getEntries(),getRules(),time(),self.summary,getRosterData(),self.selectedRaids,self.search:GetText()) end
+        if self.testMode then Raider.Services.CSRTest.BuildSummary(self.testLab.state,self.summary) else Raider.Services.CSR.BuildSummary(getEntries(),nil,time(),self.summary,getRosterData(),self.selectedRaids,self.search:GetText()) end
         self:RefreshLayout()
     end
     controller.scroll:SetScript("OnVerticalScroll",function() this:SetVerticalScroll(arg1 or 0);controller:Render() end)

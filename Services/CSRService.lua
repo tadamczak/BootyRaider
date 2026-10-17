@@ -13,6 +13,7 @@ local function Normalize(value)
 end
 
 local function HasCsrRights(member, rules)
+    if type(rules) ~= "table" then return false end
     local policy = Raider.Services.RankPolicy
     local key = policy.GetLootAlias(member.guildRank) or policy.FindLootRank(member.lootRank)
     key = key or policy.FindLootRank(member.guildRank)
@@ -61,8 +62,8 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
 
     local now = tonumber(currentTime) or time()
     local cutoff = now - WINDOW_SECONDS
-    -- Keep the public rosterData argument for callers; CSR rights belong to
-    -- historical member records and rules, not the current guild roster.
+    -- Keep the public rules/rosterData arguments for callers. Eligibility belongs
+    -- to each saved raid's rules/member records, never current defaults/roster.
     summary.rosterLootRanks = nil
     local ordered = summary.orderedScratch or {}
     summary.orderedScratch = ordered
@@ -71,7 +72,7 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
         local savedAt = GetSavedAt(entries[index])
         local raidName = tostring(entries[index].raidName or "Other")
         local filterName = KNOWN_RAIDS[raidName] and raidName or "Other"
-        if entries[index].csrEnabled ~= false and savedAt >= cutoff and savedAt <= now and (not selectedRaids or selectedRaids[filterName]) then table.insert(ordered, entries[index]) end
+        if entries[index].csrEnabled == true and savedAt >= cutoff and savedAt <= now and (not selectedRaids or selectedRaids[filterName]) then table.insert(ordered, entries[index]) end
     end
     table.sort(ordered, function(a, b) return GetSavedAt(a) < GetSavedAt(b) end)
 
@@ -84,7 +85,7 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
             local lootCount, lootItems = GetLootCount(member)
             local reserveCount, reserveItems, scalarReserves = GetReserveCount(member)
             local hasLoot = lootCount > 0
-            local hasRights = HasCsrRights(member, rules)
+            local hasRights = HasCsrRights(member, raid.lootRules)
             if key ~= "" and (hasLoot or hasRights) then
                 local state = states[key]
                 if not state then state = { name = member.name or "Unknown", pending = {}, sources = {}, receivedThisRaid = {} }; states[key] = state end

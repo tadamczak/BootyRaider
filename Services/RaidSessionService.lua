@@ -19,6 +19,40 @@ function Session:RaidIdExists(raidId)
     return database.HasSoftReserveSnapshot(raidId) or database.HasRaidStatistic(raidId)
 end
 
+local function SaveRequest(options, attendance)
+    if type(options) ~= "table" then
+        local enabled = options and true or false
+        options = {saveRaidStatistics = enabled, saveAttendance = enabled, saveCSR = enabled}
+    end
+    local raidId = options.raidId or attendance and attendance.snapshotId or ""
+    if type(raidId) ~= "string" then return nil, "Raid ID must be text." end
+    raidId = string.gsub(string.gsub(raidId, "^%s+", ""), "%s+$", "")
+    if raidId == "" then return nil, "Raid ID is required." end
+    if string.len(raidId) > 80 or string.find(raidId, "%c") then return nil, "Raid ID must contain at most 80 bytes without control characters." end
+    return {raidId = raidId, saveRaidStatistics = options.saveRaidStatistics and true or false,
+        saveAttendance = options.saveAttendance and true or false, saveCSR = options.saveCSR and true or false}
+end
+
+function Session:PrepareSave(options)
+    local attendance = self.dependencies.database.GetRaidAttendance()
+    if not attendance or self.dependencies.testRaid.IsActive() then return nil, "There is no saved raid session to save." end
+    local request, failure = SaveRequest(options, attendance)
+    if not request then return nil, failure end
+    local canonical, snapshot, statistic = self.dependencies.database.GetSavedRaidState(request.raidId)
+    request.raidId = canonical or request.raidId
+    local confirmation = {attendance = attendance, raidId = request.raidId, snapshot = snapshot, statistic = statistic,
+        saveRaidStatistics = request.saveRaidStatistics, saveAttendance = request.saveAttendance, saveCSR = request.saveCSR}
+    self.preparedSave = confirmation
+    request.confirmation = confirmation
+    return request, canonical ~= nil
+end
+
+function Session:CancelPreparedSave(confirmation)
+    if self.preparedSave ~= confirmation then return false end
+    self.preparedSave = nil
+    return true
+end
+
 function Session:CaptureActiveRoster(isDraft)
     local dependencies = self.dependencies
     if dependencies.testRaid.IsActive() then return dependencies.testRaid.GetRaidMemberCount() end
@@ -42,6 +76,8 @@ function Session:CapturePendingRaid(getPendingId, getPendingName)
         attendance.sessionStartedAt = dependencies.now()
         attendance.softReserveImport = { id = getPendingId(), origin = "booty", importedAt = dependencies.now(), unmatchedNames = {}, unmatchedReservations = {}, missingNames = {} }
         attendance._sessionDraft = true
+        attendance.lootRules = dependencies.database.CopyLootRules(dependencies.database.GetDefaultLootRules())
+        attendance.saveOptions = {saveRaidStatistics = true, saveAttendance = true, saveCSR = true}
     end
     dependencies.database.StoreRaidAttendance(attendance)
     return count
@@ -106,30 +142,44 @@ function Session:CancelPendingRaid()
 end
 
 function Session:Complete(saveOptions)
-    if type(saveOptions) ~= "table" then
-        local enabled = saveOptions and true or false
-        saveOptions = { saveRaidStatistics = enabled, saveAttendance = enabled, saveCSR = enabled }
-    end
     local dependencies = self.dependencies
     if dependencies.testRaid.IsActive() then
         dependencies.testRaid.Stop()
     else
         local attendance = dependencies.database.GetRaidAttendance()
-        if attendance then
-            local savedAt = dependencies.now()
-            local requestedRaidId = string.gsub(tostring(saveOptions.raidId or attendance.snapshotId or ""), "^%s+", "")
-            requestedRaidId = string.gsub(requestedRaidId, "%s+$", "")
-            if requestedRaidId == "" or self:RaidIdExists(requestedRaidId) then return false end
-            attendance.snapshotId = requestedRaidId
-            attendance._loadedSnapshotId = nil
-            attendance.lastSavedAt = savedAt
-            attendance._sessionDraft = nil
-            dependencies.raidRes.SyncHistory(attendance)
-            if saveOptions.saveRaidStatistics or saveOptions.saveCSR then
-                local entry = dependencies.raidStatistics.BuildEntry(attendance, saveOptions)
-                if entry then dependencies.database.StoreRaidStatistic(entry) end
+        if not attendance then return false, "There is no raid session to save." end
+        local request, failure = SaveRequest(saveOptions, attendance)
+        if not request then return false, failure end
+        local canonical, snapshot, statistic = dependencies.database.GetSavedRaidState(request.raidId)
+        request.raidId = canonical or request.raidId
+        local confirmation = type(saveOptions) == "table" and saveOptions.confirmation
+        local overwrite = type(saveOptions) == "table" and saveOptions.overwrite
+        if confirmation or overwrite then
+            if confirmation ~= self.preparedSave or not confirmation or confirmation.attendance ~= attendance
+                or confirmation.raidId ~= request.raidId or confirmation.snapshot ~= snapshot or confirmation.statistic ~= statistic
+                or confirmation.saveRaidStatistics ~= request.saveRaidStatistics or confirmation.saveAttendance ~= request.saveAttendance
+                or confirmation.saveCSR ~= request.saveCSR then
+                self:CancelPreparedSave(confirmation)
+                return false, "The raid or save destination changed. Review the save options and try again."
             end
         end
+        if canonical and (not confirmation or overwrite ~= true) then return false, "Confirm replacement of the saved raid first." end
+        -- Build from a staged owner so failed preparation and cancelled/stale
+        -- confirmation never alter the active session or its historical source.
+        local staged, key, value = {}, nil, nil
+        for key, value in pairs(attendance) do staged[key] = value end
+        staged.snapshotId, staged._loadedSnapshotId = request.raidId, nil
+        staged.lastSavedAt, staged._sessionDraft = dependencies.now(), nil
+        staged.saveOptions = {saveRaidStatistics = request.saveRaidStatistics, saveAttendance = request.saveAttendance, saveCSR = request.saveCSR}
+        local entry
+        if request.saveRaidStatistics or request.saveCSR then
+            entry = dependencies.raidStatistics.BuildEntry(staged, request)
+            if not entry then return false, "Raid statistics could not be prepared." end
+        end
+        if not dependencies.raidRes.SyncHistory(staged) then return false, "The raid snapshot could not be saved." end
+        if entry then dependencies.database.StoreRaidStatistic(entry)
+        elseif statistic then dependencies.database.DeleteRaidStatistic(request.raidId) end
+        self.preparedSave = nil
         dependencies.database.StoreRaidAttendance(nil)
     end
     return true
@@ -137,14 +187,11 @@ end
 
 function Session:LoadSnapshot(snapshotId)
     local dependencies = self.dependencies
-    local snapshots = dependencies.database.GetSoftReserveHistory()
-    local index
-    for index = 1, table.getn(snapshots) do
-        if snapshots[index].id == snapshotId then
-            local attendance = dependencies.raidRes.RestoreSnapshot(snapshots[index])
-            dependencies.raidRes.Reconcile(attendance, attendance)
-            return attendance
-        end
+    local _, snapshot = dependencies.database.GetSavedRaidState(snapshotId)
+    if snapshot then
+        local attendance = dependencies.raidRes.RestoreSnapshot(snapshot)
+        dependencies.raidRes.Reconcile(attendance, attendance)
+        return attendance
     end
     return nil
 end
@@ -170,6 +217,7 @@ function Session:BeginDraft()
 end
 
 function Session:ClearAttendance()
+    self.preparedSave = nil
     self.dependencies.database.StoreRaidAttendance(nil)
 end
 
@@ -177,6 +225,7 @@ function Session:Quit()
     local dependencies = self.dependencies
     local wasTestRaid = dependencies.testRaid.IsActive()
     dependencies.testRaid.Stop()
+    self.preparedSave = nil
     if not wasTestRaid then dependencies.database.StoreRaidAttendance(nil) end
 end
 
