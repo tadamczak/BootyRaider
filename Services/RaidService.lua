@@ -6,11 +6,16 @@ local RaidService = Raider.Services.Raid
 RaidService.debugReyCoin = false
 RaidService.allowReyCoinSayTests = false
 
--- Guild data changes only when a roster snapshot is replaced. Reusing this
--- index keeps RAID_ROSTER_UPDATE work proportional to the raid (40 players),
+-- Rebuild only for a published guild generation; the directory reuses buffers.
+-- Ordinary RAID_ROSTER_UPDATE work stays proportional to the raid (40 players),
 -- rather than to the whole guild on every event.
 local indexedGuildData
+local indexedGuildGeneration, indexedGuildName, indexedGuildRealm
 local indexedGuildMembers = {}
+local emptyGuildMembers = {}
+-- Provenance belongs to observed member objects, never persisted rank fields.
+-- Scalar values avoid retaining an attendance graph through Lua 5.0 weak keys.
+local trustedGuildRanks = setmetatable({}, { __mode = "k" })
 local pendingRollAwards = {}
 local pendingLootEchoes = {}
 local pendingReyCoinAwards = {}
@@ -372,6 +377,7 @@ function RaidService.GetSoftReserveRollRights(itemLink)
     end
     local rules = Raider.Database.GetLootRules()
     if testing then rules = testRaid.GetLootRules(rules) end
+    if not testing then RaidService.RefreshGuildRanks(attendance) end
     local contested = RaidService.IsHighlyContestedItem(itemLink)
     local hasReserve = false
     if attendance and attendance.members then
@@ -421,7 +427,11 @@ end
 -- separate carrier pool; SR takes precedence over ordinary main-pool rules.
 local transmogPolicy = {
     pool = "transmog",
-    valid = function() return true end,
+    valid = function(roll)
+        if roll.transmogEligible ~= nil then return roll.transmogEligible end
+        return Raider.Services.LootRollRequest.IsTransmogEligible(roll.link)
+    end,
+    reason = function() return "this item cannot be rolled for Transmog" end,
 }
 local srPolicy = {
     pool = "main",
@@ -452,7 +462,11 @@ local reyCoinPolicy = {
 local regularPolicy = { pool = "main", valid = function() return true end }
 local wrongRangePolicy = {
     pool = "main", valid = function() return false end,
-    reason = function() return "wrong roll, use /roll 98, 99, 100 or 101" end,
+    reason = function(roll)
+        local transmog = roll.transmogEligible
+        if transmog == nil then transmog = Raider.Services.LootRollRequest.IsTransmogEligible(roll.link) end
+        return transmog and "wrong roll, use /roll 98, 99, 100 or 101" or "wrong roll, use /roll 99, 100 or 101"
+    end,
 }
 local openItemPolicies = {
     [99] = regularPolicy, [100] = regularPolicy, [101] = reyCoinPolicy,
@@ -994,9 +1008,12 @@ function RaidService.ConfirmSoftReserveTrade(sender, recipient, itemReference)
 end
 
 local function GetGuildMemberIndex(guildData)
-    if guildData == indexedGuildData then return indexedGuildMembers end
+    if guildData == indexedGuildData and guildData.generation == indexedGuildGeneration
+        and guildData.guildName == indexedGuildName and guildData.realmName == indexedGuildRealm then return indexedGuildMembers end
     indexedGuildData = guildData
+    indexedGuildGeneration, indexedGuildName, indexedGuildRealm = guildData.generation, guildData.guildName, guildData.realmName
     indexedGuildMembers = {}
+    trustedGuildRanks = setmetatable({}, { __mode = "k" })
     if guildData and guildData.members then
         local guildIndex
         for guildIndex = 1, table.getn(guildData.members) do
@@ -1005,6 +1022,54 @@ local function GetGuildMemberIndex(guildData)
         end
     end
     return indexedGuildMembers
+end
+
+local function CurrentGuildMembers()
+    local guildData = Raider.Database.GetRosterData()
+    local inGuild = type(IsInGuild) ~= "function" or IsInGuild()
+    if not inGuild or inGuild == 0 then
+        if indexedGuildData then
+            indexedGuildData, indexedGuildGeneration, indexedGuildName, indexedGuildRealm = nil, nil, nil, nil
+            indexedGuildMembers = {}
+            trustedGuildRanks = setmetatable({}, { __mode = "k" })
+        end
+        return emptyGuildMembers, false, false
+    end
+    if guildData then return GetGuildMemberIndex(guildData), false, true end
+    local guildName = type(GetGuildInfo) == "function" and GetGuildInfo("player")
+    local realmName = type(GetRealmName) == "function" and GetRealmName()
+    -- A pending shared capture is not evidence of a demotion. Never carry
+    -- that knowledge across an observed guild/realm change.
+    local changed = indexedGuildName and guildName and indexedGuildName ~= guildName
+        or indexedGuildRealm and realmName and indexedGuildRealm ~= realmName
+    if changed then
+        indexedGuildData, indexedGuildGeneration, indexedGuildName, indexedGuildRealm = nil, nil, nil, nil
+        indexedGuildMembers = {}
+        trustedGuildRanks = setmetatable({}, { __mode = "k" })
+    end
+    return emptyGuildMembers, indexedGuildName ~= nil and guildName == indexedGuildName
+        and indexedGuildRealm ~= nil and realmName == indexedGuildRealm, false
+end
+
+function RaidService.RefreshGuildRanks(attendance)
+    local guildMembers, pending, authoritative = CurrentGuildMembers()
+    if not attendance or not attendance.members then return false end
+    local changed, index = false, nil
+    for index = 1, table.getn(attendance.members) do
+        local member = attendance.members[index]
+        local guildMember = guildMembers[string.lower(member.name or "")]
+        local rank, belongs = guildMember and guildMember.rank or "", guildMember and true or false
+        if pending then
+            local trustedRank = trustedGuildRanks[member]
+            belongs = type(trustedRank) == "string"
+            rank = belongs and trustedRank or ""
+        elseif authoritative then trustedGuildRanks[member] = belongs and rank or false end
+        if member.guildRank ~= rank or member.guildMember ~= belongs then
+            member.guildRank, member.guildMember = rank, belongs
+            changed = true
+        end
+    end
+    return changed
 end
 
 local function HasRecordedLootState(member)
@@ -1039,14 +1104,9 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
     if type(total) ~= "number" or total ~= total or total < 0 or total > 40 or total ~= math.floor(total) then
         return nil, "The physical raid member count is unavailable or invalid. Retry the roster scan."
     end
-    local guildData = Raider.Database.GetRosterData()
-    if type(IsInGuild) == "function" then
-        local inGuild = IsInGuild()
-        if not inGuild or inGuild == 0 then guildData = nil end
-    end
-    local guildMembers = GetGuildMemberIndex(guildData)
+    local guildMembers, pendingGuild, authoritativeGuild = CurrentGuildMembers()
 
-    local previousLoot, previousReserves, previousReyCoin, previousReyCoinItems, previousSrConsumed = {}, {}, {}, {}, {}
+    local previousLoot, previousReserves, previousReyCoin, previousReyCoinItems, previousSrConsumed, previousGuild = {}, {}, {}, {}, {}, {}
     local currentRaidName = GetRealZoneText() or ""
     local previousAttendance = Raider.Database.GetRaidAttendance()
     local activeSession = Raider.Services.RaidRes and Raider.Services.RaidRes.HasSession(previousAttendance)
@@ -1069,6 +1129,7 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
                 previousReyCoin[key] = previousMember.reyCoinUsedAt
                 previousReyCoinItems[key] = previousMember.reyCoinItemLink
                 previousSrConsumed[key] = previousMember.srConsumedAt
+                if pendingGuild and trustedGuildRanks[previousMember] ~= nil then previousGuild[key] = previousMember end
             end
         end
     end
@@ -1082,6 +1143,12 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         end
         presentNames[string.lower(name)] = true
         local guildMember = guildMembers[string.lower(name)]
+        local previousGuildMember = previousGuild[string.lower(name)]
+        local trustedRank = previousGuildMember and trustedGuildRanks[previousGuildMember]
+        if not guildMember and type(trustedRank) == "string" then
+            guildMember = {rank = trustedRank, publicNote = previousGuildMember.publicNote,
+                officerNote = previousGuildMember.officerNote, class = previousGuildMember.class}
+        end
         local previousReserve = previousReserves[string.lower(name)]
         table.insert(members, {
             raidIndex = raidIndex,
@@ -1148,6 +1215,22 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         softReserveImport = preservePrevious and previousAttendance.softReserveImport or nil,
         nextLootRecordId = preservePrevious and previousAttendance.nextLootRecordId or 0,
     }
+    -- Publish provenance only after the entire capture succeeds. Departed
+    -- copies retain knowledge without borrowing another snapshot's rank fields.
+    local collectionIndex, memberIndex
+    for collectionIndex = 1, 2 do
+        local collection = collectionIndex == 1 and members or departedMembers
+        for memberIndex = 1, table.getn(collection or {}) do
+            local member = collection[memberIndex]
+            local key = string.lower(member.name or "")
+            if authoritativeGuild then
+                local guildMember = guildMembers[key]
+                trustedGuildRanks[member] = guildMember and (guildMember.rank or "") or false
+            elseif pendingGuild and previousGuild[key] then
+                trustedGuildRanks[member] = trustedGuildRanks[previousGuild[key]]
+            end
+        end
+    end
     return table.getn(members), attendance, previousAttendance, preservePrevious
 end
 
@@ -1355,8 +1438,20 @@ function RaidService.ReadyCheck()
     return true
 end
 
-function RaidService.SendRaidWarning(message, prefix)
+function RaidService.SendRaidWarning(message, prefix, recipient)
     if not RaidService.IsInRaid() or type(SendChatMessage) ~= "function" then return false, "You must be in a raid." end
+    if recipient ~= nil then
+        if not Raider.Services.LootRollRequest.CanOrganize() then return false, "Only the Loot Master, raid leader or an assistant can send a Loot Master whisper." end
+        local currentRecipient, index
+        for index = 1, RaidService.GetRaidMemberCount() do
+            local name = GetRaidRosterInfo(index)
+            if name and type(recipient) == "string" and string.lower(name) == string.lower(recipient) then currentRecipient = name; break end
+        end
+        if not currentRecipient then return false, "The Loot Master whisper recipient is not in the current raid." end
+        local ok = pcall(SendChatMessage, prefix == false and message or RaidService.PrefixLootMasterMessage(message), "WHISPER", nil, currentRecipient)
+        if not ok then return false, "The Loot Master whisper could not be sent." end
+        return true
+    end
     local playerName = UnitName("player")
     local index, canWarn
     for index = 1, RaidService.GetRaidMemberCount() do

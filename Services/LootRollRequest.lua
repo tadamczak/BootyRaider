@@ -3,7 +3,40 @@ Raider.Services.LootRollRequest = {}
 local Request = Raider.Services.LootRollRequest
 local aliases = { tmog=98, mog=98, transmog=98, os=99, ms=100, rc=101, reycoin=101, sr=102 }
 Request.CategoryNames = { [98]="Tmog", [99]="OS", [100]="MS", [101]="RC", [102]="SR" }
-local function Defaults() return { [98]=true, [99]=true, [100]=true, [101]=true } end
+local transmogSlots = {
+    INVTYPE_HEAD=true, INVTYPE_SHOULDER=true, INVTYPE_CHEST=true, INVTYPE_ROBE=true, INVTYPE_BODY=true,
+    INVTYPE_WRIST=true, INVTYPE_HAND=true, INVTYPE_WAIST=true, INVTYPE_LEGS=true, INVTYPE_FEET=true,
+    INVTYPE_WEAPON=true, INVTYPE_2HWEAPON=true, INVTYPE_WEAPONMAINHAND=true, INVTYPE_WEAPONOFFHAND=true,
+    INVTYPE_RANGED=true, INVTYPE_RANGEDRIGHT=true, INVTYPE_THROWN=true,
+}
+
+function Request.IsTransmogEligible(reference)
+    if type(GetItemInfo) ~= "function" then return false, "Item information is unavailable for Tmog." end
+    if type(reference) == "string" then
+        local _, _, itemId = string.find(reference, "item:(%d+)")
+        reference = tonumber(itemId) or tonumber(reference)
+    end
+    if type(reference) ~= "string" and type(reference) ~= "number" then
+        return false, "Link an item before choosing Tmog."
+    end
+    local name, _, _, _, _, _, _, legacySlot, extendedSlot = GetItemInfo(reference)
+    if not name then return false, "Item information is not cached yet; try again before choosing Tmog." end
+    -- Accept explicit equip-location tokens in either tuple position; icon
+    -- paths must never grant eligibility when a client exposes another tuple.
+    local slot
+    if type(extendedSlot) == "string" and string.find(extendedSlot, "^INVTYPE_") then slot = extendedSlot
+    elseif type(legacySlot) == "string" and string.find(legacySlot, "^INVTYPE_") then slot = legacySlot
+    elseif extendedSlot == "" or legacySlot == "" then slot = "" end
+    if slot == nil then return false, "Item equipment information is unavailable for Tmog; try again." end
+    if not transmogSlots[slot] then return false, "Tmog is available only for eligible armor slots and weapons." end
+    return true
+end
+
+local function Defaults(link)
+    local types = { [99]=true, [100]=true, [101]=true }
+    if Request.IsTransmogEligible(link) then types[98]=true; return types,4 end
+    return types,3
+end
 
 local function HasPermission(value) return value ~= nil and value ~= false and value ~= 0 end
 
@@ -22,13 +55,17 @@ function Request.Normalize(request)
     if not string.find(link, "^|c%x+|Hitem:[^|]+|h%[[^%]]+%]|h|r$")
         and not string.find(link, "^|Hitem:[^|]+|h%[[^%]]+%]|h$") then return nil, "Use a complete item link." end
     local types, count = {}, 0
-    if request.types == nil then types, count = Defaults(), 4
+    if request.types == nil then types, count = Defaults(link)
     elseif type(request.types) ~= "table" then return nil, "Choose at least one roll type."
     else
         local range, selected
         for range, selected in pairs(request.types) do
             if selected then
                 if not Request.CategoryNames[range] or selected ~= true then return nil, "Unknown roll type." end
+                if range == 98 then
+                    local eligible, failure = Request.IsTransmogEligible(link)
+                    if not eligible then return nil, failure end
+                end
                 types[range], count = true, count + 1
             end
         end

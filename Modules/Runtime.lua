@@ -31,6 +31,11 @@ function Runtime.RefreshViews()
     local _,view
     for _,view in pairs(Runtime.views) do if view.Refresh then view:Refresh() end end
 end
+function Runtime.OnGuildDirectoryUpdated()
+    if not Raider.active then return end
+    if not Runtime.IsTestRaid() then Raider.Services.Raid.RefreshGuildRanks(Raider.Database.GetRaidAttendance()) end
+    Runtime.RefreshViews()
+end
 function Runtime.CaptureActiveRoster()
     return Runtime.sessionController:CaptureActiveRoster()
 end

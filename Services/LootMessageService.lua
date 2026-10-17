@@ -20,9 +20,9 @@ Messages.Definitions = {
     {"Stopped", "Roll stopped", "Rolling stopped for %item. All rolls are invalidated.", "%item"},
     {"Countdown", "Roll countdown", "%seconds", "%seconds"},
     {"RaidWinner", "Random raid winner", "Raid roll %value/%count: %player wins %item.", "%value, %count, %player, %item"},
-    {"RaidUnavailable", "Random raid unavailable", "Raid roll %value/%count: %player cannot receive %item.", "%value, %count, %player, %item"},
-    {"WrongRoll", "Wrong roll type", "%player wrong roll for %item: %reason.", "%player, %item, %reason"},
-    {"CannotRoll", "Roll not eligible", "%player cannot roll for %item: %reason.", "%player, %item, %reason"},
+    {"RaidUnavailable", "Random raid unavailable", "Raid roll %value/%count: %player cannot receive %item.", "%value, %count, %player, %item", whisperRecipient = "player"},
+    {"WrongRoll", "Wrong roll type", "%player wrong roll for %item: %reason.", "%player, %item, %reason", whisperRecipient = "player"},
+    {"CannotRoll", "Roll not eligible", "%player cannot roll for %item: %reason.", "%player, %item, %reason", whisperRecipient = "player"},
     {"TradeConfirmed", "Trade confirmed", "%player traded %item to %recipient.", "%player, %item, %recipient"},
     {"RulesHeader", "Loot rules heading", "=== LOOT RULES ===", ""},
     {"RankRules", "Loot rules for rank", "%rank: %rights", "%rank, %rights"},
@@ -39,6 +39,10 @@ for index = 1, table.getn(Messages.Definitions) do
     definition.enabledKey = "lmMessage" .. definition[1] .. "Enabled"
     definitions[definition[1]] = definition
     table.insert(Messages.SettingKeys, definition.textKey); table.insert(Messages.SettingKeys, definition.enabledKey)
+    if definition.whisperRecipient then
+        definition.whisperKey = "lmMessage" .. definition[1] .. "Whisper"
+        table.insert(Messages.SettingKeys, definition.whisperKey)
+    end
 end
 
 function Messages.EnsureDefaults(settings)
@@ -46,6 +50,7 @@ function Messages.EnsureDefaults(settings)
         local definition = Messages.Definitions[index]
         if type(settings[definition.textKey]) ~= "string" then settings[definition.textKey] = definition[3] end
         if settings[definition.enabledKey] == nil then settings[definition.enabledKey] = true end
+        if definition.whisperKey and settings[definition.whisperKey] == nil then settings[definition.whisperKey] = false end
     end
 end
 
@@ -134,8 +139,14 @@ function Messages.Send(key, values, send)
     if values and values.playerNames then parts, failure = Messages.BuildPlayerMessages(key, values.playerNames, values)
     else parts, failure = Messages.Build(key, values) end
     if not parts then return false, failure end
+    if table.getn(parts) == 0 then return true end
+    local definition, recipient = definitions[key], nil
+    if definition.whisperKey and BootyRaiderDB and BootyRaiderDB[definition.whisperKey] == true then
+        recipient = values and values[definition.whisperRecipient]
+        if type(recipient) ~= "string" or recipient == "" then return false, "The Loot Master whisper has no recipient." end
+    end
     for index = 1, table.getn(parts) do
-        local ok, reason = send(parts[index], false)
+        local ok, reason = send(parts[index], false, recipient)
         if not ok then return false, reason end
     end
     return true

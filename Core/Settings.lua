@@ -125,6 +125,10 @@ function Settings.Get()
         for _,definition in ipairs(Raider.Services.LootMessages.Definitions) do
             Field(definition.enabledKey,"Send "..definition[2],"checkbox",{"Addon Messages","Loot Master",definition[2]})
             local enabledKey=definition.enabledKey
+            if definition.whisperKey then
+                Field(definition.whisperKey,"Send in whisper","checkbox",{"Addon Messages","Loot Master",definition[2]},nil,nil,nil,
+                    function(store) return store[enabledKey]~=false end,"Send only to the player concerned, instead of raid chat.")
+            end
             Field(definition.textKey,definition[2],"text",{"Addon Messages","Loot Master",definition[2]},nil,nil,nil,
                 function(store) return store[enabledKey]~=false end,"Available variables: "..(definition[4]~="" and definition[4] or "none")..". Variables are optional.")
         end

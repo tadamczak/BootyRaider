@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-dev.14 — 2026-10-17
+
+- Offer Transmog rolls only for the supported armor slots and weapons.
+- Accept RaidRes participants without items, including empty-reserve export placeholders.
+- Start item rolls without requiring an addon raid session.
+- Preserve known ranks during guild refreshes and refresh loot rights when the current guild data becomes ready.
+- Show the roll category beside each current result and offer private whispers for individual roll warnings.
+
 ## 0.1.0-dev.13 — 2026-10-09
 
 - Use Booty preferences and commands; preserve previous raid settings and saved profiles.

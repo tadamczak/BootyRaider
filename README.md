@@ -16,7 +16,11 @@ Install **BootyLib** and **BootyRaider** in `Interface/AddOns`, then enable them
 
 ## Basic usage
 
-Use `/br` to open Raid, `/br stats` for Raid Stats, `/br csr` for CSR and `/br settings` for configuration. `/br roll` opens New Roll. `/br roll [item]` starts the default Tmog, OS, MS and RC modes; player names and explicit roll modes can follow the item.
+Use `/br` to open Raid, `/br stats` for Raid Stats, `/br csr` for CSR and `/br settings` for configuration. `/br roll` opens New Roll. `/br roll [item]` starts the default OS, MS and RC modes, plus Tmog for supported equipment; player names and explicit roll modes can follow the item. You must be the physical raid's Loot Master, leader or assistant; an addon raid session is optional.
+
+Tmog is available for head, shoulders, chest/robes, shirts, wrists, gloves, belts, legs, boots and weapons. Other slots and non-equippable items do not offer it. If item data is not cached, refocus the item field after the client receives it.
+
+Current player results include their roll type, for example **97 SR** or **27 Tmog**. In Loot Master message settings, **Send in whisper** can send invalid-roll and unavailable-recipient notices directly to the affected player. It is off by default; winner announcements keep their raid audience.
 
 New sessions capture the physical raid independently of guild membership. Save Raid preserves roster, loot and selected statistics. Live tracking, group/list appearance, the default game Raid tab and Loot Master messages have independent settings.
 
@@ -24,7 +28,7 @@ Save Raid offers a reload to write data to disk. This waits until other Booty pr
 
 An incomplete client roster cannot start a ready session or replace a complete roster. If New Raid fails, the dialog retains your input so you can try again when the roster is available.
 
-Import SR validates the entire RaidRes Base64 export before replacing reservations. Damaged exports leave the previous SR, loot and history intact; a valid empty reservation list clears SR. Imports accept up to 16000 bytes of pasted text.
+Import SR validates the entire RaidRes Base64 export before replacing reservations. Participants without reserved items, including RaidRes empty-choice placeholders, are accepted and receive no SR. Damaged exports leave the previous SR, loot and history intact; a valid empty reservation list clears SR. Imports accept up to 16000 bytes of pasted text.
 
 Raid class and rank filters use the space needed by their captions. Filter and search controls wrap on narrow windows and expand again when space is available, in both standalone mode and Booty Suite.
 
