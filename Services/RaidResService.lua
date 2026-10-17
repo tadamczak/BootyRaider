@@ -236,15 +236,25 @@ local function ReadImport(encoded)
         if kinds[row] ~= "object" then return nil, "Each RaidRes reservation must be an object." end
         local name, nameError = ImportText(row.name, "reservation name", false)
         if nameError then return nil, nameError end
-        if kinds[row.items] ~= "array" then return nil, "Each RaidRes reservation must contain an items array." end
-        local ids = {}
-        for itemIndex = 1, table.getn(row.items) do
-            local item = row.items[itemIndex]
+        -- RaidRes can retain a participant without a reservation. Omitted/null
+        -- items mean no SR; any populated collection still requires valid items.
+        local items = row.items
+        if items ~= nil and items ~= JSON_NULL and kinds[items] ~= "array" then
+            return nil, "Each RaidRes reservation must contain an items array when items are present and not null."
+        end
+        local ids, itemCount = {}, items ~= nil and items ~= JSON_NULL and table.getn(items) or 0
+        for itemIndex = 1, itemCount do
+            local item = items[itemIndex]
             local itemId = kinds[item] == "object" and item.id
-            if type(itemId) ~= "number" or itemId < 1 or itemId > 2147483647 or itemId ~= math.floor(itemId) then
+            -- Saved RaidRes exports use these singleton pairs for no reserve.
+            -- Keep the participant, but never turn a placeholder into loot rights.
+            local noReserve = kinds[item] == "object" and ((itemId == 0 and item.quality == 0) or (itemId == 1 and item.quality == 1))
+            if noReserve and itemCount ~= 1 then
+                return nil, "A RaidRes no-reserve placeholder cannot be combined with reserved items."
+            elseif not noReserve and (type(itemId) ~= "number" or itemId < 1 or itemId > 2147483647 or itemId ~= math.floor(itemId)) then
                 return nil, "Each RaidRes item must contain a positive integer id."
             end
-            table.insert(ids, itemId)
+            if not noReserve then table.insert(ids, itemId) end
         end
         table.insert(reservations, { name = name, itemIds = ids })
     end
@@ -529,6 +539,12 @@ function RaidResService.Reconcile(previousAttendance, attendance)
         local member = attendance.members[index]
         local key = NormalizeName(member.name)
         local reservation = reservationsByName[key]
+        if reservation and table.getn(reservation.itemIds or {}) == 0 then
+            -- An imported participant can join without reserving an item.
+            -- Remove their outside record, then report the normal missing SR.
+            reservationsByName[key] = nil
+            reservation = nil
+        end
         if member.srItemIds and table.getn(member.srItemIds) > 0 then
             reservationsByName[key] = nil
         elseif reservation and previousAssignmentState[key] ~= false then

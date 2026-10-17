@@ -17,7 +17,6 @@ function Dialog.Create(options)
     frame.item = UI.CreateFramedEditBox(frame, nil, 304, 22)
     frame.item:SetPoint("TOPLEFT", frame.label, "BOTTOMLEFT", 0, -8)
     frame.item:SetWidth(304); frame.item:SetHeight(22); frame.item:SetAutoFocus(false)
-    frame.item:SetScript("OnEditFocusGained",function() frame.itemFocused=true end)
     frame.item:SetScript("OnEditFocusLost",function() frame.itemFocused=nil end)
     local linkBinding,bagBinding
     local function DetachLinkInput()
@@ -69,6 +68,16 @@ function Dialog.Create(options)
         check.labelHit:SetHeight(18)
         frame.typeChecks[range]=check
     end
+    local function UpdateItemTypes()
+        local eligible = Raider.Services.LootRollRequest.IsTransmogEligible(frame.item:GetText())
+        if eligible and not frame.transmogEligible then frame.types[98]=true end
+        if not eligible then frame.types[98]=nil end
+        frame.transmogEligible=eligible
+        frame.typeChecks[98]:SetChecked(frame.types[98] and 1 or nil)
+        UI.Settings.SetCheckboxEnabled(frame.typeChecks[98],eligible)
+    end
+    frame.item:SetScript("OnTextChanged",UpdateItemTypes)
+    frame.item:SetScript("OnEditFocusGained",function() frame.itemFocused=true;UpdateItemTypes() end)
     frame.membersButton = UI.CreateButton(frame, nil, "Add rollers", 140, 22)
     frame.membersButton:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -118)
     UI.SetClassicButtonIcon(frame.membersButton,"roster")
@@ -120,6 +129,7 @@ function Dialog.Create(options)
             self.typeChecks[range]:SetChecked(range~=102 and 1 or nil)
         end
         self.item:SetText("")
+        UpdateItemTypes()
         self.openRoll=true; self.openCheck:SetChecked(1); UpdateMembersState()
         local count=tonumber(Raider.Services.Raid.GetRaidMemberCount()) or 0
         local used=0

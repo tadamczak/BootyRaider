@@ -400,7 +400,7 @@ local function UpdateClassColors()
             local color = (RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]) or Raider.UI.Components.Theme.classColors[classFile]
             if member.name and color then
                 playerColors[member.name] = color
-                playerColorCodes[member.name] = string.format("|cff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
+                playerColorCodes[member.name] = string.format("|cff%02x%02x%02x", math.floor(color.r * 255), math.floor(color.g * 255), math.floor(color.b * 255))
             end
         end
     end
@@ -411,7 +411,7 @@ local function UpdateClassColors()
         if color then
             playerColors[name] = color
             if not playerColorCodes[name] then
-                playerColorCodes[name] = string.format("|cff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
+                playerColorCodes[name] = string.format("|cff%02x%02x%02x", math.floor(color.r * 255), math.floor(color.g * 255), math.floor(color.b * 255))
             end
         end
     end
@@ -762,6 +762,14 @@ local function CreateRowActionButton(parent, text, width, height)
     return button
 end
 
+local function FitLiveItemLink(row, rowWidth)
+    if not row:IsVisible() or not row.itemHit:IsShown() or not row.roll or row.roll.raidRoll then return end
+    local valueWidth = row.valueText:GetStringWidth() + 2
+    row.valueText:SetWidth(valueWidth)
+    local available = rowWidth - row.text:GetWidth() - valueWidth - ((row.giveButton:IsShown() or row.rerollButton:IsShown()) and 90 or 10)
+    row.itemHit:SetWidth(math.max(1, math.min(row.itemHit.text:GetStringWidth() + 2, available)))
+end
+
 OpenRestoreMenu = function()
     if restorePicker:IsShown() then restorePicker:Hide(); return end
     UpdateRestoreCandidates()
@@ -1007,6 +1015,9 @@ RefreshResults = function()
         row.rerollRange = nil; if row.rerollButton then row.rerollButton:Hide() end
         local result = liveResults and liveResults[firstLiveResult + index - 1]
         if result then
+            -- This renderer already uses Lua 5.0's full allowance of upvalues.
+            local category = BootyRaider.Services.LootRollRequest.CategoryNames[result.range]
+            local valueText = result.value .. (category and " " .. category or "")
             row.playerName = result.name; row.roll = liveRoll; row.result = result
             local winningResult = liveRoll.winnerResult and liveRoll.winnerResult == result or (not liveRoll.winnerResult and liveRoll.winner == result.name and result.valid ~= false)
             local showItemLink = liveRoll.raidRoll or (activeRoll ~= liveRoll and winningResult)
@@ -1021,15 +1032,15 @@ RefreshResults = function()
                 row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("LEFT", row.text, "RIGHT", 0, 0)
                 row.valueText:ClearAllPoints(); row.valueText:SetPoint("LEFT", row.itemHit, "RIGHT", 0, 0)
                 if liveRoll.raidRoll then row.valueText:SetText(" - " .. result.value .. "/" .. liveRoll.raidCount)
-                else row.valueText:SetText(" (" .. result.value .. ")" .. (result.valid == false and " - Invalid" or "")
+                else row.valueText:SetText(" (" .. valueText .. ")" .. (result.valid == false and " - Invalid" or "")
                     .. (liveRoll.tradedTo and winningResult and " - traded to " .. liveRoll.tradedTo or "")) end
                 row.itemHit:Show(); row.valueText:Show()
             else
                 row.itemHit:Hide(); row.valueText:Hide()
                 row.text:ClearAllPoints(); row.text:SetPoint("LEFT", row, "LEFT", 5, 0); row.text:SetPoint("RIGHT", row, "RIGHT", -85, 0)
                 if result.valid == false then
-                    row.text:SetText(result.name .. " - (" .. result.value .. ") - Invalid roll (" .. result.shortInvalidReason .. ")")
-                else row.text:SetText(ColoredName(result.name) .. " - (" .. result.value .. ")") end
+                    row.text:SetText(result.name .. " - (" .. valueText .. ") - Invalid roll (" .. result.shortInvalidReason .. ")")
+                else row.text:SetText(ColoredName(result.name) .. " - (" .. valueText .. ")") end
             end
             if result.valid == false then row.text:SetTextColor(1, 0.28, 0.28)
             else row.text:SetTextColor(1, 1, 1) end
@@ -1066,7 +1077,10 @@ RefreshResults = function()
     UpdateScrollRange()
     local contentWidth = scrollContent:GetWidth()
     for index = 1, MAX_RESULT_ROWS do resultRows[index]:SetWidth(contentWidth - 6) end
-    for index = 1, MAX_LIVE_ROWS do liveRows[index]:SetWidth(contentWidth - 3) end
+    for index = 1, MAX_LIVE_ROWS do
+        local row = liveRows[index]
+        row:SetWidth(contentWidth - 3); row:FitItemLink(contentWidth - 3)
+    end
 end
 
 local function Refresh()
@@ -1220,8 +1234,9 @@ RestoreSession = function(source)
     Refresh()
 end
 
-Announce = function(message, prefix)
-    local ok = RaidService.SendRaidWarning(message, prefix)
+Announce = function(message, prefix, recipient)
+    local ok, reason = RaidService.SendRaidWarning(message, prefix, recipient)
+    if recipient ~= nil then return ok, reason end
     if not ok and RaidService.IsInRaid() and type(SendChatMessage)=="function" then
         -- A master looter is not necessarily a leader or assistant.
         ok=pcall(SendChatMessage,prefix == false and message or RaidService.PrefixLootMasterMessage(message),"RAID")
@@ -1380,7 +1395,10 @@ RefreshTracker = function()
     for index = 1, MAX_LIVE_ROWS do
         local line
         local result = roll.results and roll.results[trackerFirst + index - 1]
-        if result then line = ColoredName(result.name) .. " - " .. result.value .. (result.valid == false and " - Invalid" or "") end
+        if result then
+            local category = Raider.Services.LootRollRequest.CategoryNames[result.range]
+            line = ColoredName(result.name) .. " - " .. result.value .. (category and " " .. category or "") .. (result.valid == false and " - Invalid" or "")
+        end
         if index == 1 and not line then line = "Waiting for rolls..." end
         if line then trackerRows[index].text:SetText(line); trackerRows[index]:Show()
         else trackerRows[index]:Hide() end
@@ -1504,6 +1522,16 @@ local function StartRoll(slot, link, request)
     local manual = not slot
     if not link or (manual and not Raider.Services.LootRollRequest.CanOrganize()) or (not manual and not RaidService.IsPlayerLootMaster()) then return false end
     if not manual and (not LootSlotIsItem(slot) or GetLootSlotLink(slot) ~= link) then return false end
+    local previousSource, previousGuid = currentLootSession, currentSessionHasGuid
+    -- Roster synchronization can bind the first attendance owner and clear all
+    -- old loot UI context. Finish that before constructing the new round.
+    local srRestricted, srReserved, srAllowed, srNames, srRankRights, srRankNames, reyCoinRights, reyCoinUsed = RaidService.GetSoftReserveRollRights(link)
+    local lootToken = RaidService.GetLootSessionToken()
+    if not currentLootSession and previousSource then
+        currentLootSession, currentSessionHasGuid = previousSource, previousGuid
+        retention.RememberSource(currentLootSession)
+    end
+    if manual then manualRollLink = link; panel.manualSession = true end
     retention.EnsureSource()
     local seconds = GetGlobalRollDuration()
     local count = math.min(40, math.max(0, tonumber(GetNumRaidMembers()) or 0))
@@ -1527,12 +1555,12 @@ local function StartRoll(slot, link, request)
         local _, _, _, _, _, _, _, _, _, itemTexture = GetItemInfo(link)
         icon = itemTexture
     end
-    local srRestricted, srReserved, srAllowed, srNames, srRankRights, srRankNames, reyCoinRights, reyCoinUsed = RaidService.GetSoftReserveRollRights(link)
     activeRoll = { slot = slot, link = link, icon = icon, source = currentLootSession,
-        lootSessionToken = RaidService.GetLootSessionToken(),
+        lootSessionToken = lootToken,
         historyKey = historyKey or retention.ResolveHistoryKey(currentLootSession .. ":" .. tostring(slot or "manual"), link), manual = manual,
         duration = seconds, endsAt = GetTime() + seconds, lastRemaining = seconds, seen = {}, results = {}, highest = -1, highestPriority = -1, transmogHighest = -1, srRestricted = srRestricted, srReserved = srReserved, srAllowed = srAllowed, srNames = srNames, srRankRights = srRankRights, srRankNames = srRankNames, reyCoinRights = reyCoinRights, reyCoinUsed = reyCoinUsed }
     activeRoll.allowedTypes=request and request.types
+    activeRoll.transmogEligible=Raider.Services.LootRollRequest.IsTransmogEligible(link)
     activeRoll.allowedNames=allowedNames
     if allowedNames then
         local filtered={}
@@ -1558,7 +1586,9 @@ local function StartRoll(slot, link, request)
         AnnounceMessage("SRPlayers", {item=link, players=table.concat(srNames, ", "), playerNames=srNames})
         AnnounceMessage("ItemRoll", {item=link, rolls="SR (102)", seconds=seconds})
     else
-        AnnounceMessage("ItemRoll", {item=link, rolls="RC (101), MS (100), OS (99), Tmog (98)", seconds=seconds})
+        local choices="RC (101), MS (100), OS (99)"
+        if activeRoll.transmogEligible then choices=choices..", Tmog (98)" end
+        AnnounceMessage("ItemRoll", {item=link, rolls=choices, seconds=seconds})
     end
     events:RegisterEvent("CHAT_MSG_SYSTEM")
     timer:SetScript("OnUpdate", OnTimerUpdate)
@@ -1765,6 +1795,7 @@ end
 
 for index = 1, MAX_LIVE_ROWS do
     local row = Raider.UI.Components.CreateControl(nil, scrollContent)
+    row.FitItemLink = FitLiveItemLink
     row:SetHeight(21); row:SetWidth(scrollContent:GetWidth() - 3)
     row:SetPoint("TOPLEFT", liveHeader, "BOTTOMLEFT", 0, -3 - (index - 1) * 23)
     row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 8, insets = { left = 1, right = 1, top = 1, bottom = 1 } })
@@ -1828,7 +1859,10 @@ panel:SetScript("OnSizeChanged", function()
     local width = scrollContent:GetWidth()
     local i
     for i = 1, MAX_RESULT_ROWS do resultRows[i]:SetWidth(width - 6) end
-    for i = 1, MAX_LIVE_ROWS do liveRows[i]:SetWidth(width - 3) end
+    for i = 1, MAX_LIVE_ROWS do
+        local row = liveRows[i]
+        row:SetWidth(width - 3); row:FitItemLink(width - 3)
+    end
 end)
 
 panel:EnableMouseWheel(true)
@@ -2190,7 +2224,7 @@ events:SetScript("OnEvent", function()
             local reyCoinUsed, reyCoinItem = false, nil
             if range == 101 then reyCoinUsed, reyCoinItem = RaidService.HasUsedReyCoin(name) end
             local result, invalidReason = RaidService.ProcessLootRoll(roll, name, value, range, reyCoinUsed, reyCoinItem)
-            if invalidReason then
+            if result and invalidReason then
                 if string.find(invalidReason, "^wrong roll") then
                     AnnounceMessage("WrongRoll", {player=name, item=roll.link, reason=string.gsub(invalidReason, "^wrong roll, ", "")})
                 else AnnounceMessage("CannotRoll", {player=name, item=roll.link, reason=invalidReason}) end
