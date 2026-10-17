@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.20 — 2026-10-17
+
+- Restore the original thin CSR project border after the rejected outline change.
+
 ## 0.1.0-dev.19 — 2026-10-17
 
 - Render CSR accordion outlines with the existing project border's locally anchored texture pieces.

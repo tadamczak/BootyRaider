@@ -110,8 +110,7 @@ end
 local function StyleReportRow(row, index, accordion, header)
     UI.SetRowColor(row, accordion and reportSectionColor or reportRowColor,
         accordion and 1 or header and 0 or math.mod(index, 2) == 0 and 0.14 or 0.025)
-    -- Keep the existing native-profile project frame in owner-local slices.
-    UI.SetProjectButtonOutline(row, accordion, 2, nil, nil, nil, 0)
+    UI.SetProjectButtonOutline(row, accordion)
     row.bootyTableRowHover:Hide(); row.bootyTableRowSelection:Hide()
     row.bootyTableRowSelected = false; row.bootyTableRowHovered = nil
     row:EnableMouse(not header)
