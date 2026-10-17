@@ -54,6 +54,11 @@ local function GetItemId(item, scalar)
     return tonumber(item)
 end
 
+local function GetClass(member)
+    if type(member.classFile) == "string" and member.classFile ~= "" then return member.classFile end
+    return member.class
+end
+
 function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selectedRaids, searchText, showArchived)
     local summary = target or { players = {} }
     summary.players = summary.players or {}
@@ -99,7 +104,9 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
             local hasRights = HasCsrRights(member, raid.lootRules)
             if key ~= "" and (hasLoot or hasRights) then
                 local state = states[key]
-                if not state then state = { name = member.name or "Unknown", pending = {}, sources = {}, receivedThisRaid = {} }; states[key] = state end
+                if not state then state = { name = member.name or "Unknown", class = GetClass(member),
+                    pending = {}, sources = {}, receivedThisRaid = {} }; states[key] = state end
+                if not state.class or state.class == "" then state.class = GetClass(member) end
                 state.sources = state.sources or {}
                 ClearTable(state.receivedThisRaid)
                 -- Receiving an item clears all CSR previously accumulated for
@@ -122,8 +129,13 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                             if previous and previous.id == raid.id and previous.savedAt == savedAt then
                                 previous.count = previous.count + count
                             else
+                                local archivedItems = type(raid.csrArchived) == "table" and raid.csrArchived[key]
+                                local manuallyArchived = type(archivedItems) == "table" and archivedItems[itemId] == true
+                                local expired = savedAt < cutoff
                                 sources[table.getn(sources) + 1] = { id = raid.id, raidName = raid.raidName or "Other", savedAt = savedAt,
-                                    expiresAt = savedAt + WINDOW_SECONDS, status = savedAt >= cutoff and "ACTIVE" or "ARCHIVED", count = count }
+                                    playerName = state.name, itemId = itemId, manuallyArchived = manuallyArchived,
+                                    expired = expired, expiresAt = savedAt + WINDOW_SECONDS,
+                                    status = (expired or manuallyArchived) and "ARCHIVED" or "ACTIVE", count = count }
                             end
                         end
                     end
@@ -139,12 +151,15 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
             if missed > 0 and (query == "" or string.find(Normalize(state.name), query, 1, true)) then
                 local activeCount, archivedCount = 0, 0
                 local sources = state.sources and state.sources[itemId] or {}
-                for index = 1, table.getn(sources) do
+                for index = table.getn(sources), 1, -1 do
                     if sources[index].status == "ACTIVE" then activeCount = activeCount + sources[index].count
-                    else archivedCount = archivedCount + sources[index].count end
+                    elseif archives then archivedCount = archivedCount + sources[index].count
+                    else table.remove(sources, index) end
                 end
-                table.insert(players, { name = state.name, itemId = itemId, items = activeCount, archivedItems = archivedCount,
-                    csr = activeCount * POINTS_PER_UNSUCCESSFUL_SR, raids = sources })
+                if activeCount + archivedCount > 0 then
+                    table.insert(players, { name = state.name, class = state.class, itemId = itemId, items = activeCount, archivedItems = archivedCount,
+                        csr = activeCount * POINTS_PER_UNSUCCESSFUL_SR, raids = sources })
+                end
             end
         end
     end

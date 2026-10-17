@@ -1,12 +1,20 @@
 local Raider = BootyRaider
 local Runtime = Raider.Runtime
-local function CreateRaid(parent,host) return Raider.Modules.RaidScreen.Create(parent,host) end
+local function RequestHistoryOnShow(view)
+    local show=view.Show
+    function view:Show()
+        show(self)
+        Runtime.RequestHistoryAuthority()
+    end
+    return view
+end
+local function CreateRaid(parent,host) return RequestHistoryOnShow(Raider.Modules.RaidScreen.Create(parent,host)) end
 local function CreateStatistics(parent,host)
     Runtime.Initialize(host)
     local view=Raider.Modules.RaidStatistics.Create(parent,Raider.Database.GetRaidStatistics,Raider.Database.DeleteRaidStatistic,Raider.Database.UpdateRaidStatistic)
     view.frame=view.page
     Runtime.views.raidStatistics=view
-    return view
+    return RequestHistoryOnShow(view)
 end
 local function CreateCSR(parent,host)
     Runtime.Initialize(host)
@@ -15,10 +23,10 @@ local function CreateCSR(parent,host)
             Runtime.OpenView("raidStatistics")
             local statistics=Runtime.GetView("raidStatistics")
             if statistics and statistics.SelectRaid then statistics:SelectRaid(id) end
-        end)
+        end,{canManageHistory=Raider.Services.RankPolicy.CanManageHistory,setSourceArchived=Raider.Database.SetCSRSourceArchived})
     view.frame=view.page
     Runtime.views.csr=view
-    return view
+    return RequestHistoryOnShow(view)
 end
 function Raider.HandleCommand(text)
     if not Raider.active then Runtime.Print("BootyRaider is stopped. Resume it in Plugins or reload with the addon enabled.");return false end
@@ -85,7 +93,7 @@ local descriptor={id="raider",name="BootyRaider",label="Raid",namespace=Raider,v
     OnActivationFailed=Runtime.OnActivationFailed,
     GetDatabase=Raider.Database.Ensure,GetQuickMenu=QuickMenu,ResetSettings=Raider.Settings.Reset,OnSettingChanged=Raider.OnSettingChanged,Command=Raider.HandleCommand,
     BeginSettingsBatch=Runtime.BeginSettingsBatch,EndSettingsBatch=Runtime.EndSettingsBatch,OnSettingsProfileApplied=Runtime.OnSettingsProfileApplied,
-    GetGuildDirectoryDemand=function() return Raider.active and Raider.Services.Raid.IsInRaid() end,
+    GetGuildDirectoryDemand=Runtime.WantsGuildDirectory,
     OnGuildDirectoryUpdated=Runtime.OnGuildDirectoryUpdated,
     views={{id="raid",label="Raid",icon="raids",create=CreateRaid},
         {id="raidStatistics",label="Raid Stats",icon="raid_stats",create=CreateStatistics},

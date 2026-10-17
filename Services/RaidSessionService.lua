@@ -201,7 +201,10 @@ function Session:Complete(saveOptions)
         end
         if not dependencies.raidRes.SyncHistory(staged) then return false, "The raid snapshot could not be saved." end
         if entry then dependencies.database.StoreRaidStatistic(entry)
-        elseif statistic then dependencies.database.DeleteRaidStatistic(request.raidId) end
+        elseif statistic then
+            local removed, reason = dependencies.database.RemoveRaidStatisticForSave(request.raidId, attendance)
+            if not removed then return false, reason or "The previous raid statistics could not be removed." end
+        end
         self.preparedSave = nil
         dependencies.database.StoreRaidAttendance(nil)
     end

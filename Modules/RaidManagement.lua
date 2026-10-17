@@ -410,7 +410,7 @@ function RaidManagement.CreateActionControls(page)
     controls.historyLoadButtons = {}
     controls.historyEditButtons = {}
     controls.historyHeaders = {}
-    for index, text in ipairs({"#", "Name", "Raid", "Duration", "Created At", "Modified At"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
+    for index, text in ipairs({"#", "Raid ID", "Raid Type", "Duration", "Created At", "Modified At"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
     local historyIndex
     for historyIndex = 1, 10 do
         local button = Raider.UI.Components.CreateSelectionButton(controls.historyCanvas, nil, "", 380, 26); button.historyIndex = historyIndex; button:Hide()
@@ -3806,7 +3806,7 @@ function RaidManagement.AttachActionHandlers(options)
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(newRaidDialog, options.page) end
     Raider.UI.Components.SetHeadingIcon(newRaidDialog.title,"raids")
     newRaidDialog.raidLabel = Raider.UI.Components.CreateLabel(newRaidDialog, nil, "OVERLAY", "GameFontHighlightSmall")
-    newRaidDialog.raidLabel:SetPoint("TOPLEFT", newRaidDialog, "TOPLEFT", 18, -91); newRaidDialog.raidLabel:SetText("Raid")
+    newRaidDialog.raidLabel:SetPoint("TOPLEFT", newRaidDialog, "TOPLEFT", 18, -91); newRaidDialog.raidLabel:SetText("Raid Type")
     newRaidDialog.raidSelect = Raider.UI.Components.CreateDropdownButton(newRaidDialog, nil, selectedRaidName, 180)
     newRaidDialog.raidSelect:SetPoint("TOPLEFT", newRaidDialog, "TOPLEFT", 18, -108)
     newRaidDialog.raidPanel = Raider.UI.Components.CreateDropdownPanel(newRaidDialog, newRaidDialog.raidSelect, 180, 148, 10)
@@ -3890,6 +3890,7 @@ function RaidManagement.AttachActionHandlers(options)
             Raider.UI.Components.ShowOpaquePopup("BOOTY_RAIDER_DELETE_RAID_SNAPSHOT")
         end)
         controls.historyEditButtons[historyIndex]:SetScript("OnClick", function()
+            if not Raider.Services.RankPolicy.CanManageHistory() then return end
             local snapshot = options.page.raidHistorySnapshots and options.page.raidHistorySnapshots[this.historyIndex]
             if snapshot then editRaidDialog:Open(snapshot) end
         end)

@@ -28,13 +28,19 @@ Loot Rules belong to the current raid. Unsaved changes do not change saved CSR. 
 
 Saved raids show **Duration**, **Created At** and **Modified At**. Duration uses the recorded raid end and displays, for example, **1h 05min 09s**. **Save raid end time** records the end when saving; **Modify raid end time** enables changing an existing end in **DD.MM.YYYY HH:MM:SS** format. Without a recorded end, duration is **Unknown**. Editing or copying a raid preserves its original creation date and recorded end.
 
-Use **Edit** beside a saved raid to change its ID, optional name and raid type. Raid Stats also lets you change the type. Finish an active raid before renaming its ID. Saving metadata offers the usual reload prompt. The **Issues** button minimizes or restores Soft Reserve warnings.
+Saved lists use **Raid ID** and **Raid Type**. Use **Edit** beside a saved raid to change its ID and type. Raid Stats also lets you change the type. Finish an active raid before renaming its ID. Saving metadata offers the usual reload prompt. The **Issues** button minimizes or restores Soft Reserve warnings.
 
 Loot Master message settings are grouped by topic. Each text field shows a complete example that updates while you edit, including your prefix and whisper preference.
 
 In Raid Stats, **Select all** selects or clears the currently filtered raids. Search also matches players and partial item names. Names saved with the raid are searchable even without the client cache; older records containing only item IDs need cached names.
 
 CSR retains history beyond 60 days. **Show archived CSR** includes expired reserves with zero points. **Group By** offers Default, Player and Item; expand rows to inspect source raids, dates, expiration and ACTIVE/ARCHIVED status. Click column headings to sort each table. Editing or copying an old raid does not renew its CSR expiration. History remains until manually deleted; records removed by older versions cannot be recovered.
+
+Each CSR source has an eye icon to view its raid. **Archive** removes that source's points while retaining its history. With **Show archived CSR** checked, **Activate** restores a manually archived source before its original expiration. Expired sources cannot be activated. Overwriting the same raid preserves archive decisions; a new Raid ID has independent sources.
+
+Only current guild ranks **Officer Wukong** and **Mukla** can archive/activate CSR, edit saved raid details, or edit/remove Raid Stats. Reading history remains available to everyone. These controls wait for current guild information; a raid leader or assistant role alone grants no history editing rights.
+
+**Settings → Addon UI → CSR → Display** offers **Show class icon** and **Use class colors**, both enabled by default. Expand controls appear before the class/item icon and name.
 
 Save Raid offers a reload to write data to disk. This waits until other Booty products have no active raid or recording. A failed startup or Stop reports its reason and retains raid data.
 
