@@ -7,8 +7,8 @@ Raider.Modules.CSR = CSR
 
 local function CreateTestLab(owner, onChanged, onExit)
     local dialog = UI.CreateContainer("BootyRaiderCSRTestLab", UIParent)
-    dialog:SetWidth(500); dialog:SetHeight(420); dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
-    dialog:SetResizable(true); dialog:SetMinResize(280, 240); dialog:SetMaxResize(850, 700)
+    dialog:SetWidth(540); dialog:SetHeight(510); dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
+    dialog:SetResizable(true); dialog:SetMinResize(320, 280); dialog:SetMaxResize(850, 700)
     if dialog.SetClampedToScreen then dialog:SetClampedToScreen(true) end
     dialog.title = UI.CreateHeading(dialog, "CSR Test Lab", 1, "gold", "csr")
     dialog.close = UI.CreateWindowButton(dialog, nil, "close")
@@ -17,37 +17,57 @@ local function CreateTestLab(owner, onChanged, onExit)
     dialog.body = UI.CreateResponsiveCanvas(dialog.host, "BootyRaiderCSRTestLabBody")
     local body = dialog.body
     dialog.help = UI.CreateLabel(body, nil, "OVERLAY", "GameFontHighlightSmall")
-    dialog.help:SetText("Temporary simulation: add players and reserves, award items, change rank or advance time. Saved raids are unchanged.")
+    dialog.help:SetText("Temporary simulation. Select a player to add reserves or award an item. Test contributions support Archive and Activate; saved raids are unchanged.")
+    dialog.error = UI.CreateLabel(body, nil, "OVERLAY", "GameFontHighlightSmall"); dialog.error:SetTextColor(1, 0.3, 0.3)
     dialog.state = Raider.Services.CSRTest.Create(); dialog.summary = { players = {} }
     dialog.status = UI.CreateLabel(body, nil, "OVERLAY", "GameFontHighlightSmall")
     dialog.item = UI.CreateLabel(body, nil, "OVERLAY", "GameFontHighlightSmall")
     dialog.result = UI.CreateLabel(body, nil, "OVERLAY", "GameFontNormal")
-    dialog.logTitle = UI.CreateLabel(body, nil, "OVERLAY", "GameFontNormal")
-    dialog.logTitle:SetText("Simulation log")
+    dialog.playerTitle = UI.CreateHeading(body, "Selected player", 3, "gold")
+    dialog.reserveTitle = UI.CreateHeading(body, "Reserves and loot", 3, "gold")
+    dialog.timeTitle = UI.CreateHeading(body, "Time and eligibility", 3, "gold")
+    dialog.logTitle = UI.CreateHeading(body, "Simulation log", 3, "gold")
     dialog.logLines = {}
     for index = 1, 5 do dialog.logLines[index] = UI.CreateLabel(body, nil, "OVERLAY", "GameFontHighlightSmall") end
     local function Action(text, width, callback)
         local button = UI.CreateButton(body, nil, text, width, 26)
         UI.StyleActionButton(button); button.bootyFlowWidth = width
-        button:SetScript("OnClick", function() callback(dialog.state); dialog:Refresh() end)
+        button:SetScript("OnClick", function()
+            local accepted, reason = callback(dialog.state)
+            dialog.actionError = accepted == false and reason or nil; dialog:Refresh()
+        end)
         return button
     end
-    dialog.actions = {
-        Action("Add player", 90, Raider.Services.CSRTest.AddPlayer),
-        Action("Add unsuccessful SR", 142, Raider.Services.CSRTest.AddMissedReserve),
-        Action("Award item", 94, Raider.Services.CSRTest.AwardItem),
-        Action("Next item", 84, Raider.Services.CSRTest.NextItem),
-        Action("Toggle rank", 94, Raider.Services.CSRTest.ToggleRank),
-        Action("+7 days", 76, function(state) Raider.Services.CSRTest.AdvanceDays(state, 7) end),
+    dialog.playerSelect = UI.CreateDropdownButton(body, nil, "Select player", 180)
+    dialog.playerSelect:SetHeight(26); dialog.playerSelect.bootyFlowWidth = 180
+    dialog.playerPanel = UI.CreateDropdownPanel(body, dialog.playerSelect, 200, 80, 20)
+    dialog.playerCanvas = UI.CreateResponsiveCanvas(dialog.playerPanel, "BootyRaiderCSRTestPlayers")
+    dialog.playerChoices = {}
+    dialog.playerSelect:SetScript("OnClick", function()
+        if dialog.playerPanel:IsVisible() then dialog.playerPanel:Hide() else dialog.playerPanel:Show() end
+    end)
+    dialog.addPlayer = Action("Add player", 100, Raider.Services.CSRTest.AddPlayer)
+    dialog.reserveActions = {
+        Action("Add unsuccessful SR", 150, Raider.Services.CSRTest.AddMissedReserve),
+        Action("Award item", 104, Raider.Services.CSRTest.AwardItem),
+        Action("Next item", 88, Raider.Services.CSRTest.NextItem),
     }
+    dialog.timeActions = {
+        Action("Toggle rank", 104, Raider.Services.CSRTest.ToggleRank),
+        Action("+1 Day", 80, function(state) Raider.Services.CSRTest.AdvanceDays(state, 1) end),
+        Action("+7 Days", 80, function(state) Raider.Services.CSRTest.AdvanceDays(state, 7) end),
+    }
+    dialog.actions = {dialog.addPlayer, dialog.reserveActions[1], dialog.reserveActions[2], dialog.reserveActions[3],
+        dialog.timeActions[1], dialog.timeActions[2], dialog.timeActions[3]}
+    dialog.playerControls = {dialog.playerSelect, dialog.addPlayer}
     dialog.reset = UI.CreateButton(dialog, nil, "Reset Test", 90, 26)
     dialog.exit = UI.CreateButton(dialog, nil, "Exit Test", 80, 26)
     UI.StyleActionButton(dialog.reset); UI.StyleActionButton(dialog.exit)
     dialog.exit:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -20, 8)
     dialog.reset:SetPoint("RIGHT", dialog.exit, "LEFT", -8, 0)
-    local function Exit() dialog:Hide(); if onExit then onExit() end end
+    local function Exit() dialog.playerPanel:Hide(); dialog:Hide(); if onExit then onExit() end end
     dialog.close:SetScript("OnClick", Exit); dialog.exit:SetScript("OnClick", Exit)
-    dialog.reset:SetScript("OnClick", function() Raider.Services.CSRTest.Reset(dialog.state); dialog:Refresh() end)
+    dialog.reset:SetScript("OnClick", function() Raider.Services.CSRTest.Reset(dialog.state); dialog.actionError = nil; dialog:Refresh() end)
     dialog.grip = UI.CreateControl(nil, dialog)
     dialog.grip:SetWidth(12); dialog.grip:SetHeight(12); dialog.grip:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", 0, 0)
     dialog.grip:SetFrameLevel(dialog:GetFrameLevel()+100)
@@ -61,8 +81,14 @@ local function CreateTestLab(owner, onChanged, onExit)
             if line.SetWordWrap then line:SetWordWrap(true) end
             y = y + math.max(16, UI.MeasureTextHeight(line, width)) + 8
         end
-        Line(dialog.help); Line(dialog.status); Line(dialog.item); Line(dialog.result)
-        y = UI.LayoutFlow(body, dialog.actions, 0, y, width, 8) + 8
+        Line(dialog.help)
+        if dialog.actionError then Line(dialog.error); dialog.error:Show() else dialog.error:Hide() end
+        Line(dialog.playerTitle)
+        y = UI.LayoutFlow(body, dialog.playerControls, 0, y, width, 8) + 8
+        Line(dialog.status); Line(dialog.result); Line(dialog.reserveTitle); Line(dialog.item)
+        y = UI.LayoutFlow(body, dialog.reserveActions, 0, y, width, 8) + 12
+        Line(dialog.timeTitle)
+        y = UI.LayoutFlow(body, dialog.timeActions, 0, y, width, 8) + 12
         Line(dialog.logTitle)
         for i = 1, table.getn(dialog.logLines) do
             if dialog.logLines[i]:GetText() ~= "" then Line(dialog.logLines[i]); dialog.logLines[i]:Show() else dialog.logLines[i]:Hide() end
@@ -70,24 +96,57 @@ local function CreateTestLab(owner, onChanged, onExit)
         return y
     end
     function dialog:Layout()
-        self.host:ClearAllPoints(); self.host:SetPoint("TOPLEFT", self, "TOPLEFT", 8, -36)
-        self.host:SetWidth(self:GetWidth()-16); self.host:SetHeight(self:GetHeight()-78)
+        self.host:ClearAllPoints(); self.host:SetPoint("TOPLEFT", self, "TOPLEFT", 16, -40)
+        self.host:SetWidth(self:GetWidth()-32); self.host:SetHeight(self:GetHeight()-90)
         UI.LayoutResponsiveCanvas(body, LayoutContent)
     end
     dialog:SetScript("OnSizeChanged", function() dialog:Layout() end)
     function dialog:Refresh()
+        self.error:SetText(self.actionError or "")
         Raider.Services.CSRTest.BuildSummary(self.state, self.summary)
         local totalItems, totalCsr = 0, 0
         for _, player in ipairs(self.summary.players) do totalItems=totalItems+player.items; totalCsr=totalCsr+player.csr end
         local selected = self.state.currentPlayer
-        self.status:SetText("Player: " .. (selected or "none") .. "   Rank: " .. (selected and self.state.ranks[selected] or "-") .. "   Date: " .. date("%Y-%m-%d", self.state.now))
+        self.playerSelect:SetText(selected or "Select player")
+        UI.FitButtonLabel(self.playerSelect, math.max(1, self.playerSelect:GetWidth() - 28))
+        local players = Raider.Services.CSRTest.GetPlayers(self.state)
+        for index, name in ipairs(players) do
+            local choice = self.playerChoices[index]
+            if not choice then
+                choice = UI.CreateButton(self.playerCanvas, nil, "", 180, 22)
+                UI.StyleDropdownChoice(choice)
+                choice:SetScript("OnClick", function()
+                    local accepted, reason = Raider.Services.CSRTest.SelectPlayer(dialog.state, this.playerName)
+                    dialog.actionError = accepted == false and reason or nil
+                    dialog.playerPanel:Hide(); dialog:Refresh()
+                end)
+                self.playerChoices[index] = choice
+            end
+            choice.playerName = name; choice:SetText(name); choice:Show()
+        end
+        for index = table.getn(players) + 1, table.getn(self.playerChoices) do self.playerChoices[index]:Hide() end
+        self.playerPanel:SetHeight(math.min(202, math.max(34, table.getn(players) * 24 + 8)))
+        UI.LayoutResponsiveCanvas(self.playerCanvas, function(width)
+            for index = 1, table.getn(players) do
+                local choice = self.playerChoices[index]
+                choice:ClearAllPoints(); choice:SetPoint("TOPLEFT", self.playerCanvas, "TOPLEFT", 4, -4 - (index - 1) * 24)
+                choice:SetWidth(math.max(1, width - 8)); UI.FitButtonLabel(choice, math.max(1, width - 20))
+            end
+            return table.getn(players) * 24 + 8
+        end)
+        if selected then self.playerSelect:Enable() else self.playerSelect:Disable() end
+        for _, button in ipairs({self.reserveActions[1], self.reserveActions[2], self.timeActions[1]}) do
+            if selected then button:Enable() else button:Disable() end
+        end
+        self.status:SetText("Rank: " .. (selected and self.state.ranks[selected] or "-") .. "   Date: " .. date("%Y-%m-%d", self.state.now))
         self.item:SetText("Item: " .. UI.GetItemLabel(Raider.Services.CSRTest.GetItemId(self.state)))
         self.result:SetText("Rows: " .. table.getn(self.summary.players) .. "   Reserves: " .. totalItems .. "   CSR: " .. totalCsr)
         for i=1,table.getn(self.logLines) do self.logLines[i]:SetText(self.state.log[i] or "") end
         self:Layout()
         if onChanged then onChanged() end
     end
-    function dialog:Open() self:Refresh(); self:Show() end
+    function dialog:Open() self:Show(); self:Refresh() end
+    dialog:SetScript("OnHide", function() dialog.playerPanel:Hide() end)
     dialog:Hide()
     if UI.WindowStack then UI.WindowStack.Register(dialog, {owner = owner}) end
     return dialog
@@ -171,6 +230,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     controller.archivedCheck.label = UI.CreateLabel(controller.archivedGroup, nil, "OVERLAY", "GameFontHighlightSmall")
     controller.archivedCheck.label:SetPoint("LEFT", controller.archivedCheck, "RIGHT", 0, 0)
     controller.archivedCheck.label:SetText("Show archived CSR")
+    controller.archivedCheck.label:SetJustifyH("LEFT"); controller.archivedCheck.label:SetJustifyV("MIDDLE")
     controller.archivedCheck:SetScript("OnClick", function()
         controller.showArchived = this:GetChecked() and true or false; controller:Refresh()
     end)
@@ -198,10 +258,10 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     controller.empty:SetText("No matching Soft Reserves.")
     controller.sourceColumns = {
         { field = "no", text = "#", desiredWidth = 30, minimumWidth = 22, fraction = 0.04 },
-        { field = "raid", text = "Raid", desiredWidth = 300, minimumWidth = 45, fraction = 0.55 },
-        { field = "date", text = "Date", desiredWidth = 92, minimumWidth = 65, fraction = 0.15 },
-        { field = "expires", text = "Expires in", desiredWidth = 74, minimumWidth = 54, fraction = 0.12 },
-        { field = "status", text = "Status", desiredWidth = 82, minimumWidth = 60, fraction = 0.14 },
+        { field = "raid", text = "Raid", desiredWidth = 284, minimumWidth = 45, fraction = 0.55 },
+        { field = "date", text = "Date", desiredWidth = 100, minimumWidth = 65, fraction = 0.15 },
+        { field = "expires", text = "Expires in", desiredWidth = 88, minimumWidth = 54, fraction = 0.12 },
+        { field = "status", text = "Status", desiredWidth = 94, minimumWidth = 60, fraction = 0.14 },
     }
     local function SourceLabel(source)
         return tostring(source.id or "-") .. " | " .. tostring(source.raidName or "Other")
@@ -339,29 +399,43 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         row.itemHit:SetScript("OnEnter", function() UI.ShowItemTooltip(this) end)
         row.itemHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row.itemHit:SetScript("OnClick", function() if this.ownerRow.node then controller:Toggle(this.ownerRow.node) end end)
-        row.view = UI.CreateIconButton(row, nil, "Interface\\Icons\\Spell_Holy_MindVision", 20, 1)
-        UI.AttachTooltip(row.view, "View raid", "Open this saved raid in Raid Statistics.")
+        row.view = UI.CreateIconButton(row, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\view.tga", 20, 2, UI.Theme.colors.goldIcon)
+        UI.AttachTooltip(row.view, "View raid", function()
+            return controller.testMode and "Simulated contributions have no saved raid to open." or "Open this saved raid in Raid Statistics."
+        end)
         row.archive = UI.CreateIconButton(row, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\archive.tga", 20, 2, UI.Theme.colors.goldIcon)
         row.archive.ownerRow = row
         UI.AttachTooltip(row.archive, "Archive CSR", "Archive this raid contribution without deleting its history.")
-        row.activate = UI.CreateIconButton(row, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\enable.tga", 20, 2, UI.Theme.colors.goldIcon)
+        row.activate = UI.CreateIconButton(row, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\restore.tga", 20, 2, UI.Theme.colors.goldIcon)
         row.activate.ownerRow = row
         UI.AttachTooltip(row.activate, "Activate CSR", "Restore this contribution while its original 60-day validity remains.")
         local function ChangeArchive()
             local source = this.ownerRow.source
-            if controller.testMode or not source or not options.canManageHistory or not options.canManageHistory() or not options.setSourceArchived then return end
-            local accepted, reason = options.setSourceArchived(source.id, source.playerName, source.itemId, this == this.ownerRow.archive, controller.selectedRaids)
+            if not source then return end
+            local accepted, reason
+            if controller.testMode then
+                accepted, reason = Raider.Services.CSRTest.SetSourceArchived(controller.testLab.state, source.id,
+                    source.playerName, source.itemId, this == this.ownerRow.archive)
+            else
+                if not options.canManageHistory or not options.canManageHistory() or not options.setSourceArchived then return end
+                accepted, reason = options.setSourceArchived(source.id, source.playerName, source.itemId, this == this.ownerRow.archive, controller.selectedRaids)
+            end
             if not accepted and reason then controller.actionError = reason else controller.actionError = nil end
             controller:Refresh()
         end
         row.archive:SetScript("OnClick", ChangeArchive); row.activate:SetScript("OnClick", ChangeArchive)
-        row.view:SetScript("OnClick", function() if openRaidStatistics and this.raidId then openRaidStatistics(this.raidId) end end)
+        row.view:SetScript("OnClick", function() if not controller.testMode and openRaidStatistics and this.raidId then openRaidStatistics(this.raidId) end end)
+        row.raidHit = UI.CreateControl(nil, row)
+        UI.AttachTooltip(row.raidHit, "Raid contribution", function() return row.source and SourceLabel(row.source) or "" end)
         row:SetScript("OnClick", OnRowClick)
         self.detailRows[index] = row; self.detailLines[index] = row.labels[1]; self.viewButtons[index] = row.view
         return row
     end
     local function SetSourceWidths(width)
-        UI.Table.AllocateColumnWidths(controller.sourceColumns, math.max(5, width - (controller.canManageHistory and not controller.testMode and 64 or 40)))
+        local actionsWidth = (controller.canManageHistory or controller.testMode) and 64 or 40
+        local available = math.max(5, math.min(596, width - actionsWidth))
+        UI.Table.AllocateColumnWidths(controller.sourceColumns, available)
+        return available
     end
     local function AppendDetail(entry, kind, node, source, indent, height)
         entry.count = entry.count + 1
@@ -375,10 +449,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         AppendDetail(entry, "sourceHeader", node, nil, indent, 26)
         SetSourceWidths(math.max(1, width - indent))
         for index, source in ipairs(node.sources) do
-            local raidWidth = math.max(1, controller.sourceColumns[2].width - 8)
-            controller.measure:SetWidth(raidWidth); controller.measure:SetText(source.texts[2])
-            local height = math.max(24, UI.MeasureTextHeight(controller.measure, raidWidth) + 8)
-            AppendDetail(entry, "source", node, source, indent, height + 2)
+            AppendDetail(entry, "source", node, source, indent, 26)
             entry.details[entry.count].stripe = index
         end
     end
@@ -471,9 +542,9 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     local function RenderDetail(row, detail, width)
         row.node, row.source, row.kind, row.itemId = nil, detail.source and detail.source.raid, detail.kind, nil
         for index = 1, 5 do ReportFont(row.labels[index]); row.labels[index]:Hide(); row.headers[index]:Hide() end
-        row.view:Hide(); row.archive:Hide(); row.activate:Hide(); row.iconRegion:Hide(); row.classIcon:Hide(); row.itemHit:Hide(); row.toggle:Hide()
+        row.view:Hide(); row.archive:Hide(); row.activate:Hide(); row.raidHit:Hide(); row.iconRegion:Hide(); row.classIcon:Hide(); row.itemHit:Hide(); row.toggle:Hide()
         if detail.kind == "source" or detail.kind == "sourceHeader" then
-            SetSourceWidths(width)
+            local columnsWidth = SetSourceWidths(width)
             local x = 8
             if detail.kind == "sourceHeader" then
                 local widths = {}
@@ -485,31 +556,36 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                     local label = row.labels[index]
                     UI.Table.Cell(label, row, x, column.width - 8, row:GetHeight(), detail.source.texts[index])
                     label:SetTextColor(1, 1, 1)
-                    if index == 2 and label.SetWordWrap then label:SetWordWrap(true) end
                     label:Show(); x = x + column.width
                 end
-                row.view:ClearAllPoints(); row.view:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+                row.raidHit:ClearAllPoints(); row.raidHit:SetPoint("LEFT", row, "LEFT", 8 + controller.sourceColumns[1].width, 0)
+                row.raidHit:SetWidth(math.max(1, controller.sourceColumns[2].width - 8)); row.raidHit:SetHeight(row:GetHeight()); row.raidHit:Show()
+                row.view:ClearAllPoints(); row.view:SetPoint("LEFT", row, "LEFT", columnsWidth + ((controller.canManageHistory or controller.testMode) and 32 or 8), 0)
                 row.view.raidId = raid.id; row.view:Show()
-                if controller.canManageHistory and not controller.testMode then
-                    local action = raid.status == "ACTIVE" and row.archive or raid.manuallyArchived and not raid.expired and row.activate or nil
+                if controller.testMode then row.view:Disable(); row.view:SetAlpha(0.35)
+                else row.view:Enable(); row.view:SetAlpha(1) end
+                if controller.canManageHistory or controller.testMode then
+                    local action = raid.status == "ACTIVE" and row.archive or raid.status == "ARCHIVED" and raid.manuallyArchived and not raid.expired and row.activate or nil
                     if action then action:ClearAllPoints(); action:SetPoint("RIGHT", row.view, "LEFT", -4, 0); action:Show() end
                 end
             end
         elseif detail.kind == "pairHeader" then
+            local columnsWidth = math.min(720, width)
             HeaderCells(row, {{field = controller.groupMode == "player" and "item" or "name", text = controller.groupMode == "player" and "Item" or "Player"},
-                {field = "csr", text = "CSR"}}, {width - 56, 40}, detail.node.key)
+                {field = "csr", text = "CSR"}}, {columnsWidth - 56, 40}, detail.node.key)
         else
             local player = detail.node.player
             row.node = detail.node
             local itemMode = controller.groupMode == "player"
             local textX = AccordionLead(row, detail.node, itemMode, 8)
-            UI.Table.Cell(row.labels[1], row, textX, width - textX - 64, 24, itemMode and ItemText(player) or player.name); row.labels[1]:Show()
+            local columnsWidth = math.min(720, width)
+            UI.Table.Cell(row.labels[1], row, textX, columnsWidth - textX - 64, 24, itemMode and ItemText(player) or player.name); row.labels[1]:Show()
             PlayerColor(row.labels[1], itemMode and "" or player.class)
-            UI.Table.Cell(row.labels[2], row, width - 48, 40, 24, tostring(player.csr)); row.labels[2]:Show()
+            UI.Table.Cell(row.labels[2], row, columnsWidth - 48, 40, 24, tostring(player.csr)); row.labels[2]:Show()
             row.labels[2]:SetTextColor(1, 1, 1)
             if itemMode then
                 row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row, "TOPLEFT", 20, 0)
-                row.itemHit:SetWidth(math.max(1, width - 76)); row.itemHit:SetHeight(24)
+                row.itemHit:SetWidth(math.max(1, columnsWidth - 76)); row.itemHit:SetHeight(24)
             end
         end
     end
@@ -532,9 +608,10 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         end
         UI.ApplyScrollRange(self.scroll, bar, self.renderMaximum)
         local csrWidth = 40
-        local nameWidth = self.groupMode == "default" and math.floor(width * 0.32) or math.max(1, width - csrWidth - 90)
-        local itemWidth = width - nameWidth - csrWidth
-        local starts, widths = {0, nameWidth, width - csrWidth}, {nameWidth, itemWidth, csrWidth}
+        local columnsWidth = math.min(720, width)
+        local nameWidth = self.groupMode == "default" and math.floor(columnsWidth * 0.30) or math.max(1, columnsWidth - csrWidth - 90)
+        local itemWidth = columnsWidth - nameWidth - csrWidth
+        local starts, widths = {0, nameWidth, columnsWidth - csrWidth}, {nameWidth, itemWidth, csrWidth}
         local texts, fields
         if self.groupMode == "player" then texts, fields = {"Player", "Items", "CSR"}, {"name", "count", "csr"}
         elseif self.groupMode == "item" then texts, fields = {"Item", "Players", "CSR"}, {"item", "count", "csr"}
@@ -564,7 +641,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                 if node.player then
                     UI.Table.Cell(row.name, row.heading, textX, nameWidth - textX - 8, 24, node.player.name)
                     UI.Table.Cell(row.label, row.heading, nameWidth + 32, itemWidth - 40, 24, ItemText(node.player))
-                    UI.Table.Cell(row.csr, row.heading, width - csrWidth, csrWidth - 8, 24, tostring(node.player.csr))
+                    UI.Table.Cell(row.csr, row.heading, columnsWidth - csrWidth, csrWidth - 8, 24, tostring(node.player.csr))
                     ItemIcon(row, node.player.itemId, nameWidth + 8)
                     row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row.heading, "TOPLEFT", nameWidth, 0)
                     row.itemHit:SetWidth(itemWidth); row.itemHit:SetHeight(24)
@@ -573,7 +650,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                     UI.Table.Cell(row.name, row.heading, textX, nameWidth - textX - 8, 24,
                         itemMode and UI.GetItemLabel(node.itemId) or node.name)
                     UI.Table.Cell(row.label, row.heading, nameWidth + 8, itemWidth - 16, 24, tostring(table.getn(node.children)))
-                    UI.Table.Cell(row.csr, row.heading, width - csrWidth, csrWidth - 8, 24, tostring(node.csr))
+                    UI.Table.Cell(row.csr, row.heading, columnsWidth - csrWidth, csrWidth - 8, 24, tostring(node.csr))
                     if itemMode then
                         row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row.heading, "TOPLEFT", 20, 0)
                         row.itemHit:SetWidth(math.max(1, nameWidth - 20)); row.itemHit:SetHeight(24)

@@ -510,7 +510,7 @@ function Database.SetCSRSourceArchived(raidId, playerName, itemId, archived, sel
     end
     if not source then return false, "This CSR source is no longer available." end
     if archived and source.status ~= "ACTIVE" then return false, "This CSR source is already archived." end
-    if not archived and (source.expired or not source.manuallyArchived) then
+    if not archived and (source.status ~= "ARCHIVED" or source.expired or not source.manuallyArchived) then
         return false, "Only unexpired manually archived CSR can be activated."
     end
     local records = entry.csrArchived

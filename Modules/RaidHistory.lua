@@ -55,7 +55,7 @@ local function MeasureHistory(width, controls)
                 Cell(button.createdAt, button, durationX + durationWidth, createdWidth, createdAt and date("%Y-%m-%d %H:%M", createdAt) or "Unknown"),
                 Cell(button.savedAt, button, durationX + durationWidth + createdWidth, modifiedWidth, modifiedAt and date("%Y-%m-%d %H:%M", modifiedAt) or "Unknown"))
             button:SetHeight(height); button:Show()
-            Raider.UI.Components.StyleWarmListRow(button, page.selectedRaidHistoryId == snapshot.id)
+            Raider.UI.Components.StyleSelectableTableRow(button, math.mod(index, 2) == 0, page.selectedRaidHistoryId == snapshot.id)
             load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(16); deleteButton:SetHeight(16)
             load:ClearAllPoints(); load:SetPoint("LEFT", button, "RIGHT", 4, 0); load:Show()
             if edit then

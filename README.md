@@ -38,6 +38,10 @@ CSR retains history beyond 60 days. **Show archived CSR** includes expired reser
 
 Each CSR source has an eye icon to view its raid. **Archive** removes that source's points while retaining its history. With **Show archived CSR** checked, **Activate** restores a manually archived source before its original expiration. Expired sources cannot be activated. Overwriting the same raid preserves archive decisions; a new Raid ID has independent sources.
 
+Receiving an item retains its previous reserve entries as **AWARDED** under **Show archived CSR**. These entries grant zero CSR and cannot be activated. A later unsuccessful reserve starts accumulating points again.
+
+**CSR Test Lab** uses temporary data. Select an earlier test player to add more reserves or award the selected item, archive test sources, and advance time with **+1 Day** or **+7 Days**. View Raid is disabled for simulated sources. Exit Test returns to saved history.
+
 Only current guild ranks **Officer Wukong** and **Mukla** can archive/activate CSR, edit saved raid details, or edit/remove Raid Stats. Reading history remains available to everyone. These controls wait for current guild information; a raid leader or assistant role alone grants no history editing rights.
 
 **Settings → Addon UI → CSR → Display** offers **Show class icon** and **Use class colors**, both enabled by default. Expand controls appear before the class/item icon and name.

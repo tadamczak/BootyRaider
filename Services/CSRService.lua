@@ -65,7 +65,7 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
     local players, states = summary.players, summary.states or {}
     summary.states = states
     local index
-    for index = table.getn(players), 1, -1 do table.remove(players, index) end
+    for index = table.getn(players), 1, -1 do players[index] = nil end
     for index in pairs(states) do states[index] = nil end
 
     local now = tonumber(currentTime) or time()
@@ -77,13 +77,16 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
     summary.rosterLootRanks = nil
     local ordered = summary.orderedScratch or {}
     summary.orderedScratch = ordered
-    for index = table.getn(ordered), 1, -1 do table.remove(ordered, index) end
+    for index = table.getn(ordered), 1, -1 do ordered[index] = nil end
+    local orderedCount = 0
     for index = 1, table.getn(entries or {}) do
         local savedAt = GetSavedAt(entries[index])
         local raidName = tostring(entries[index].raidName or "Other")
         local filterName = KNOWN_RAIDS[raidName] and raidName or "Other"
         if entries[index].csrEnabled == true and (archives or savedAt >= cutoff) and savedAt <= now
-            and (not selectedRaids or selectedRaids[filterName]) then table.insert(ordered, entries[index]) end
+            and (not selectedRaids or selectedRaids[filterName]) then
+            orderedCount = orderedCount + 1; ordered[orderedCount] = entries[index]
+        end
     end
     table.sort(ordered, function(a, b)
         local left, right = GetSavedAt(a), GetSavedAt(b)
@@ -105,34 +108,30 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
             if key ~= "" and (hasLoot or hasRights) then
                 local state = states[key]
                 if not state then state = { name = member.name or "Unknown", class = GetClass(member),
-                    pending = {}, sources = {}, receivedThisRaid = {} }; states[key] = state end
+                    pending = {}, sources = {}, sourceCounts = {}, awardedThrough = {}, receivedThisRaid = {} }; states[key] = state end
                 if not state.class or state.class == "" then state.class = GetClass(member) end
                 state.sources = state.sources or {}
                 ClearTable(state.receivedThisRaid)
-                -- Receiving an item clears all CSR previously accumulated for
-                -- it, irrespective of whether it was reserved in this raid.
-                for itemIndex = 1, lootCount do
-                    local itemId = GetItemId(lootItems[itemIndex], false)
-                    if itemId then state.pending[itemId] = nil; state.sources[itemId] = nil; state.receivedThisRaid[itemId] = true end
-                end
                 if hasRights then
                     for itemIndex = 1, reserveCount do
                         local reserve = reserveItems[itemIndex]
                         local itemId = GetItemId(reserve, scalarReserves)
-                        if itemId and not state.receivedThisRaid[itemId] then
+                        if itemId then
                             local count = type(reserve) == "table" and tonumber(reserve.count) or 1
                             count = count or 1
                             state.pending[itemId] = (state.pending[itemId] or 0) + count
                             state.sources[itemId] = state.sources[itemId] or {}
                             local sources = state.sources[itemId]
-                            local previous = sources[table.getn(sources)]
+                            local sourceCount = state.sourceCounts[itemId] or 0
+                            local previous = sources[sourceCount]
                             if previous and previous.id == raid.id and previous.savedAt == savedAt then
                                 previous.count = previous.count + count
                             else
                                 local archivedItems = type(raid.csrArchived) == "table" and raid.csrArchived[key]
                                 local manuallyArchived = type(archivedItems) == "table" and archivedItems[itemId] == true
                                 local expired = savedAt < cutoff
-                                sources[table.getn(sources) + 1] = { id = raid.id, raidName = raid.raidName or "Other", savedAt = savedAt,
+                                sourceCount = sourceCount + 1; state.sourceCounts[itemId] = sourceCount
+                                sources[sourceCount] = { id = raid.id, raidName = raid.raidName or "Other", savedAt = savedAt,
                                     playerName = state.name, itemId = itemId, manuallyArchived = manuallyArchived,
                                     expired = expired, expiresAt = savedAt + WINDOW_SECONDS,
                                     status = (expired or manuallyArchived) and "ARCHIVED" or "ACTIVE", count = count }
@@ -140,25 +139,47 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                         end
                     end
                 end
+                -- A receipt consumes the balance through this raid, but its
+                -- provenance remains available in the archived ledger. Process
+                -- reserves first so a reserved-and-received item is retained too.
+                for itemIndex = 1, lootCount do
+                    local itemId = GetItemId(lootItems[itemIndex], false)
+                    if itemId and not state.receivedThisRaid[itemId] then
+                        state.receivedThisRaid[itemId] = true
+                        local sources = state.sources[itemId]
+                        local sourceCount = state.sourceCounts[itemId] or 0
+                        for index = (state.awardedThrough[itemId] or 0) + 1, sourceCount do
+                            sources[index].status = "AWARDED"
+                        end
+                        state.awardedThrough[itemId] = sourceCount
+                    end
+                end
             end
         end
     end
 
     local _, state
+    local playerCount = 0
     for _, state in pairs(states) do
         local itemId, missed
         for itemId, missed in pairs(state.pending) do
             if missed > 0 and (query == "" or string.find(Normalize(state.name), query, 1, true)) then
-                local activeCount, archivedCount = 0, 0
+                local activeCount, archivedCount, kept = 0, 0, 0
                 local sources = state.sources and state.sources[itemId] or {}
-                for index = table.getn(sources), 1, -1 do
-                    if sources[index].status == "ACTIVE" then activeCount = activeCount + sources[index].count
-                    elseif archives then archivedCount = archivedCount + sources[index].count
-                    else table.remove(sources, index) end
+                local sourceCount = table.getn(sources)
+                for index = 1, sourceCount do
+                    local source = sources[index]
+                    if source.status == "ACTIVE" then activeCount = activeCount + source.count
+                    elseif archives then archivedCount = archivedCount + source.count end
+                    if source.status == "ACTIVE" or archives then
+                        kept = kept + 1; sources[kept] = source
+                    end
                 end
+                for index = sourceCount, kept + 1, -1 do sources[index] = nil end
                 if activeCount + archivedCount > 0 then
-                    table.insert(players, { name = state.name, class = state.class, itemId = itemId, items = activeCount, archivedItems = archivedCount,
-                        csr = activeCount * POINTS_PER_UNSUCCESSFUL_SR, raids = sources })
+                    playerCount = playerCount + 1
+                    players[playerCount] = { name = state.name, class = state.class, itemId = itemId, items = activeCount, archivedItems = archivedCount,
+                        csr = activeCount * POINTS_PER_UNSUCCESSFUL_SR, raids = sources }
                 end
             end
         end
