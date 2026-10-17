@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.19 — 2026-10-17
+
+- Render CSR accordion outlines with the existing project border's locally anchored texture pieces.
+
 ## 0.1.0-dev.18 — 2026-10-17
 
 - Archive individual CSR sources and reactivate manually archived sources before expiration.
