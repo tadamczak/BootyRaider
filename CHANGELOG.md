@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-dev.21 — 2026-10-17
+
+- Keep consumed CSR history as AWARDED with zero points.
+- Compact CSR columns and archive filter; use matching gold action icons.
+- Expand the isolated CSR Test Lab with player selection, archive actions and day controls.
+- Use subtle alternating snapshot row backgrounds.
+
 ## 0.1.0-dev.20 — 2026-10-17
 
 - Restore the original thin CSR project border after the rejected outline change.
