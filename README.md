@@ -26,6 +26,12 @@ New sessions capture the physical raid independently of guild membership. Save R
 
 Loot Rules belong to the current raid. Unsaved changes do not change saved CSR. Saving an existing Raid ID asks before replacing it; a different ID creates an independent copy. Each raid keeps its own save choices. CSR uses only raids saved with **Save CSR** and their saved eligibility rules. Loading a saved raid accepts that session immediately.
 
+Saved raids show **Duration**, **Created At** and **Modified At**. Editing a saved raid preserves its duration; Save As creates a new record without changing the original raid date. The **Issues** button shows or hides Soft Reserve warnings.
+
+In Raid Stats, **Select all** selects or clears the currently filtered raids. Search also matches players and partial item names. Names saved with the raid are searchable even without the client cache; older records containing only item IDs need cached names.
+
+CSR retains history beyond 60 days. **Show archived CSR** includes expired reserves with zero points. **Group By** offers Default, Player and Item; expand rows to inspect source raids, dates, expiration and ACTIVE/ARCHIVED status. Click column headings to sort each table. Editing or copying an old raid does not renew its CSR expiration. History remains until manually deleted; records removed by older versions cannot be recovered.
+
 Save Raid offers a reload to write data to disk. This waits until other Booty products have no active raid or recording. A failed startup or Stop reports its reason and retains raid data.
 
 An incomplete client roster cannot start a ready session or replace a complete roster. If New Raid fails, the dialog retains your input so you can try again when the roster is available.

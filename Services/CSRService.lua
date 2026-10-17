@@ -30,7 +30,9 @@ local function ClearTable(target)
 end
 
 local function GetSavedAt(raid)
-    return tonumber(raid and (raid.savedAt or raid.completedAt or raid.createdAt or raid.startedAt)) or 0
+    if not raid then return 0 end
+    -- Re-saving an old raid must not renew its sixty-day eligibility window.
+    return tonumber(raid.startedAt) or tonumber(raid.createdAt) or tonumber(raid.savedAt) or tonumber(raid.completedAt) or 0
 end
 
 local function GetReserveCount(member)
@@ -51,7 +53,7 @@ local function GetItemId(item, scalar)
     return tonumber(item)
 end
 
-function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selectedRaids, searchText)
+function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selectedRaids, searchText, showArchived)
     local summary = target or { players = {} }
     summary.players = summary.players or {}
     local players, states = summary.players, summary.states or {}
@@ -62,6 +64,8 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
 
     local now = tonumber(currentTime) or time()
     local cutoff = now - WINDOW_SECONDS
+    local archives = showArchived == true
+    local query = Normalize(searchText)
     -- Keep the public rules/rosterData arguments for callers. Eligibility belongs
     -- to each saved raid's rules/member records, never current defaults/roster.
     summary.rosterLootRanks = nil
@@ -72,13 +76,19 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
         local savedAt = GetSavedAt(entries[index])
         local raidName = tostring(entries[index].raidName or "Other")
         local filterName = KNOWN_RAIDS[raidName] and raidName or "Other"
-        if entries[index].csrEnabled == true and savedAt >= cutoff and savedAt <= now and (not selectedRaids or selectedRaids[filterName]) then table.insert(ordered, entries[index]) end
+        if entries[index].csrEnabled == true and (archives or savedAt >= cutoff) and savedAt <= now
+            and (not selectedRaids or selectedRaids[filterName]) then table.insert(ordered, entries[index]) end
     end
-    table.sort(ordered, function(a, b) return GetSavedAt(a) < GetSavedAt(b) end)
+    table.sort(ordered, function(a, b)
+        local left, right = GetSavedAt(a), GetSavedAt(b)
+        if left == right then return tostring(a.id or "") < tostring(b.id or "") end
+        return left < right
+    end)
 
     local raidIndex, memberIndex, itemIndex
     for raidIndex = 1, table.getn(ordered) do
         local raid = ordered[raidIndex]
+        local savedAt = GetSavedAt(raid)
         for memberIndex = 1, table.getn(raid.members or {}) do
             local member = raid.members[memberIndex]
             local key = Normalize(member.name)
@@ -103,9 +113,17 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                         local itemId = GetItemId(reserve, scalarReserves)
                         if itemId and not state.receivedThisRaid[itemId] then
                             local count = type(reserve) == "table" and tonumber(reserve.count) or 1
-                            state.pending[itemId] = (state.pending[itemId] or 0) + (count or 1)
+                            count = count or 1
+                            state.pending[itemId] = (state.pending[itemId] or 0) + count
                             state.sources[itemId] = state.sources[itemId] or {}
-                            state.sources[itemId][table.getn(state.sources[itemId]) + 1] = { id = raid.id, raidName = raid.raidName or "Other", savedAt = raid.savedAt }
+                            local sources = state.sources[itemId]
+                            local previous = sources[table.getn(sources)]
+                            if previous and previous.id == raid.id and previous.savedAt == savedAt then
+                                previous.count = previous.count + count
+                            else
+                                sources[table.getn(sources) + 1] = { id = raid.id, raidName = raid.raidName or "Other", savedAt = savedAt,
+                                    expiresAt = savedAt + WINDOW_SECONDS, status = savedAt >= cutoff and "ACTIVE" or "ARCHIVED", count = count }
+                            end
                         end
                     end
                 end
@@ -117,8 +135,15 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
     for _, state in pairs(states) do
         local itemId, missed
         for itemId, missed in pairs(state.pending) do
-            if missed > 0 and (not searchText or searchText == "" or string.find(string.lower(state.name), string.lower(searchText), 1, true)) then
-                table.insert(players, { name = state.name, itemId = itemId, items = missed, csr = missed * POINTS_PER_UNSUCCESSFUL_SR, raids = state.sources and state.sources[itemId] or {} })
+            if missed > 0 and (query == "" or string.find(Normalize(state.name), query, 1, true)) then
+                local activeCount, archivedCount = 0, 0
+                local sources = state.sources and state.sources[itemId] or {}
+                for index = 1, table.getn(sources) do
+                    if sources[index].status == "ACTIVE" then activeCount = activeCount + sources[index].count
+                    else archivedCount = archivedCount + sources[index].count end
+                end
+                table.insert(players, { name = state.name, itemId = itemId, items = activeCount, archivedItems = archivedCount,
+                    csr = activeCount * POINTS_PER_UNSUCCESSFUL_SR, raids = sources })
             end
         end
     end
@@ -128,6 +153,8 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
         return left < right
     end)
     summary.cutoff = cutoff
+    summary.now = now
+    summary.showArchived = archives
     summary.pointsPerItem = POINTS_PER_UNSUCCESSFUL_SR
     return summary
 end

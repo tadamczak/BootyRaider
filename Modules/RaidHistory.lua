@@ -25,11 +25,12 @@ local function MeasureHistory(width, controls)
     local dataWidth = math.max(60, width - 48)
     local numberWidth = 28
     local remainingWidth = math.max(32, dataWidth - numberWidth)
-    local nameWidth, raidWidth = math.floor(remainingWidth * 0.34), math.floor(remainingWidth * 0.30)
-    local timeWidth = remainingWidth - nameWidth - raidWidth
-    local widths = {numberWidth, nameWidth, raidWidth, timeWidth}
+    local nameWidth, raidWidth = math.floor(remainingWidth * 0.24), math.floor(remainingWidth * 0.22)
+    local durationWidth, createdWidth = math.floor(remainingWidth * 0.12), math.floor(remainingWidth * 0.21)
+    local modifiedWidth = remainingWidth - nameWidth - raidWidth - durationWidth - createdWidth
+    local widths = {numberWidth, nameWidth, raidWidth, durationWidth, createdWidth, modifiedWidth}
     local x = 8
-    for index = 1, 4 do
+    for index = 1, 6 do
         local heading = controls.historyHeaders[index]
         heading:ClearAllPoints(); heading:SetPoint("TOPLEFT", page, "TOPLEFT", x, actionY - 62); heading:SetWidth(widths[index] - 6); heading:SetJustifyH("LEFT"); heading:Show()
         x = x + widths[index]
@@ -41,12 +42,16 @@ local function MeasureHistory(width, controls)
         local deleteButton, load = controls.historyDeleteButtons[index], controls.historyLoadButtons[index]
         button:ClearAllPoints(); button:SetPoint("TOPLEFT", controls.historyCanvas, "TOPLEFT", 0, y); button:SetWidth(dataWidth)
         if snapshot then
-            local savedAt = snapshot.savedAt or snapshot.updatedAt
+            local createdAt, modifiedAt, duration = Raider.Services.RaidRes.GetSnapshotTimes(snapshot)
+            local durationText = duration and string.format("%d:%02d:%02d", math.floor(duration / 3600), math.floor(math.mod(duration, 3600) / 60), math.floor(math.mod(duration, 60))) or "Unknown"
+            local durationX = numberWidth + nameWidth + raidWidth
             local height = math.max(26,
                 Cell(button.number, button, 4, numberWidth - 6, tostring(index)),
                 Cell(button.label, button, numberWidth, nameWidth, tostring(snapshot.id or "Unknown")),
                 Cell(button.raidName, button, numberWidth + nameWidth, raidWidth, snapshot.raidName or "Unknown zone"),
-                Cell(button.savedAt, button, numberWidth + nameWidth + raidWidth, timeWidth, savedAt and date("%Y-%m-%d %H:%M", savedAt) or ""))
+                Cell(button.duration, button, durationX, durationWidth, durationText),
+                Cell(button.createdAt, button, durationX + durationWidth, createdWidth, createdAt and date("%Y-%m-%d %H:%M", createdAt) or "Unknown"),
+                Cell(button.savedAt, button, durationX + durationWidth + createdWidth, modifiedWidth, modifiedAt and date("%Y-%m-%d %H:%M", modifiedAt) or "Unknown"))
             button:SetHeight(height); button:Show()
             Raider.UI.Components.StyleWarmListRow(button, page.selectedRaidHistoryId == snapshot.id)
             load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(16); deleteButton:SetHeight(16)
@@ -60,7 +65,7 @@ end
 
 function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
     local fullWidth = math.max(1, Raider.UI.Components.GetFrameSpan(page) - 16)
-    local width = math.min(500, fullWidth)
+    local width = fullWidth
     local rightInset = 8 + fullWidth - width
     local buttonWidth = math.min(110, (width - 8) / 2)
     if controls.title then

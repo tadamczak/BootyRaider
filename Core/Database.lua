@@ -408,7 +408,8 @@ function Database.StoreRaidStatistic(entry)
     local index
     for index = table.getn(history.order), 1, -1 do if history.order[index] == entry.id then table.remove(history.order, index) end end
     table.insert(history.order, 1, entry.id); history.raids[entry.id] = entry
-    while table.getn(history.order) > 50 do local expired = table.remove(history.order); history.raids[expired] = nil end
+    -- CSR archives share these saved records. Automatic count-based eviction
+    -- would silently erase their history; explicit deletion remains available.
     return true
 end
 

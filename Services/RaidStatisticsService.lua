@@ -18,8 +18,13 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
     local raidId = attendance.snapshotId or (importInfo and importInfo.id)
     if not raidId then return nil end
     saveOptions = saveOptions or {}
+    local now = time()
     local entry = {
-        id = raidId, raidName = attendance.raidName or "Unknown zone", savedAt = time(), members = {},
+        id = raidId, raidName = attendance.raidName or "Unknown zone", savedAt = now, members = {},
+        startedAt = attendance.sessionStartedAt,
+        createdAt = attendance.createdAt or attendance.lastSavedAt or now,
+        modifiedAt = attendance.modifiedAt or attendance.lastSavedAt or now,
+        duration = attendance.duration or math.max(0, (attendance.lastSavedAt or now) - (attendance.sessionStartedAt or now)),
         statisticsEnabled = saveOptions.saveRaidStatistics ~= false,
         attendanceEnabled = saveOptions.saveAttendance ~= false,
         csrEnabled = saveOptions.saveCSR == true,
@@ -40,7 +45,12 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
             lootRank = ResolveLootRank(member),
             attendance = 1, srCount = table.getn(member.srItemIds or {}), lootCount = lootCount, srItems = {}, lootItems = {},
         }
-        for itemIndex = 1, table.getn(member.srItemIds or {}) do savedMember.srItems[itemIndex] = { itemId = tonumber(member.srItemIds[itemIndex]), count = 1 } end
+        for itemIndex = 1, table.getn(member.srItemIds or {}) do
+            local itemId = tonumber(member.srItemIds[itemIndex])
+            local itemName
+            if itemId and type(GetItemInfo) == "function" then itemName = GetItemInfo(itemId) end
+            savedMember.srItems[itemIndex] = { itemId = itemId, name = itemName, count = 1 }
+        end
         for lootIndex = 1, table.getn(member.loot or {}) do
             local loot = member.loot[lootIndex]
             savedMember.lootItems[lootIndex] = { itemId = tonumber(loot.itemId), name = loot.name, count = tonumber(loot.count) or 1 }
@@ -118,10 +128,49 @@ local function ParseDate(value, endOfDay)
     return stamp
 end
 
+local function Contains(value, query)
+    return string.find(string.lower(tostring(value or "")), query, 1, true) ~= nil
+end
+
+local function ItemName(value)
+    local text = tostring(value or "")
+    local _, _, label = string.find(text, "|h%[(.-)%]|h")
+    return label or text
+end
+
+local function MatchesItems(items, query)
+    local index
+    for index = 1, table.getn(items or {}) do
+        local item = items[index]
+        local savedName = ItemName(item.name or item.itemName)
+        local savedLink = ItemName(item.link or item.itemLink)
+        if Contains(savedName, query) or Contains(savedLink, query) then return true end
+        -- This reads the client's existing item cache only. There is no polling
+        -- or item-query event retained by a hidden statistics page.
+        if savedName == "" and savedLink == ""
+            and type(GetItemInfo) == "function" and tonumber(item.itemId) then
+            local name = GetItemInfo(tonumber(item.itemId))
+            if Contains(name, query) then return true end
+        end
+    end
+    return false
+end
+
+local function MatchesSearch(entry, query)
+    if query == "" or Contains(entry.id, query) or Contains(entry.raidName or "Other", query) then return true end
+    local index
+    for index = 1, table.getn(entry.members or {}) do
+        local member = entry.members[index]
+        if Contains(member.name, query) or MatchesItems(member.srItems, query) or MatchesItems(member.lootItems, query) then return true end
+    end
+    return false
+end
+
 function RaidStatistics.FilterEntries(entries, fromText, toText, target, selectedRaids, searchText)
     local fromStamp, toStamp = ParseDate(fromText, false), ParseDate(toText, true)
     if fromStamp == false or toStamp == false then return nil, "Use date format YYYY-MM-DD." end
     if fromStamp and toStamp and fromStamp > toStamp then return nil, "The From date must be before the To date." end
+    local query = string.lower(tostring(searchText or ""))
     local index
     for index = table.getn(target), 1, -1 do table.remove(target, index) end
     for index = 1, table.getn(entries or {}) do
@@ -131,17 +180,9 @@ function RaidStatistics.FilterEntries(entries, fromText, toText, target, selecte
         local raidIndex
         for raidIndex = 1, table.getn(RAID_NAMES) do if RAID_NAMES[raidIndex] == raidName then known = true; break end end
         local filterName = known and raidName or "Other"
-        local query = string.lower(tostring(searchText or ""))
-        local matchesSearch = query == "" or string.find(string.lower(tostring(entries[index].id or "")), query, 1, true)
-            or string.find(string.lower(raidName), query, 1, true)
-        if not matchesSearch then
-            local memberIndex
-            for memberIndex = 1, table.getn(entries[index].members or {}) do
-                if string.find(string.lower(tostring(entries[index].members[memberIndex].name or "")), query, 1, true) then matchesSearch = true; break end
-            end
-        end
-        if entries[index].statisticsEnabled ~= false and (not selectedRaids or selectedRaids[filterName]) and matchesSearch
-            and (not fromStamp or savedAt >= fromStamp) and (not toStamp or savedAt <= toStamp) then table.insert(target, entries[index]) end
+        if entries[index].statisticsEnabled ~= false and (not selectedRaids or selectedRaids[filterName])
+            and (not fromStamp or savedAt >= fromStamp) and (not toStamp or savedAt <= toStamp)
+            and MatchesSearch(entries[index], query) then table.insert(target, entries[index]) end
     end
     return target
 end

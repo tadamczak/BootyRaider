@@ -661,6 +661,16 @@ local function CopySaveOptions(options)
         saveAttendance = options.saveAttendance == true, saveCSR = options.saveCSR == true }
 end
 
+function RaidResService.GetSnapshotTimes(snapshot)
+    local createdAt = tonumber(snapshot.createdAt or snapshot.startedAt or snapshot.savedAt or snapshot.updatedAt)
+    local modifiedAt = tonumber(snapshot.modifiedAt or snapshot.savedAt or snapshot.updatedAt) or createdAt
+    local duration = tonumber(snapshot.duration)
+    if not duration and snapshot.startedAt and (snapshot.savedAt or snapshot.updatedAt) then
+        duration = (tonumber(snapshot.savedAt or snapshot.updatedAt) or 0) - (tonumber(snapshot.startedAt) or 0)
+    end
+    return createdAt, modifiedAt, duration and math.max(0, duration) or nil
+end
+
 function RaidResService.BuildSnapshot(attendance)
     if not attendance or type(attendance.members) ~= "table" then return nil end
     local importInfo = EnsureSnapshotImport(attendance)
@@ -668,6 +678,9 @@ function RaidResService.BuildSnapshot(attendance)
     local snapshot = { version = 4, id = attendance.snapshotId or importInfo.id, raidResId = importInfo.id, srUrl = importInfo.url, rollForExport = importInfo.rollForExport, raidName = attendance.raidName, source = importInfo.origin or "raidres", startedAt = attendance.sessionStartedAt or attendance.scannedAt, savedAt = attendance.lastSavedAt, updatedAt = time(), assignedCount = 0, unmatched = {}, missingNames = {}, members = {}, nextLootRecordId = tonumber(attendance.nextLootRecordId) or 0 }
     snapshot.lootRules = Raider.Database.CopyLootRules(Raider.Database.EnsureRaidLootRules(attendance))
     snapshot.saveOptions = CopySaveOptions(attendance.saveOptions)
+    snapshot.createdAt = attendance.createdAt or attendance.sessionStartedAt or attendance.scannedAt
+    snapshot.modifiedAt = attendance.modifiedAt or attendance.lastSavedAt or snapshot.updatedAt
+    snapshot.duration = attendance.duration or (attendance.sessionStartedAt and math.max(0, snapshot.modifiedAt - attendance.sessionStartedAt))
     local index, itemIndex, savedNames = nil, nil, {}
     for index = 1, table.getn(attendance.members or {}) do
         local member = attendance.members[index]
@@ -761,11 +774,13 @@ function RaidResService.RestoreSnapshot(snapshot)
             end
         end
     end
+    local createdAt, modifiedAt, duration = RaidResService.GetSnapshotTimes(snapshot)
     local attendance = {
         addonVersion = Raider.version, scannedAt = snapshot.updatedAt, scannedAtText = snapshot.updatedAt and date("%Y-%m-%d %H:%M:%S", snapshot.updatedAt) or "", sessionStartedAt = snapshot.startedAt or snapshot.updatedAt, lastSavedAt = snapshot.savedAt or snapshot.updatedAt,
         raidName = snapshot.raidName, snapshotId = snapshot.id, updatedBy = UnitName("player"), members = members, departedMembers = departedMembers, nextLootRecordId = nextLootRecordId,
         lootRules = Raider.Database.CopyLootRules(snapshot.lootRules or Raider.Database.GetDefaultLootRules()),
         saveOptions = CopySaveOptions(snapshot.saveOptions),
+        createdAt = createdAt, modifiedAt = modifiedAt, duration = duration,
         softReserveImport = { id = snapshot.raidResId or snapshot.id, origin = snapshot.source, url = snapshot.srUrl or "", rollForExport = snapshot.rollForExport or "", importedAt = snapshot.updatedAt, unmatchedNames = unmatchedNames, unmatchedReservations = unmatched, missingNames = missingNames },
         _loadedSnapshotId = snapshot.id,
         _sessionDraft = true,

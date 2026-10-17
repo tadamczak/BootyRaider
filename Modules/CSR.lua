@@ -93,198 +93,452 @@ local function CreateTestLab(owner, onChanged, onExit)
     return dialog
 end
 
+local function PairKey(player)
+    return string.lower(player.name or "") .. ":" .. tostring(player.itemId or "")
+end
+
+local function ClearArray(values)
+    for index = table.getn(values), 1, -1 do values[index] = nil end
+end
+
 function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistics)
-    local page=UI.CreateResponsiveCanvas(host,"BootyRaiderCSRPage")
-    local controller = { page = page, rows = {}, summary = { players = {} }, testMode = false, selectedRaids = {}, expandedKey = nil }
+    local page = UI.CreateResponsiveCanvas(host, "BootyRaiderCSRPage")
+    local controller = { page = page, rows = {}, detailRows = {}, detailLines = {}, viewButtons = {},
+        summary = { players = {} }, selectedRaids = {}, expanded = {}, sortStates = {},
+        nodes = {}, pairs = {}, groups = {}, layoutRows = {}, groupMode = "default", showArchived = false }
+    page.csrController = controller; host.csrController = controller
     local raidNames = Raider.Services.RaidStatistics.GetRaidNames()
-    local raidFilterIndex
-    for raidFilterIndex = 1, table.getn(raidNames) do controller.selectedRaids[raidNames[raidFilterIndex]] = true end
-    page.csrController=controller;host.csrController=controller
-    controller.testLab = CreateTestLab(page, function() controller.testMode = true; controller:Refresh() end, function() controller.testMode = false; controller:Refresh() end)
-    controller.title = Raider.UI.Components.CreateHeading(page, "", 1, "gold", "csr"); controller.title:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -10); controller.title:SetText("CSR")
-    controller.description = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontHighlightSmall"); controller.description:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -40); controller.description:SetPoint("RIGHT", page, "RIGHT", -6, 0); controller.description:SetJustifyH("LEFT")
-    controller.description:SetText("Unsuccessful Soft Reserves from the last 60 days. Each player-item pair accumulates independently. Each miss grants 10 CSR.")
-    controller.testButton = Raider.UI.Components.CreateButton(page, nil, "CSR Test Lab", 96, 22); controller.testButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -6, -10); controller.testButton:SetScript("OnClick", function() controller.testLab:Open() end)
-    controller.filterLabel = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontHighlightSmall"); controller.filterLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -75); controller.filterLabel:SetText("Filters")
-    controller.raidFilter = Raider.UI.Components.CreateDropdownButton(page, nil, "Raid", 150); controller.raidFilter:SetPoint("LEFT", controller.filterLabel, "RIGHT", 10, 0)
-    controller.raidPanel = Raider.UI.Components.CreateDropdownPanel(page, controller.raidFilter, 190, 178, 20)
-    controller.searchLabel = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontHighlightSmall"); controller.searchLabel:SetPoint("LEFT", controller.raidFilter, "RIGHT", 18, 0); controller.searchLabel:SetText("Search")
-    controller.search = Raider.UI.Components.CreateFramedEditBox(page, nil, 180); controller.search:ClearAllPoints(); controller.search:SetPoint("LEFT", controller.searchLabel, "RIGHT", 7, 0); controller.search:SetHeight(22); controller.search:SetAutoFocus(false); controller.search:SetScript("OnEscapePressed", function() this:ClearFocus() end); controller.search:SetScript("OnEnterPressed", function() this:ClearFocus() end)
+    for _, name in ipairs(raidNames) do controller.selectedRaids[name] = true end
+    controller.testLab = CreateTestLab(page, function() controller.testMode = true; controller:Refresh() end,
+        function() controller.testMode = false; controller:Refresh() end)
+    controller.title = UI.CreateHeading(page, "CSR", 1, "gold", "csr")
+    controller.description = UI.CreateLabel(page, nil, "OVERLAY", "GameFontHighlightSmall")
+    controller.description:SetJustifyH("LEFT")
+    controller.description:SetText("Unsuccessful Soft Reserves. Each miss grants 10 CSR for 60 days. Archived reserves remain available for reference and grant no CSR.")
+    controller.testButton = UI.CreateButton(page, nil, "CSR Test Lab", 96, 22)
+    UI.StyleActionButton(controller.testButton)
+    controller.testButton:SetScript("OnClick", function() controller.testLab:Open() end)
+    controller.raidFilter = UI.CreateDropdownButton(page, nil, "Raid", 130)
+    controller.raidFilter.bootyFlowWidth = 130; controller.raidFilter:SetHeight(26)
+    controller.raidPanel = UI.CreateDropdownPanel(page, controller.raidFilter, 190, 178, 20)
     controller.raidDismiss = controller.raidPanel.dismiss
     controller.raidFilter:SetScript("OnClick", function()
-        if controller.raidPanel:IsVisible() then controller.raidPanel:Hide()
-        else controller.raidPanel:Show() end
+        if controller.raidPanel:IsVisible() then controller.raidPanel:Hide() else controller.raidPanel:Show() end
     end)
-    UI.FilterPanel.Refresh(controller.raidPanel,raidNames,controller.selectedRaids,function() controller:Refresh() end,true,true)
-    controller.raidChecks=controller.raidPanel.options
+    UI.FilterPanel.Refresh(controller.raidPanel, raidNames, controller.selectedRaids, function() controller:Refresh() end, true, true)
+    controller.raidChecks = controller.raidPanel.options
+    controller.searchGroup = UI.CreateContainer(nil, page)
+    controller.searchGroup:SetWidth(162); controller.searchGroup:SetHeight(26); controller.searchGroup.bootyFlowWidth = 162
+    controller.search = UI.CreateFramedEditBox(controller.searchGroup, nil, 162)
+    controller.search:SetPoint("LEFT", controller.searchGroup, "LEFT", 0, 0); controller.search:SetHeight(22)
+    controller.search:SetAutoFocus(false)
+    controller.search:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+    controller.search:SetScript("OnEnterPressed", function() this:ClearFocus() end)
     controller.search:SetScript("OnTextChanged", function() controller:Refresh() end)
-    UI.AttachPlaceholder(controller.search,"Search...");controller.searchLabel:SetText("");controller.searchLabel:Hide()
-    controller.playerHeader = Raider.UI.Components.Table.CreateHeader(page, nil, "Player name", 16, -108, 154, nil, false)
-    controller.itemsHeader = Raider.UI.Components.Table.CreateHeader(page, nil, "Item", 180, -108, 140, nil, false)
-    controller.csrHeader = Raider.UI.Components.Table.CreateHeader(page, nil, "CSR", 0, -108, 60, nil, false)
-    controller.csrHeader:ClearAllPoints(); controller.csrHeader:SetPoint("TOPRIGHT", page, "TOPRIGHT", -24, -108)
-    controller.playerHeader:SetHeight(16); controller.itemsHeader:SetHeight(16); controller.csrHeader:SetHeight(16)
-    controller.scroll = Raider.UI.Components.CreateScrollFrame("BootyRaiderCSRScroll", page, "UIPanelScrollFrameTemplate"); controller.scroll:SetPoint("TOPLEFT", page, "TOPLEFT", 2, -124); controller.scroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -22, 5)
-    Raider.UI.Components.RegisterSkinnedScrollBar(getglobal("BootyRaiderCSRScrollScrollBar"))
-    controller.canvas=UI.CreateContainer(nil,controller.scroll);controller.scroll:SetScrollChild(controller.canvas)
-    controller.detailRows={};controller.detailLines={};controller.viewButtons={}
-    local index
-    for index = 1, 30 do
-        local row = Raider.UI.Components.CreateControl(nil, controller.canvas); row:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -98 - ((index - 1) * 24)); row:SetPoint("RIGHT", page, "RIGHT", -26, 0); row:SetHeight(23)
-        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" }); row:SetBackdropColor(0.035, 0.035, 0.032, math.mod(index, 2) == 0 and 0.82 or 0.58)
-        Raider.UI.Components.RegisterSkinnedSurface(row, "row", { bgFile = "Interface\\Buttons\\WHITE8X8" }, { 0.035, 0.035, 0.032, math.mod(index, 2) == 0 and 0.82 or 0.58 }, { 0, 0, 0, 0 })
-        row.name = Raider.UI.Components.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall"); row.name:SetPoint("TOPLEFT", row, "TOPLEFT", 5, -4); row.name:SetWidth(150); row.name:SetJustifyH("LEFT")
-        row.iconRegion = Raider.UI.Components.CreateTexture(row, nil, "ARTWORK"); row.iconRegion:SetPoint("TOPLEFT", row, "TOPLEFT", 163, -2); row.iconRegion:SetWidth(19); row.iconRegion:SetHeight(19)
-        row.label = Raider.UI.Components.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall"); row.label:SetPoint("TOPLEFT", row.iconRegion, "TOPRIGHT", 5, -2); row.label:SetPoint("RIGHT", row, "RIGHT", -84, 0); row.label:SetJustifyH("LEFT")
-        row.csr = Raider.UI.Components.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall"); row.csr:SetPoint("TOPRIGHT", row, "TOPRIGHT", -6, -4); row.csr:SetWidth(60)
-        row.itemHit = Raider.UI.Components.CreateControl(nil, row); row.itemHit:SetPoint("TOPLEFT", row, "TOPLEFT", 160, 0); row.itemHit:SetPoint("TOPRIGHT", row, "TOPRIGHT", -78, 0); row.itemHit:SetHeight(23); row.itemHit.ownerRow = row
-        row.itemHit:SetScript("OnEnter", function() Raider.UI.Components.ShowItemTooltip(this.ownerRow) end); row.itemHit:SetScript("OnLeave", function() GameTooltip:Hide() end); row.itemHit:SetScript("OnClick", function() this.ownerRow:Click() end)
-        row.detailRows=controller.detailRows;row.detailLines=controller.detailLines;row.viewButtons=controller.viewButtons
-        local detailIndex
-        function row:AcquireDetail(detailIndex)
-            if self.detailRows[detailIndex] then self.detailRows[detailIndex]:SetParent(self);return self.detailRows[detailIndex] end
-            local detail = Raider.UI.Components.CreateContainer(nil, row); detail:SetPoint("TOPLEFT", row, "TOPLEFT", 6, -29 - ((detailIndex - 1) * 22)); detail:SetPoint("RIGHT", row, "RIGHT", -6, 0); detail:SetHeight(21)
-            detail:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" }); detail.normalAlpha = math.mod(detailIndex, 2) == 0 and 0.28 or 0.16; detail:SetBackdropColor(0.20, 0.16, 0.08, detail.normalAlpha); detail:EnableMouse(true)
-            detail:SetScript("OnEnter", function() this:SetBackdropColor(0.34, 0.25, 0.08, 0.55) end); detail:SetScript("OnLeave", function() this:SetBackdropColor(0.20, 0.16, 0.08, this.normalAlpha) end); detail:Hide(); row.detailRows[detailIndex] = detail
-            local line = Raider.UI.Components.CreateLabel(detail, nil, "OVERLAY", "GameFontDisableSmall"); line:SetPoint("LEFT", detail, "LEFT", 7, 0); line:SetPoint("RIGHT", detail, "RIGHT", -60, 0); line:SetJustifyH("LEFT"); row.detailLines[detailIndex] = line
-            local view = Raider.UI.Components.CreateButton(detail, nil, "View", 52, 20); UI.StyleActionButton(view);view:SetHeight(20); view:SetPoint("RIGHT", detail, "RIGHT", -1, 0); view:SetScript("OnClick", function() if openRaidStatistics and this.raidId then openRaidStatistics(this.raidId) end end); row.viewButtons[detailIndex] = view
-            return detail
+    UI.AttachPlaceholder(controller.search, "Search...")
+    controller.groupBox = UI.CreateContainer(nil, page)
+    controller.groupBox:SetWidth(182); controller.groupBox:SetHeight(26); controller.groupBox.bootyFlowWidth = 182
+    local groupLabel
+    groupLabel, controller.groupBy = UI.CreateChoiceField({ parent = controller.groupBox, label = "Group By", x = 0, y = 0,
+        buttonOffset = 62, width = 120, height = 76, firstY = -5, step = 22, initialText = "Default",
+        choices = {{ value = "default", text = "Default" }, { value = "player", text = "Player" }, { value = "item", text = "Item" }},
+        getValue = function() return controller.groupMode end,
+        onSelect = function(value) controller:SetGroupBy(value) end })
+    groupLabel:ClearAllPoints(); groupLabel:SetPoint("LEFT", controller.groupBox, "LEFT", 0, 0)
+    controller.groupBy:SetHeight(26)
+    controller.archivedGroup = UI.CreateContainer(nil, page)
+    controller.archivedGroup:SetWidth(180); controller.archivedGroup:SetHeight(26); controller.archivedGroup.bootyFlowWidth = 180
+    controller.archivedCheck = UI.CreateCheckButton(nil, controller.archivedGroup, "UICheckButtonTemplate")
+    controller.archivedCheck:SetPoint("LEFT", controller.archivedGroup, "LEFT", 0, 0)
+    controller.archivedCheck:SetWidth(22); controller.archivedCheck:SetHeight(22); controller.archivedCheck:SetChecked(false)
+    controller.archivedCheck.label = UI.CreateLabel(controller.archivedGroup, nil, "OVERLAY", "GameFontHighlightSmall")
+    controller.archivedCheck.label:SetPoint("LEFT", controller.archivedCheck, "RIGHT", 2, 0)
+    controller.archivedCheck.label:SetText("Show archived CSR")
+    controller.archivedCheck:SetScript("OnClick", function()
+        controller.showArchived = this:GetChecked() and true or false; controller:Refresh()
+    end)
+    controller.archivedCheck.labelHit = UI.CreateControl(nil, controller.archivedGroup)
+    controller.archivedCheck.labelHit:SetPoint("LEFT", controller.archivedCheck, "RIGHT", 0, 0)
+    controller.archivedCheck.labelHit:SetWidth(156); controller.archivedCheck.labelHit:SetHeight(26)
+    controller.archivedCheck.labelHit:SetScript("OnClick", function()
+        local check = controller.archivedCheck; check:SetChecked(not check:GetChecked())
+        controller.showArchived = check:GetChecked() and true or false; controller:Refresh()
+    end)
+    controller.flow = { controller.raidFilter, controller.searchGroup, controller.groupBox, controller.archivedGroup }
+    controller.headers = {}
+    local function OnSort() controller:Sort(this.tableKey, this.sortKey) end
+    for index, text in ipairs({ "Player name", "Item", "CSR" }) do
+        local header = UI.Table.CreateHeader(page, nil, text, 0, 0, 100, nil, false)
+        header.tableKey = "root"; header:SetScript("OnClick", OnSort); controller.headers[index] = header
+    end
+    controller.playerHeader, controller.itemsHeader, controller.csrHeader = unpack(controller.headers)
+    controller.scroll = UI.CreateScrollFrame("BootyRaiderCSRScroll", page, "UIPanelScrollFrameTemplate")
+    UI.RegisterSkinnedScrollBar(getglobal("BootyRaiderCSRScrollScrollBar"))
+    controller.canvas = UI.CreateContainer(nil, controller.scroll); controller.scroll:SetScrollChild(controller.canvas)
+    controller.measure = UI.CreateLabel(page, nil, "ARTWORK", "GameFontHighlightSmall"); controller.measure:SetAlpha(0)
+    if controller.measure.SetWordWrap then controller.measure:SetWordWrap(true) end
+    controller.empty = UI.CreateLabel(page, nil, "OVERLAY", "GameFontDisableSmall")
+    controller.empty:SetText("No matching Soft Reserves.")
+    controller.sourceColumns = {
+        { field = "no", text = "No", desiredWidth = 30, minimumWidth = 22, fraction = 0.04 },
+        { field = "raid", text = "Raid", desiredWidth = 300, minimumWidth = 45, fraction = 0.55 },
+        { field = "date", text = "Date", desiredWidth = 92, minimumWidth = 65, fraction = 0.15 },
+        { field = "expires", text = "Expires in", desiredWidth = 74, minimumWidth = 54, fraction = 0.12 },
+        { field = "status", text = "Status", desiredWidth = 82, minimumWidth = 60, fraction = 0.14 },
+    }
+    local function SourceLabel(source)
+        return tostring(source.id or "-") .. " | " .. tostring(source.raidName or "Other")
+    end
+    local function ItemText(player)
+        local count = (tonumber(player.items) or 0) + (tonumber(player.archivedItems) or 0)
+        return UI.GetItemLabel(player.itemId) .. (count > 1 and (" x " .. count) or "")
+    end
+    local function KeyValue(node, field)
+        local player = node.player
+        if field == "csr" then return player and player.csr or node.csr end
+        if field == "count" then return table.getn(node.children or {}) end
+        if field == "item" then
+            local itemId = player and player.itemId or node.itemId
+            local itemName = GetItemInfo(itemId)
+            return string.lower(itemName or ("Item " .. tostring(itemId)))
         end
-        row:SetScript("OnClick", function()
-            if not this.player then return end
-            local key = string.lower(this.player.name or "") .. ":" .. tostring(this.player.itemId or "")
-            local collapsing = controller.expandedKey == key
-            if collapsing then
-                controller.expandedKey = nil
-                local detailIndex
-                for detailIndex = 1, table.getn(this.detailRows) do this.detailRows[detailIndex]:Hide() end
-            else
-                controller.expandedKey = key
-            end
-            controller:RefreshLayout()
+        return string.lower(player and player.name or node.name or "")
+    end
+    local function SortNodes(values, state, defaultField)
+        local field, descending = state and state.field or defaultField or "name", state and state.descending
+        table.sort(values, function(a, b)
+            local left, right = KeyValue(a, field), KeyValue(b, field)
+            if left == right then return a.key < b.key end
+            if descending then return left > right end
+            return left < right
         end)
-        row:Hide(); controller.rows[index] = row
     end
-    UI.StyleProjectPopup(controller.raidPanel)
-    UI.StyleActionButton(controller.testButton)
-    controller.searchGroup=UI.CreateContainer(nil,page);controller.searchGroup:SetWidth(162);controller.searchGroup:SetHeight(26);controller.searchGroup.bootyFlowWidth=162
-    controller.searchLabel:Hide()
-    controller.search:SetParent(controller.searchGroup);controller.search:ClearAllPoints();controller.search:SetPoint("LEFT",controller.searchGroup,"LEFT",0,0);controller.search:SetWidth(162)
-    controller.raidFilter.bootyFlowWidth=130;controller.raidFilter:SetHeight(26)
-    controller.flow={controller.raidFilter,controller.searchGroup}
-    controller.headers={controller.playerHeader,controller.itemsHeader,controller.csrHeader}
-    controller.measure=UI.CreateLabel(page,nil,"ARTWORK","GameFontHighlightSmall");controller.measure:SetAlpha(0)
-    controller.detailHeights={};controller.detailTexts={};controller.layoutRows={}
-    controller.empty=UI.CreateLabel(page,nil,"OVERLAY","GameFontDisableSmall");controller.empty:SetText("No matching Soft Reserves.")
-    local function DetailText(raid,index)
-        return tostring(index) .. ".  " .. tostring(raid.id or "-") .. " | " .. tostring(raid.raidName or "Other") .. " | " .. date("%Y-%m-%d",tonumber(raid.savedAt) or 0)
+    local function SourceValue(source, field)
+        if field == "raid" then return source.sortRaid end
+        if field == "date" then return tonumber(source.raid.savedAt) or 0 end
+        if field == "expires" then return tonumber(source.raid.expiresAt) or 0 end
+        if field == "status" then return source.raid.status or "ACTIVE" end
+        return source.no
     end
-    local function MeasureRows(width,self)
-        local total=0
-        for index,player in ipairs(self.summary.players) do
-            local entry=self.layoutRows[index]
-            if not entry then entry={};table.insert(self.layoutRows,entry) end
-            entry.y=total;entry.player=player;entry.count=0
-            local height=24
-            if self.expandedKey==string.lower(player.name or "")..":"..tostring(player.itemId or "") then
-                entry.count=table.getn(player.raids or {})
-                for i,raid in ipairs(player.raids or {}) do
-                    self.detailTexts[i]=DetailText(raid,i)
-                    self.measure:SetWidth(math.max(1,width-78));self.measure:SetText(self.detailTexts[i])
-                    self.detailHeights[i]=math.max(24,UI.MeasureTextHeight(self.measure,math.max(1,width-78))+8);height=height+self.detailHeights[i]
+    function controller:Sort(tableKey, field)
+        local state = self.sortStates[tableKey]
+        if state and state.field == field then state.descending = not state.descending
+        else self.sortStates[tableKey] = { field = field, descending = false } end
+        self:SortNodes(); self:RefreshLayout()
+    end
+    function controller:SortNodes()
+        SortNodes(self.nodes, self.sortStates["root:" .. self.groupMode], self.groupMode == "item" and "item" or "name")
+        for _, group in pairs(self.groups) do SortNodes(group.children, self.sortStates[group.key], self.groupMode == "player" and "item" or "name") end
+        for _, node in ipairs(self.pairs) do
+            local state = self.sortStates[node.key]
+            table.sort(node.sources, function(a, b)
+                local field = state and state.field or "no"
+                local left, right = SourceValue(a, field), SourceValue(b, field)
+                if left == right then return a.no < b.no end
+                if state and state.descending then return left > right end
+                return left < right
+            end)
+        end
+    end
+    function controller:BuildNodes()
+        ClearArray(self.nodes); ClearArray(self.pairs)
+        for key in pairs(self.groups) do self.groups[key] = nil end
+        for _, player in ipairs(self.summary.players) do
+            local node = { kind = "pair", key = PairKey(player), player = player, sources = {} }
+            for index, raid in ipairs(player.raids or {}) do
+                local raidText = SourceLabel(raid)
+                local days = math.max(0, math.ceil(((tonumber(raid.expiresAt) or 0) - (self.summary.now or time())) / 86400))
+                node.sources[index] = { no = index, raid = raid, sortRaid = string.lower(raidText),
+                    texts = { tostring(index), raidText, date("%Y-%m-%d", tonumber(raid.savedAt) or 0), tostring(days) .. "d", raid.status or "ACTIVE" } }
+            end
+            table.insert(self.pairs, node)
+            if self.groupMode == "default" then table.insert(self.nodes, node)
+            else
+                local key = self.groupMode .. ":" .. (self.groupMode == "player" and string.lower(player.name or "") or tostring(player.itemId))
+                local group = self.groups[key]
+                if not group then
+                    group = { kind = "group", key = key, name = player.name, itemId = player.itemId, children = {}, csr = 0 }
+                    self.groups[key] = group; table.insert(self.nodes, group)
+                end
+                group.csr = group.csr + player.csr; table.insert(group.children, node)
+            end
+        end
+        self:SortNodes()
+    end
+    function controller:SetGroupBy(value)
+        if value ~= "default" and value ~= "player" and value ~= "item" then return end
+        self.groupMode = value; self.expandedKey = nil
+        self:BuildNodes(); self:RefreshLayout()
+    end
+    function controller:IsExpanded(node)
+        if self.groupMode == "default" then return self.expandedKey == node.key end
+        return self.expanded[node.key] and true or false
+    end
+    function controller:Toggle(node)
+        if self.groupMode == "default" then self.expandedKey = self.expandedKey ~= node.key and node.key or nil
+        else self.expanded[node.key] = not self.expanded[node.key] end
+        self:RefreshLayout()
+    end
+    local function OnRowClick() if this.node then controller:Toggle(this.node) end end
+    function controller:AcquireRow(index)
+        if self.rows[index] then return self.rows[index] end
+        local row = UI.CreateControl(nil, self.canvas)
+        row.name = UI.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall")
+        row.label = UI.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall")
+        row.csr = UI.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall")
+        row.iconRegion = UI.CreateTexture(row, nil, "ARTWORK"); row.iconRegion:SetWidth(19); row.iconRegion:SetHeight(19)
+        row.itemHit = UI.CreateControl(nil, row); row.itemHit.ownerRow = row
+        row.itemHit:SetScript("OnEnter", function() UI.ShowItemTooltip(this) end)
+        row.itemHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row.itemHit:SetScript("OnClick", function() if this.ownerRow.node then controller:Toggle(this.ownerRow.node) end end)
+        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+        UI.RegisterSkinnedSurface(row, "row", { bgFile = "Interface\\Buttons\\WHITE8X8" }, {0,0,0,0}, {0,0,0,0})
+        row:SetScript("OnClick", OnRowClick); self.rows[index] = row
+        return row
+    end
+    function controller:AcquireDetail(index, owner)
+        local row = self.detailRows[index]
+        if row then row:SetParent(owner); return row end
+        row = UI.CreateControl(nil, owner); row.labels = {}; row.headers = {}; row.visibleHeaders = {}
+        row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+        UI.RegisterSkinnedSurface(row, "row", { bgFile = "Interface\\Buttons\\WHITE8X8" }, {0,0,0,0}, {0,0,0,0})
+        for cell = 1, 5 do
+            row.labels[cell] = UI.CreateLabel(row, nil, "OVERLAY", "GameFontHighlightSmall")
+            local header = UI.Table.CreateHeader(row, nil, "", 0, 0, 20, nil, false)
+            header:SetScript("OnClick", OnSort); row.headers[cell] = header
+        end
+        row.iconRegion = UI.CreateTexture(row, nil, "ARTWORK"); row.iconRegion:SetWidth(19); row.iconRegion:SetHeight(19)
+        row.itemHit = UI.CreateControl(nil, row); row.itemHit.ownerRow = row
+        row.itemHit:SetScript("OnEnter", function() UI.ShowItemTooltip(this) end)
+        row.itemHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row.itemHit:SetScript("OnClick", function() if this.ownerRow.node then controller:Toggle(this.ownerRow.node) end end)
+        row.view = UI.CreateButton(row, nil, "View", 48, 20); UI.StyleActionButton(row.view); row.view:SetHeight(20)
+        row.view:SetScript("OnClick", function() if openRaidStatistics and this.raidId then openRaidStatistics(this.raidId) end end)
+        row:SetScript("OnClick", OnRowClick)
+        self.detailRows[index] = row; self.detailLines[index] = row.labels[1]; self.viewButtons[index] = row.view
+        return row
+    end
+    local function SetSourceWidths(width)
+        UI.Table.AllocateColumnWidths(controller.sourceColumns, math.max(5, width - 58))
+    end
+    local function AppendDetail(entry, kind, node, source, indent, height)
+        entry.count = entry.count + 1
+        local detail = entry.details[entry.count]
+        if not detail then detail = {}; entry.details[entry.count] = detail end
+        detail.kind, detail.node, detail.source, detail.indent = kind, node, source, indent
+        detail.y, detail.height = entry.height, height
+        entry.height = entry.height + height
+    end
+    local function AppendSources(entry, node, width, indent)
+        AppendDetail(entry, "sourceHeader", node, nil, indent, 22)
+        SetSourceWidths(math.max(1, width - indent - 4))
+        for _, source in ipairs(node.sources) do
+            local raidWidth = math.max(1, controller.sourceColumns[2].width - 4)
+            controller.measure:SetWidth(raidWidth); controller.measure:SetText(source.texts[2])
+            local height = math.max(24, UI.MeasureTextHeight(controller.measure, raidWidth) + 8)
+            AppendDetail(entry, "source", node, source, indent, height)
+        end
+    end
+    local function MeasureRows(width, self)
+        local total = 0
+        for index, node in ipairs(self.nodes) do
+            local entry = self.layoutRows[index]
+            if not entry then entry = { details = {} }; self.layoutRows[index] = entry end
+            entry.y, entry.node, entry.count, entry.height = total, node, 0, 24
+            if self:IsExpanded(node) then
+                if node.kind == "pair" then AppendSources(entry, node, width, 4)
+                else
+                    AppendDetail(entry, "pairHeader", node, nil, 12, 22)
+                    for _, child in ipairs(node.children) do
+                        AppendDetail(entry, "pair", child, nil, 12, 24)
+                        if self:IsExpanded(child) then AppendSources(entry, child, width, 24) end
+                    end
                 end
             end
-            entry.height=height
-            total=total+height
+            total = total + entry.height
         end
-        for i=table.getn(self.layoutRows),table.getn(self.summary.players)+1,-1 do table.remove(self.layoutRows,i) end
+        for index = table.getn(self.layoutRows), table.getn(self.nodes) + 1, -1 do self.layoutRows[index] = nil end
         return total
     end
-    local function LayoutContent(width,height,self)
-        local available=math.max(80,width-16)
-        self.title:ClearAllPoints();self.title:SetPoint("TOPLEFT",page,"TOPLEFT",8,-8);UI.FitButtonLabel(self.title,math.max(1,available-104))
-        self.testButton:ClearAllPoints();self.testButton:SetPoint("TOPRIGHT",page,"TOPRIGHT",-8,-8)
-        self.description:ClearAllPoints();self.description:SetPoint("TOPLEFT",page,"TOPLEFT",8,-42);self.description:SetWidth(available);self.description:SetHeight(0)
-        local top=42+math.max(24,UI.MeasureTextHeight(self.description,available))+8
-        self.filterLabel:Hide()
-        top=UI.LayoutFlow(page,self.flow,8,top,available,8)+8
-        self.search:SetWidth(math.max(24,self.searchGroup:GetWidth()))
-        self.headerTop=top;self.bodyTop=top+24;self.bodyHeight=math.max(48,height-self.bodyTop-8);self.bodyWidth=available
-        return self.bodyTop+self.bodyHeight+8
+    local function LayoutContent(width, height, self)
+        local available = math.max(80, width - 16)
+        self.title:ClearAllPoints(); self.title:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -8)
+        UI.FitButtonLabel(self.title, math.max(1, available - 104))
+        self.testButton:ClearAllPoints(); self.testButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, -8)
+        self.description:ClearAllPoints(); self.description:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -42)
+        self.description:SetWidth(available); self.description:SetHeight(0)
+        local top = 42 + math.max(24, UI.MeasureTextHeight(self.description, available)) + 8
+        top = UI.LayoutFlow(page, self.flow, 8, top, available, 8) + 8
+        self.search:SetWidth(math.max(24, self.searchGroup:GetWidth()))
+        self.groupBy:SetWidth(math.max(24, self.groupBox:GetWidth() - 62))
+        self.archivedCheck.label:SetWidth(math.max(1, self.archivedGroup:GetWidth() - 24))
+        self.archivedCheck.labelHit:SetWidth(math.max(1, self.archivedGroup:GetWidth() - 22))
+        self.headerTop, self.bodyTop = top, top + 24
+        self.bodyHeight, self.bodyWidth = math.max(48, height - self.bodyTop - 8), available
+        return self.bodyTop + self.bodyHeight + 8
     end
-    function controller:Layout() UI.LayoutResponsiveCanvas(page,LayoutContent,self) end
+    function controller:Layout() UI.LayoutResponsiveCanvas(page, LayoutContent, self) end
+    local function HeaderCells(row, fields, widths, tableKey)
+        local x = 4
+        for index, field in ipairs(fields) do
+            local header = row.headers[index]
+            header:ClearAllPoints(); header:SetPoint("TOPLEFT", row, "TOPLEFT", x, 0)
+            header:SetWidth(widths[index]); header:SetHeight(22)
+            header.tableKey, header.sortKey = tableKey, field.field
+            header.label:SetText(field.text); header:Show(); x = x + widths[index]
+            row.visibleHeaders[index] = header
+        end
+        for index = table.getn(row.visibleHeaders), table.getn(fields) + 1, -1 do row.visibleHeaders[index] = nil end
+        UI.Table.FitHeaders(row.visibleHeaders, 12)
+    end
+    local function ItemIcon(row, itemId, x)
+        row.itemId = itemId; row.iconRegion:ClearAllPoints(); row.iconRegion:SetPoint("TOPLEFT", row, "TOPLEFT", x, -2)
+        row.itemHit.itemId, row.itemHit.iconRegion = itemId, row.iconRegion
+        row.iconRegion:SetTexture(type(GetItemIcon) == "function" and GetItemIcon(itemId) or "Interface\\Icons\\INV_Misc_QuestionMark")
+        row.iconRegion:Show(); row.itemHit:Show()
+    end
+    local function RenderDetail(row, detail, width)
+        row.node, row.source, row.kind, row.itemId = nil, detail.source and detail.source.raid, detail.kind, nil
+        for index = 1, 5 do row.labels[index]:Hide(); row.headers[index]:Hide() end
+        row.view:Hide(); row.iconRegion:Hide(); row.itemHit:Hide()
+        if detail.kind == "source" or detail.kind == "sourceHeader" then
+            SetSourceWidths(width)
+            local x = 4
+            if detail.kind == "sourceHeader" then
+                local widths = {}
+                for index, column in ipairs(controller.sourceColumns) do widths[index] = column.width end
+                HeaderCells(row, controller.sourceColumns, widths, detail.node.key)
+            else
+                local raid = detail.source.raid
+                for index, column in ipairs(controller.sourceColumns) do
+                    local label = row.labels[index]
+                    UI.Table.Cell(label, row, x, column.width - 4, row:GetHeight(), detail.source.texts[index])
+                    if index == 2 and label.SetWordWrap then label:SetWordWrap(true) end
+                    label:Show(); x = x + column.width
+                end
+                row.view:ClearAllPoints(); row.view:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+                row.view.raidId = raid.id; row.view:Show()
+            end
+        elseif detail.kind == "pairHeader" then
+            HeaderCells(row, {{field = controller.groupMode == "player" and "item" or "name", text = controller.groupMode == "player" and "Item" or "Player"},
+                {field = "csr", text = "CSR"}}, {width - 48, 40}, detail.node.key)
+        else
+            local player = detail.node.player
+            row.node = detail.node
+            local prefix = controller:IsExpanded(detail.node) and "- " or "+ "
+            local label = controller.groupMode == "player" and ItemText(player) or player.name
+            UI.Table.Cell(row.labels[1], row, 4, width - 50, 23, prefix .. label); row.labels[1]:Show()
+            UI.Table.Cell(row.labels[2], row, width - 42, 38, 23, tostring(player.csr)); row.labels[2]:Show()
+            if controller.groupMode == "player" then
+                ItemIcon(row, player.itemId, 16)
+                UI.Table.Cell(row.labels[1], row, 40, width - 86, 23, prefix .. label)
+                row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+                row.itemHit:SetWidth(width - 44); row.itemHit:SetHeight(23)
+            end
+        end
+    end
     function controller:Render(changed)
         if self.rendering then return end
-        self.rendering=true
-        if changed or not self.renderWidth or self.renderedExpandedKey~=self.expandedKey then
-            local width,total,_,maximum=UI.ResolveScrollLayout(self.bodyWidth,self.bodyHeight,20,MeasureRows,self)
-            self.renderWidth,self.renderHeight,self.renderMaximum=width,total,maximum
-            self.renderedExpandedKey=self.expandedKey
+        self.rendering = true
+        if changed or not self.renderWidth then
+            local width, total, _, maximum = UI.ResolveScrollLayout(self.bodyWidth, self.bodyHeight, 20, MeasureRows, self)
+            self.renderWidth, self.renderHeight, self.renderMaximum = width, total, maximum
         end
-        local width,contentHeight,maximum=self.renderWidth,self.renderHeight,self.renderMaximum
-        self.scroll:ClearAllPoints();self.scroll:SetPoint("TOPLEFT",page,"TOPLEFT",8,-self.bodyTop);self.scroll:SetWidth(width);self.scroll:SetHeight(self.bodyHeight)
-        self.canvas:SetWidth(width);self.canvas:SetHeight(contentHeight)
-        local bar=getglobal(self.scroll:GetName().."ScrollBar")
-        if bar then bar:ClearAllPoints();bar:SetPoint("TOPLEFT",page,"TOPLEFT",12+width,-self.bodyTop-16);bar:SetHeight(math.max(1,self.bodyHeight-32));bar:SetWidth(16) end
-        UI.ApplyScrollRange(self.scroll,bar,maximum)
-        local nameWidth=math.floor(width*0.32);local csrWidth=40;local itemWidth=width-nameWidth-csrWidth
-        local starts={0,nameWidth,width-csrWidth};local widths={nameWidth,itemWidth,csrWidth}
-        for i=1,3 do local header=self.headers[i];header:ClearAllPoints();header:SetPoint("TOPLEFT",page,"TOPLEFT",8+starts[i],-self.headerTop);header:SetWidth(widths[i]);header:SetHeight(20) end
-        self.playerHeader.label:SetText(width<420 and "Player" or "Player name")
-        UI.Table.FitHeaders(self.headers,12)
-        local top=self.scroll:GetVerticalScroll();local bottom=top+self.bodyHeight
-        local y,used=0,0
-        for _,detail in ipairs(self.detailRows) do detail:Hide() end
-        for logicalIndex,entry in ipairs(self.layoutRows) do
-            local player,count,rowHeight=entry.player,entry.count,entry.height
-            local expanded=count>0
-            y=entry.y
-            if y>=bottom then break end
-            if y+rowHeight>top and y<bottom and used<table.getn(self.rows) then
-                used=used+1;local row=self.rows[used]
-                row:ClearAllPoints();row:SetPoint("TOPLEFT",self.canvas,"TOPLEFT",0,-y);row:SetWidth(width);row:SetHeight(rowHeight-1)
-                row.player=player;row.itemId=player.itemId
-                UI.Table.Cell(row.name,row,6,nameWidth-8,23,player.name)
-                row.iconRegion:ClearAllPoints();row.iconRegion:SetPoint("TOPLEFT",row,"TOPLEFT",nameWidth,-2)
-                UI.Table.Cell(row.label,row,nameWidth+24,itemWidth-28,23,UI.GetItemLabel(player.itemId)..(player.items>1 and (" x "..player.items) or ""))
-                UI.Table.Cell(row.csr,row,width-csrWidth,csrWidth-4,23,tostring(player.csr))
-                row.itemHit:ClearAllPoints();row.itemHit:SetPoint("TOPLEFT",row,"TOPLEFT",nameWidth,0);row.itemHit:SetWidth(itemWidth);row.itemHit:SetHeight(23)
-                local texture=type(GetItemIcon)=="function" and GetItemIcon(player.itemId) or nil;row.iconRegion:SetTexture(texture or "Interface\\Icons\\INV_Misc_QuestionMark")
-                UI.ApplyRowBackground(row,logicalIndex,expanded)
-                local detailY,detailUsed=24,0
-                for i=1,count do
-                    local detailHeight=self.detailHeights[i]
-                    if y+detailY+detailHeight>top and y+detailY<bottom then
-                        detailUsed=detailUsed+1
-                        local detail=row:AcquireDetail(detailUsed)
-                        detail:ClearAllPoints();detail:SetPoint("TOPLEFT",row,"TOPLEFT",4,-detailY);detail:SetWidth(width-8);detail:SetHeight(detailHeight-2)
-                        self.detailLines[detailUsed]:SetText(self.detailTexts[i]);self.detailLines[detailUsed]:SetJustifyV("MIDDLE")
-                        self.viewButtons[detailUsed].raidId=player.raids[i].id
-                        detail:Show()
+        local width = self.renderWidth
+        self.scroll:ClearAllPoints(); self.scroll:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -self.bodyTop)
+        self.scroll:SetWidth(width); self.scroll:SetHeight(self.bodyHeight)
+        self.canvas:SetWidth(width); self.canvas:SetHeight(self.renderHeight)
+        local bar = getglobal(self.scroll:GetName() .. "ScrollBar")
+        if bar then
+            bar:ClearAllPoints(); bar:SetPoint("TOPLEFT", page, "TOPLEFT", 12 + width, -self.bodyTop - 16)
+            bar:SetHeight(math.max(1, self.bodyHeight - 32)); bar:SetWidth(16)
+        end
+        UI.ApplyScrollRange(self.scroll, bar, self.renderMaximum)
+        local csrWidth = 40
+        local nameWidth = self.groupMode == "default" and math.floor(width * 0.32) or math.max(1, width - csrWidth - 90)
+        local itemWidth = width - nameWidth - csrWidth
+        local starts, widths = {0, nameWidth, width - csrWidth}, {nameWidth, itemWidth, csrWidth}
+        local texts, fields
+        if self.groupMode == "player" then texts, fields = {"Player", "Items", "CSR"}, {"name", "count", "csr"}
+        elseif self.groupMode == "item" then texts, fields = {"Item", "Players", "CSR"}, {"item", "count", "csr"}
+        else texts, fields = {width < 420 and "Player" or "Player name", "Item", "CSR"}, {"name", "item", "csr"} end
+        for index, header in ipairs(self.headers) do
+            header:ClearAllPoints(); header:SetPoint("TOPLEFT", page, "TOPLEFT", 8 + starts[index], -self.headerTop)
+            header:SetWidth(widths[index]); header:SetHeight(20); header.label:SetText(texts[index])
+            header.tableKey, header.sortKey = "root:" .. self.groupMode, fields[index]
+        end
+        UI.Table.FitHeaders(self.headers, 12)
+        local top, bottom = self.scroll:GetVerticalScroll(), self.scroll:GetVerticalScroll() + self.bodyHeight
+        for _, detail in ipairs(self.detailRows) do detail:Hide() end
+        local used, detailUsed = 0, 0
+        for index, entry in ipairs(self.layoutRows) do
+            if entry.y >= bottom then break end
+            if entry.y + entry.height > top then
+                used = used + 1
+                local row, node = self:AcquireRow(used), entry.node
+                row.node, row.player = node, node.player
+                row:ClearAllPoints(); row:SetPoint("TOPLEFT", self.canvas, "TOPLEFT", 0, -entry.y)
+                row:SetWidth(width); row:SetHeight(entry.height - 1)
+                row.iconRegion:Hide(); row.itemHit:Hide(); row.itemId = nil
+                local prefix = self:IsExpanded(node) and "- " or "+ "
+                if node.player then
+                    UI.Table.Cell(row.name, row, 6, nameWidth - 8, 23, prefix .. node.player.name)
+                    UI.Table.Cell(row.label, row, nameWidth + 24, itemWidth - 28, 23, ItemText(node.player))
+                    UI.Table.Cell(row.csr, row, width - csrWidth, csrWidth - 4, 23, tostring(node.player.csr))
+                    ItemIcon(row, node.player.itemId, nameWidth)
+                    row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row, "TOPLEFT", nameWidth, 0)
+                    row.itemHit:SetWidth(itemWidth); row.itemHit:SetHeight(23)
+                else
+                    local itemMode = self.groupMode == "item"
+                    UI.Table.Cell(row.name, row, itemMode and 30 or 6, nameWidth - (itemMode and 34 or 8), 23,
+                        prefix .. (itemMode and UI.GetItemLabel(node.itemId) or node.name))
+                    UI.Table.Cell(row.label, row, nameWidth + 4, itemWidth - 8, 23, tostring(table.getn(node.children)))
+                    UI.Table.Cell(row.csr, row, width - csrWidth, csrWidth - 4, 23, tostring(node.csr))
+                    if itemMode then
+                        ItemIcon(row, node.itemId, 6)
+                        row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+                        row.itemHit:SetWidth(nameWidth); row.itemHit:SetHeight(23)
                     end
-                    detailY=detailY+detailHeight
+                end
+                UI.ApplyRowBackground(row, index, self:IsExpanded(node))
+                for detailIndex = 1, entry.count do
+                    local detail = entry.details[detailIndex]
+                    if entry.y + detail.y + detail.height > top and entry.y + detail.y < bottom then
+                        detailUsed = detailUsed + 1
+                        local child = self:AcquireDetail(detailUsed, row)
+                        child:ClearAllPoints(); child:SetPoint("TOPLEFT", row, "TOPLEFT", detail.indent, -detail.y)
+                        child:SetWidth(math.max(1, width - detail.indent - 4)); child:SetHeight(detail.height - 1)
+                        RenderDetail(child, detail, child:GetWidth()); UI.ApplyRowBackground(child, detailIndex, false); child:Show()
+                    end
                 end
                 row:Show()
             end
-            y=y+rowHeight
         end
-        for i=used+1,table.getn(self.rows) do self.rows[i].player=nil;self.rows[i]:Hide() end
-        self.empty:ClearAllPoints();self.empty:SetPoint("TOPLEFT",page,"TOPLEFT",8,-self.bodyTop-4);self.empty:SetWidth(width)
-        if table.getn(self.summary.players)==0 then self.empty:Show() else self.empty:Hide() end
-        self.rendering=false
+        for index = used + 1, table.getn(self.rows) do self.rows[index].node = nil; self.rows[index].player = nil; self.rows[index]:Hide() end
+        self.empty:ClearAllPoints(); self.empty:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -self.bodyTop - 4); self.empty:SetWidth(width)
+        if table.getn(self.nodes) == 0 then self.empty:Show() else self.empty:Hide() end
+        self.rendering = false
     end
     function controller:RefreshLayout()
         if not host:IsShown() then return end
-        Raider.Diagnostics.Count("uiRefreshes")
-        self:Layout();self:Render(true)
+        Raider.Diagnostics.Count("uiRefreshes"); self:Layout(); self:Render(true)
     end
     function controller:Refresh()
         if not host:IsShown() then return end
-        if self.testMode then Raider.Services.CSRTest.BuildSummary(self.testLab.state,self.summary) else Raider.Services.CSR.BuildSummary(getEntries(),nil,time(),self.summary,getRosterData(),self.selectedRaids,self.search:GetText()) end
-        self:RefreshLayout()
+        if self.testMode then
+            local state = self.testLab.state
+            Raider.Services.CSR.BuildSummary(state.entries, nil, state.now, self.summary, nil, nil, self.search:GetText(), self.showArchived)
+        else
+            Raider.Services.CSR.BuildSummary(getEntries(), nil, time(), self.summary, getRosterData(), self.selectedRaids, self.search:GetText(), self.showArchived)
+        end
+        self:BuildNodes(); self:RefreshLayout()
     end
-    controller.scroll:SetScript("OnVerticalScroll",function() this:SetVerticalScroll(arg1 or 0);controller:Render() end)
-    return { frame=page,page=page,Show=function(self) host:Show();page:Show();controller:Refresh() end,
-        Hide=function(self) controller.testLab:Hide();controller.raidPanel:Hide();controller.raidDismiss:Hide();page:Hide();host:Hide() end,
-        Refresh=function(self) controller:Refresh() end,OnResize=function(self) controller.raidPanel:Hide();controller:RefreshLayout() end }
+    controller.scroll:SetScript("OnVerticalScroll", function() this:SetVerticalScroll(arg1 or 0); controller:Render() end)
+    return { frame = page, page = page, Show = function(self) host:Show(); page:Show(); controller:Refresh() end,
+        Hide = function(self)
+            controller.testLab:Hide(); controller.raidPanel:Hide(); controller.raidDismiss:Hide()
+            controller.groupBy.panel:Hide(); controller.groupBy.panel.dismiss:Hide(); page:Hide(); host:Hide()
+        end,
+        Refresh = function(self) controller:Refresh() end,
+        OnResize = function(self) controller.raidPanel:Hide(); controller.groupBy.panel:Hide(); controller:RefreshLayout() end }
 end
