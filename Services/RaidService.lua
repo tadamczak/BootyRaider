@@ -668,16 +668,17 @@ function RaidService.QueueReyCoinAward(winner, itemLink, carrier, reyCoinRollers
         DEFAULT_CHAT_FRAME:AddMessage("Raider Reycoin trace: queued winner=" .. tostring(winner)
             .. " carrier=" .. tostring(carrier or winner) .. " item=" .. tostring(itemId))
     end
-    table.insert(pendingReyCoinAwards, {
+    local pending = {
         transactionId = nextReyCoinTransactionId, state = "awaiting_item",
         lootSessionToken = token,
         winner = winner, carrier = carrier or winner, link = itemLink, itemId = itemId,
         reyCoinRollers = reyCoinRollers, historyKey = historyKey, rollHistory = rollHistory,
         recipientStates = recipientStates,
         quantity = quantity and LootQuantity(quantity) or nil,
-    })
+    }
+    table.insert(pendingReyCoinAwards, pending)
     NotifyPendingReyCoinChanged()
-    return true
+    return true, pending
 end
 
 function RaidService.HasPendingReyCoinAward()
@@ -813,12 +814,15 @@ function RaidService.QueueLootAwardForReceipt(recipient, itemLink, historyKey, l
     local index
     for index = 1, table.getn(lines or {}) do copy[index] = lines[index] end
     local now = GetTime()
-    pendingRollAwards[string.lower(recipient) .. ":" .. itemId] = {
+    local receiptKey = string.lower(recipient) .. ":" .. itemId
+    local pending = {
+        receiptKey = receiptKey,
         lines = copy, at = now, lootSessionToken = token, historyKey = historyKey,
         recipientState = ArchiveLootMember(FindLootMember(lootSessionAttendance, recipient)),
         quantity = quantity and LootQuantity(quantity) or nil }
+    pendingRollAwards[receiptKey] = pending
     ScheduleLootExpiry(now + 30)
-    return true
+    return true, pending
 end
 
 function RaidService.QueueRollHistoryForAward(recipient, itemLink, lines)
@@ -941,13 +945,34 @@ function RaidService.QueueSoftReserveTrade(recipient, itemLink, carrier, history
     local copy = {}
     local index
     for index = 1, table.getn(rollHistory or {}) do copy[index] = rollHistory[index] end
-    table.insert(pendingSoftReserveTrades, {
+    local pending = {
         recipient = recipient, carrier = carrier, link = itemLink, itemId = itemId,
         recipientState = ArchiveLootMember(FindLootMember(lootSessionAttendance, recipient)),
         historyKey = historyKey, rollHistory = copy, state = "awaiting_receipt", lootSessionToken = token,
-        quantity = quantity and LootQuantity(quantity) or nil })
+        quantity = quantity and LootQuantity(quantity) or nil }
+    table.insert(pendingSoftReserveTrades, pending)
     NotifySoftReserveTradeChanged()
-    return true
+    return true, pending
+end
+
+-- Release only the unconfirmed records owned by this native award attempt.
+-- A receipt may already have advanced a transfer before SLOT_CLEARED arrives.
+function RaidService.CancelLootAwardAttempt(receipt, reyCoin, softReserve)
+    if receipt and pendingRollAwards[receipt.receiptKey] == receipt then
+        pendingRollAwards[receipt.receiptKey] = nil
+        StopLootExpiryIfEmpty()
+    end
+    if reyCoin and reyCoin.state == "awaiting_item" then RaidService.CancelPendingReyCoinTransfer(reyCoin) end
+    if softReserve and softReserve.state == "awaiting_receipt" then
+        local index
+        for index = 1, table.getn(pendingSoftReserveTrades) do
+            if pendingSoftReserveTrades[index] == softReserve then
+                table.remove(pendingSoftReserveTrades, index)
+                NotifySoftReserveTradeChanged()
+                break
+            end
+        end
+    end
 end
 
 function RaidService.ConfirmSoftReserveCarrierReceipt(carrier, itemLink)

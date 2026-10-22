@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.24 — 2026-10-22
+
+- Release stalled Master Loot requests after five seconds without confirmation, including when the loot window closes.
+- Report failed delivery separately from an already awarded item; preserve confirmed SR/Reycoin transfers during cleanup.
+
 ## 0.1.0-dev.23 — 2026-10-22
 
 - Expose explicit on-demand timing targets for Booty Diagnostics without idle scanning or memory measurements.
