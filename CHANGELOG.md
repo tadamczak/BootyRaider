@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.22 — 2026-10-22
+
+- Do not treat logging in outside a raid as leaving one.
+- Keep recovered unsaved sessions visible for review, saving or quitting.
+
 ## 0.1.0-dev.21 — 2026-10-17
 
 - Keep consumed CSR history as AWARDED with zero points.

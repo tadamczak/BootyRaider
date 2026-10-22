@@ -24,6 +24,8 @@ Current player results include their roll type, for example **97 SR** or **27 Tm
 
 New sessions capture the physical raid independently of guild membership. Save Raid preserves roster, loot and selected statistics. Live tracking, group/list appearance, the default game Raid tab and Loot Master messages have independent settings.
 
+Logging in outside a raid does not show a raid-departure warning. An unfinished session from an earlier login remains accessible in Raid for review, Save or Quit. Refresh explicitly to update its roster; leaving a raid observed during the current login still asks whether to continue or end the session.
+
 Loot Rules belong to the current raid. Unsaved changes do not change saved CSR. Saving an existing Raid ID asks before replacing it; a different ID creates an independent copy. Each raid keeps its own save choices. CSR uses only raids saved with **Save CSR** and their saved eligibility rules. Loading a saved raid accepts that session immediately.
 
 Saved raids show **Duration**, **Created At** and **Modified At**. Duration uses the recorded raid end and displays, for example, **1h 05min 09s**. **Save raid end time** records the end when saving; **Modify raid end time** enables changing an existing end in **DD.MM.YYYY HH:MM:SS** format. Without a recorded end, duration is **Unknown**. Editing or copying a raid preserves its original creation date and recorded end.

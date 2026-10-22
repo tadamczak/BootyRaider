@@ -200,7 +200,9 @@ function RaidSessionController.Create(dependencies)
         state.raidSessionTransitionPending = false; state.raidSessionMismatchContext = nil
         state.raidPhysicalRosterReady = nil; state.raidSessionAwaitingPhysicalAcceptance = nil
         if session.ResetPhysicalRaid then session:ResetPhysicalRaid() end
-        dependencies.setHistoricalLoaded(false)
+        -- Keep recovered attendance accessible even when logging in solo, and
+        -- require the existing explicit refresh before replacing its roster.
+        dependencies.setHistoricalLoaded(ready and draft)
     end
     function controller:RestoreActive()
         return session:RestoreActive(RestoreState)

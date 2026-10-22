@@ -3243,6 +3243,7 @@ function RaidManagement.HandleWorldContext(options, context, confirmed)
     end
     if options.isTestRaid() or not hasSession then
         context.active = false
+        context.observedRaid = false
         context.raidZone = nil
         context.promptedContext = nil
         options.setContinuedContext(nil)
@@ -3255,6 +3256,7 @@ function RaidManagement.HandleWorldContext(options, context, confirmed)
         context.sessionId = attendance.snapshotId
         context.startedAt = attendance.sessionStartedAt
         context.raidZone = nil
+        context.observedRaid = false
         context.promptedContext = nil
         options.setContinuedContext(nil)
         options.hideSessionTransitionPrompt()
@@ -3262,12 +3264,15 @@ function RaidManagement.HandleWorldContext(options, context, confirmed)
     -- A saved/session display name is not an instance identity. Observe the
     -- actual client context instead, without persisting derived zone state.
     local contextKey = options.getSessionTransitionContext and options.getSessionTransitionContext()
+    -- Saved attendance can outlive the physical group. Initial absence after
+    -- login is a baseline, not evidence that the player just left a raid.
+    if inRaid then context.observedRaid = true end
     if not contextKey and inRaid and (not instanceType or instanceType == "") then return end
     if contextKey then
         -- A saved roster can belong to another physical group in the same zone.
         -- Preserve it until the user makes the existing session choice.
     elseif not inRaid then
-        contextKey = "outside-raid-context"
+        if context.observedRaid then contextKey = "outside-raid-context" end
     elseif context.raidZone and not inRaidInstance then
         contextKey = "outside-raid-context"
     elseif context.raidZone and zone ~= "" and context.raidZone ~= zone then
