@@ -69,3 +69,5 @@ Raid Leader Tools and Loot Master Tools menus open above every part of these war
 Previous data is imported by the optional **Booty Legacy Data Import** addon. Keep the old SavedVariables until migration has been confirmed in game.
 
 Older raids did not store their own Loot Rules. They receive one independent copy of the existing rules on migration. Original choices that were never recorded cannot be recovered; load, review and save individual raids to correct their history.
+
+With current BootyProfiler installed, **Booty Diagnostics → Profile Booty** can measure selected BootyRaider operations after you select the addon and press **Start**. **Stop** ends the capture. The report covers the listed Lua entry points; it does not measure total addon CPU, RAM or disk size.

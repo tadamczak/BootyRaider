@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.23 — 2026-10-22
+
+- Expose explicit on-demand timing targets for Booty Diagnostics without idle scanning or memory measurements.
+
 ## 0.1.0-dev.22 — 2026-10-22
 
 - Do not treat logging in outside a raid as leaving one.

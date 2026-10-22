@@ -88,10 +88,33 @@ local function QuickMenu(host)
     return entries
 end
 
+function Raider.GetProfilingTargets()
+    local D = BootyLib.Diagnostics
+    local descriptor = D.CreateProfilingDescriptor(Raider.version,
+        "Raid event dispatch, roster and loot processing, raid/CSR summaries, SR import/snapshot and Raid refresh. Fixed live targets; not all addon functions or rendering.")
+    D.AddProfilingScript(descriptor, Runtime.events, "OnEvent", "Raid events", true)
+    D.AddProfilingFunction(descriptor, Raider.Services.Raid, "CaptureRoster", "Capture roster")
+    D.AddProfilingFunction(descriptor, Raider.Services.Raid, "RecordLoot", "Record loot")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidStatistics, "BuildSummary", "Raid statistics summary")
+    D.AddProfilingFunction(descriptor, Raider.Services.CSR, "BuildSummary", "CSR summary")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidRes, "Import", "SR import")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidRes, "BuildSnapshot", "SR snapshot")
+    D.AddProfilingFunction(descriptor, Raider.Modules.RaidManagement, "RefreshPage", "Raid refresh")
+    return descriptor
+end
+function Raider.GetDatabaseStatistics()
+    return {collections = {
+        {id = "savedRaids", label = "Saved raid statistics", path = {"raidStatistics", "raids"}, unit = "Raids", valueType = "table", emptyWhenMissing = true},
+        {id = "srSnapshots", label = "Saved SR snapshots", path = {"softReserveHistory", "raids"}, unit = "Snapshots", valueType = "table", emptyWhenMissing = true},
+        {id = "sessionMembers", label = "Current session members", path = {"raidAttendance", "members"}, unit = "Members", valueType = "table", emptyWhenMissing = true},
+        {id = "sessionDeparted", label = "Current session departed members", path = {"raidAttendance", "departedMembers"}, unit = "Members", valueType = "table", emptyWhenMissing = true},
+    }}
+end
+
 local descriptor={id="raider",name="BootyRaider",label="Raid",namespace=Raider,version=Raider.version,apiVersion=1,OnHostReady=Runtime.Initialize,
     Initialize=Runtime.Initialize,Start=Runtime.Initialize,Stop=Runtime.Stop,IsBusy=Runtime.IsBusy,GetSettings=Raider.Settings.Get,
     OnActivationFailed=Runtime.OnActivationFailed,
-    GetDatabase=Raider.Database.Ensure,GetQuickMenu=QuickMenu,ResetSettings=Raider.Settings.Reset,OnSettingChanged=Raider.OnSettingChanged,Command=Raider.HandleCommand,
+    GetDatabase=Raider.Database.Ensure,GetProfilingTargets=Raider.GetProfilingTargets,GetDatabaseStatistics=Raider.GetDatabaseStatistics,GetQuickMenu=QuickMenu,ResetSettings=Raider.Settings.Reset,OnSettingChanged=Raider.OnSettingChanged,Command=Raider.HandleCommand,
     BeginSettingsBatch=Runtime.BeginSettingsBatch,EndSettingsBatch=Runtime.EndSettingsBatch,OnSettingsProfileApplied=Runtime.OnSettingsProfileApplied,
     GetGuildDirectoryDemand=Runtime.WantsGuildDirectory,
     OnGuildDirectoryUpdated=Runtime.OnGuildDirectoryUpdated,
