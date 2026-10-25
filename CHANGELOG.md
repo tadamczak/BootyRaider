@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.25 — 2026-10-25
+
+- Allow cloaks in Tmog rolls, including default categories, commands and New Roll.
+
 ## 0.1.0-dev.24 — 2026-10-22
 
 - Release stalled Master Loot requests after five seconds without confirmation, including when the loot window closes.

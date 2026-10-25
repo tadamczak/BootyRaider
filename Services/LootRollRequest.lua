@@ -4,6 +4,7 @@ local Request = Raider.Services.LootRollRequest
 local aliases = { tmog=98, mog=98, transmog=98, os=99, ms=100, rc=101, reycoin=101, sr=102 }
 Request.CategoryNames = { [98]="Tmog", [99]="OS", [100]="MS", [101]="RC", [102]="SR" }
 local transmogSlots = {
+    INVTYPE_CLOAK=true,
     INVTYPE_HEAD=true, INVTYPE_SHOULDER=true, INVTYPE_CHEST=true, INVTYPE_ROBE=true, INVTYPE_BODY=true,
     INVTYPE_WRIST=true, INVTYPE_HAND=true, INVTYPE_WAIST=true, INVTYPE_LEGS=true, INVTYPE_FEET=true,
     INVTYPE_WEAPON=true, INVTYPE_2HWEAPON=true, INVTYPE_WEAPONMAINHAND=true, INVTYPE_WEAPONOFFHAND=true,
