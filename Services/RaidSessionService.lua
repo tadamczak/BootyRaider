@@ -6,7 +6,7 @@ Raider.Services.RaidSession = RaidSession
 
 local Session = {}
 Session.__index = Session
-local presetKeys = {"lmAutoLootExceptions", "lmAutoLootPresets"}
+local presetKeys = {"lmAutoLootExceptions", "lmAutoLootPresets", "lmAutoLootInclusions"}
 
 -- Dependencies are domain adapters, never UI objects or session flag owners.
 -- Keeping their namespaces also preserves instrumentation installed afterward.
@@ -34,8 +34,8 @@ function Session:SetRaidType(raidName, expectedAttendance)
     replacement.raidName = raidName
     local database = dependencies.database
     local store = database.Ensure()
-    local oldMask, oldExclusions = store.lmAutoLootPresets, store.lmAutoLootExceptions
-    local mask, exclusions = dependencies.autoLoot.GetRaidPreset(raidName, oldExclusions)
+    local oldMask, oldExclusions, oldInclusions = store.lmAutoLootPresets, store.lmAutoLootExceptions, store.lmAutoLootInclusions
+    local mask, exclusions, inclusions = dependencies.autoLoot.GetRaidPreset(raidName, oldExclusions, oldInclusions)
     local function Publish(previous, current)
         if database.onRaidAttendanceMetadataChanged then database.onRaidAttendanceMetadataChanged(previous, current) end
         database.StoreRaidAttendance(current)
@@ -44,9 +44,11 @@ function Session:SetRaidType(raidName, expectedAttendance)
     -- Publish only after both preset fields and the type have their final values.
     -- Preserve the loot-session owner; a failed refresh restores the same state.
     store.lmAutoLootPresets, store.lmAutoLootExceptions = mask, exclusions
+    store.lmAutoLootInclusions = inclusions
     local ok, failure = pcall(Publish, attendance, replacement)
     if not ok then
         store.lmAutoLootPresets, store.lmAutoLootExceptions = oldMask, oldExclusions
+        store.lmAutoLootInclusions = oldInclusions
         local restored, reason = pcall(Publish, replacement, attendance)
         if not restored then return false, tostring(failure) .. " Restore failed: " .. tostring(reason) end
         return false, tostring(failure)

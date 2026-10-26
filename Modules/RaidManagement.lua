@@ -2116,7 +2116,8 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
     row.rank:SetText(shorten(Raider.Services.RankPolicy.GetDisplayName(member.guildRank ~= "" and member.guildRank or "Guest"), 18))
     local itemId = member.srItemIds and member.srItemIds[1]
     local numericId = tonumber(itemId)
-    row.sr:SetText(itemId and ((member.srException and "* " or "") .. (numericId and Raider.UI.Components.GetItemLabel(numericId) or itemId)) or "")
+    row.srHit.labelPrefix = member.srException and "* " or ""
+    row.sr:SetText(itemId and (row.srHit.labelPrefix .. (numericId and Raider.UI.Components.GetItemLabel(numericId) or itemId)) or "")
     row.srHit.itemId, row.srHit.itemName = numericId, itemId and Raider.Services.ItemReference.Name(itemId)
     local srTexture = numericId and type(GetItemIcon) == "function" and GetItemIcon(numericId) or nil
     if not srTexture and numericId then local _, _, _, _, _, _, _, _, _, cachedTexture = GetItemInfo(numericId); srTexture = cachedTexture end
@@ -4469,10 +4470,15 @@ function RaidManagement.CreateAutoLootControls(page, view)
     local modeClick, rarityClick = mode:GetScript("OnClick"), rarity:GetScript("OnClick")
     mode:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); modeClick() end)
     rarity:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); rarityClick() end)
-    local shownPresetMask, shownExclusions
+    local shownPresetMask, shownExclusions, shownInclusions
     page.RefreshAutoLootConfig = function(force)
         local mask=Raider.Database.GetSetting("lmAutoLootPresets")
         local text=Raider.Database.GetSetting("lmAutoLootExceptions")
+        local included=Raider.Database.GetSetting("lmAutoLootInclusions")
+        if force or included~=shownInclusions then
+            shownInclusions=included
+            if inclusions:GetText()~=included then inclusions:SetText(included) end
+        end
         if force or mask~=shownPresetMask or text~=shownExclusions then
             shownPresetMask,shownExclusions=mask,text
             RefreshPresets()

@@ -45,7 +45,7 @@ local function PagedList(frame, x, width, render, clicked)
         if self.offset+9 >= table.getn(self.values) then self.next:Disable() else self.next:Enable() end
     end
     for index = 1, 9 do
-        local row = UI.CreateButton(frame, nil, "", width, 22)
+        local row = UI.CreateSelectionButton(frame, nil, "", width, 22)
         row:SetPoint("TOPLEFT", frame, "TOPLEFT", x, -78-(index-1)*23)
         UI.SetButtonLabelInsets(row, 6, 6); row.label:SetJustifyH("LEFT")
         row:SetScript("OnClick", function() if this.value then clicked(this.value, this.valueIndex) end end)
@@ -71,10 +71,29 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     frame.selectedTitle:SetPoint("TOPLEFT", frame, "TOPLEFT", 330, -48)
     frame.selectedTitle:SetText("Selected SR (click to remove)")
     local available, chosen
+    local itemLoader = UI.CreateTooltip("BootyRaiderReserveItemLoader", frame)
+    frame.itemLoader=itemLoader
+    local requested = {}
+    local function RefreshItemTick()
+        frame.itemWait=frame.itemWait+(arg1 or 0);frame.itemElapsed=frame.itemElapsed+(arg1 or 0)
+        if frame.itemElapsed>=0.25 then frame.itemElapsed=0;chosen:Refresh();available:Refresh() end
+        if frame.itemWait>=2 then frame:SetScript("OnUpdate",nil);frame.itemWait=nil end
+    end
+    local function LoadItem(id)
+        id=tonumber(id)
+        if not id or GetItemInfo(id) or requested[id] then return end
+        requested[id]=true
+        itemLoader:SetOwner(frame,"ANCHOR_NONE");itemLoader:SetHyperlink("item:"..id..":0:0:0");itemLoader:Hide()
+        frame.itemWait=0;frame.itemElapsed=0
+        frame:SetScript("OnUpdate",RefreshItemTick)
+    end
     local function RenderItem(row, id)
+        LoadItem(id)
         row.itemId = tonumber(id)
         row.fullText = ItemText(id) .. (row.itemId and (" (#" .. id .. ")") or "")
         row:SetText(UI.ShortenText(row.fullText, 38))
+        UI.SetClassicButtonSelected(row, selected[1]==id)
+        UI.ApplyDropdownChoiceSurface(row)
     end
     local function Filter()
         local query = string.lower(frame.search:GetText() or "")
@@ -87,18 +106,20 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         available.offset=0; available:Refresh()
     end
     available = PagedList(frame, 12, 295, RenderItem, function(id)
-        selected={id}; chosen.values=selected; chosen:Refresh()
+        selected={id}; chosen.values=selected; chosen:Refresh(); available:Refresh()
     end)
     chosen = PagedList(frame, 330, 298, RenderItem, function(_, index)
-        table.remove(selected,index); chosen:Refresh()
+        table.remove(selected,index); chosen:Refresh(); available:Refresh()
     end)
     for _, list in ipairs({available, chosen}) do
         for _, row in ipairs(list.rows) do
+            local enter,leave=row:GetScript("OnEnter"),row:GetScript("OnLeave")
             row:SetScript("OnEnter", function()
+                if enter then enter() end
                 if this.itemId then UI.ShowItemTooltip(this)
                 else UI.AnchorTooltip(this); GameTooltip:SetText(this.fullText); GameTooltip:Show() end
             end)
-            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide();if leave then leave() end end)
         end
     end
     frame.addName = UI.CreateButton(frame, nil, "Add name", 90, 22)
@@ -106,7 +127,7 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     frame.addName:SetScript("OnClick", function()
         local name = Raider.Services.ItemReference.NormalizeName(frame.search:GetText())
         if not name then frame.message:SetText("Enter an item name (up to 120 characters)."); return end
-        selected={name}; chosen.values=selected; chosen:Refresh()
+        selected={name}; chosen.values=selected; chosen:Refresh(); available:Refresh()
         frame.message:SetText("Added by name: " .. name)
     end)
     frame.available, frame.chosen = available, chosen
@@ -116,11 +137,25 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     frame.exception:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -314)
     frame.exceptionLabel = UI.CreateLabel(frame, nil, "OVERLAY", "GameFontHighlightSmall")
     frame.exceptionLabel:SetPoint("LEFT", frame.exception, "RIGHT", 4, 0)
-    frame.exceptionLabel:SetText("Allow these SR as a loot-rights exception")
-    frame.save:SetScript("OnClick", function()
+    frame.exceptionLabel:SetText("Allow to SR without loot rights")
+    local function CurrentMember()
+        for _,member in ipairs(frame.attendance and frame.attendance.members or {}) do if member.name==frame.memberName then return member end end
+    end
+    local function Save(confirmed)
         if getAttendance() ~= frame.attendance then frame.message:SetText("The session roster changed. Reopen the editor."); return end
-        local allowed = frame.exception:GetChecked() and true or false
+        local member=CurrentMember()
+        if not member then frame.message:SetText("This player is no longer in the session. Reopen the editor.");return end
+        local hasRights=Raider.Services.Raid.HasSoftReserveRights(member)
+        local allowed = not hasRights and frame.exception:GetChecked() and true or false
         if allowed and table.getn(selected)==0 then frame.message:SetText("Select an SR before enabling an exception."); return end
+        if not hasRights and not allowed and table.getn(selected)>0 and not confirmed then
+            if not frame.confirm then
+                frame.confirm=UI.Window.CreateProjectConfirmation("BootyRaiderReserveRightsConfirm","No loot rights","Save anyway","raids")
+                if UI.WindowStack then UI.WindowStack.SetOwner(frame.confirm,frame) end
+            end
+            frame.confirm:Open(frame.memberName.." does not have loot rights, and 'Allow to SR without loot rights' is not selected. Save this SR anyway? It will remain ineligible until loot rights or an exception are granted.",function() Save(true) end)
+            return
+        end
         local changed = table.getn(selected) ~= table.getn(originalIds)
         for index, id in ipairs(selected) do if id ~= originalIds[index] then changed = true end end
         if changed then
@@ -132,7 +167,8 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
             if not ok then frame.message:SetText(failure); return end
         end
         frame:Hide(); refresh()
-    end)
+    end
+    frame.save:SetScript("OnClick",function() Save(false) end)
     function frame:Open(member)
         self.attendance=getAttendance(); self.memberName=member.name
         self.title:SetText("Soft Reserves: " .. member.name)
@@ -142,11 +178,20 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         for index,id in ipairs(member.srItemIds or {}) do originalIds[index]=id end
         if originalIds[1] then selected[1]=originalIds[1] end
         originalException=member.srException==true
-        self.exception:SetChecked(originalException); self.message:SetText(failure and "No catalogue for this raid. Type the item name and click Add name." or "Choose one item, or type its name and click Add name. A new choice replaces the previous SR.")
+        local hasRights=Raider.Services.Raid.HasSoftReserveRights(member)
+        UI.SetButtonEnabled(self.exception,not hasRights)
+        self.exceptionLabel:SetAlpha(hasRights and 0.45 or 1)
+        self.exception:SetChecked(not hasRights and originalException); self.message:SetText(failure and "No catalogue for this raid. Type the item name and click Add name." or "Choose one item, or type its name and click Add name. A new choice replaces the previous SR.")
         if table.getn(originalIds)>1 then self.message:SetText("This editor saves one SR. Choose the item to keep; Cancel by closing this window to keep the imported reservations.") end
         chosen.values=selected; chosen.offset=0; chosen:Refresh(); self.search:SetText(""); Filter(); self:Show()
+        if selected[1] then
+            for index,id in ipairs(available.values) do if id==selected[1] then available.offset=math.floor((index-1)/9)*9;break end end
+            available:Refresh()
+        end
     end
     frame:SetScript("OnHide", function()
+        frame:SetScript("OnUpdate",nil);frame.itemWait=nil;requested={};itemLoader:Hide()
+        if frame.confirm then frame.confirm:Hide() end
         allItems={}; selected={}; originalIds={}; available.values={}; chosen.values={}
         available:Refresh(); chosen:Refresh(); frame.attendance=nil
     end)

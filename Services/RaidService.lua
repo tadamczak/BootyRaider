@@ -277,6 +277,15 @@ local function GetSoftReserveRank(member)
     return Raider.Services.RankPolicy.GetLootAlias(rank) or (rank ~= "" and rank) or "guest"
 end
 
+function RaidService.HasSoftReserveRights(member, rules)
+    if not member then return false end
+    rules = rules or Raider.Database.GetLootRules()
+    local rank = GetSoftReserveRank(member)
+    local rule = rules and rules[rank]
+    if rule then return rule.sr == true end
+    return defaultSoftReserveRanks[rank] == true
+end
+
 local contestedSource, contestedNames = nil, {}
 local function CurrentHighlyContestedItems()
     local items = Raider.Database.GetHighlyContestedItems and Raider.Database.GetHighlyContestedItems() or {}

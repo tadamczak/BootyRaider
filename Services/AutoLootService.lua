@@ -48,12 +48,13 @@ local presets = {
     { "Recipe *", "* Sack of *", "Onyxia Hide Backpack" },
     { "Recipe *", "Head of the Broodlord Lashlayer" },
 }
-function AutoLoot.ApplyPresets(text, mask)
+local inclusionPresets = { {}, {}, { "Lava Core", "Fiery Core" }, {}, {} }
+local function ApplyPresetEntries(text, mask, entriesByRaid)
     local entries, owned, seen = {}, {}, {}
     local index, entry, item
-    for index = 1, table.getn(presets) do
+    for index = 1, table.getn(entriesByRaid) do
         owned[Normalize(AutoLoot.PresetNames[index] .. " exceptions preset test")] = true
-        for item = 1, table.getn(presets[index]) do owned[Normalize(presets[index][item])] = true end
+        for item = 1, table.getn(entriesByRaid[index]) do owned[Normalize(entriesByRaid[index][item])] = true end
     end
     owned["onyxia exceptions preset test"] = true
     for entry in string.gfind(tostring(text or ""), "[^,]+") do
@@ -62,20 +63,22 @@ function AutoLoot.ApplyPresets(text, mask)
             table.insert(entries, (string.gsub(entry, "^%s*(.-)%s*$", "%1"))); seen[key] = true
         end
     end
-    for index = 1, table.getn(presets) do
+    for index = 1, table.getn(entriesByRaid) do
         if math.mod(math.floor((tonumber(mask) or 0) / 2 ^ (index - 1)), 2) == 1 then
-            for item = 1, table.getn(presets[index]) do
-                entry = presets[index][item]
+            for item = 1, table.getn(entriesByRaid[index]) do
+                entry = entriesByRaid[index][item]
                 if not seen[Normalize(entry)] then table.insert(entries, entry); seen[Normalize(entry)] = true end
             end
         end
     end
     return table.concat(entries, ", ")
 end
+function AutoLoot.ApplyPresets(text, mask) return ApplyPresetEntries(text, mask, presets) end
+function AutoLoot.ApplyInclusionPresets(text, mask) return ApplyPresetEntries(text, mask, inclusionPresets) end
 
-function AutoLoot.GetRaidPreset(raidName, exclusions)
+function AutoLoot.GetRaidPreset(raidName, exclusions, inclusions)
     local mask = raidPresetMasks[raidName] or 0
-    return mask, AutoLoot.ApplyPresets(exclusions, mask)
+    return mask, AutoLoot.ApplyPresets(exclusions, mask), AutoLoot.ApplyInclusionPresets(inclusions, mask)
 end
 
 function AutoLoot.ApplyRaidPreset(raidName)
@@ -83,5 +86,6 @@ function AutoLoot.ApplyRaidPreset(raidName)
     local mask = raidPresetMasks[raidName] or 0
     Raider.Database.SetSetting("lmAutoLootExceptions", AutoLoot.ApplyPresets(BootyRaiderDB.lmAutoLootExceptions, mask))
     Raider.Database.SetSetting("lmAutoLootPresets", mask)
+    Raider.Database.SetSetting("lmAutoLootInclusions", AutoLoot.ApplyInclusionPresets(BootyRaiderDB.lmAutoLootInclusions, mask))
     return mask
 end

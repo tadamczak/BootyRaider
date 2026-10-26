@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.33 — 2026-10-27
+
+- Apply MC inclusions with Raid Type; preserve SR exception markers, gate exceptions by rights, confirm ineligible saves and preload/highlight selected SR items.
+
 ## 0.1.0-dev.32 — 2026-10-26
 
 - Allow dragging standalone LM Config; use a gold plus for Add SR, a trash bin for Remove and the same gold wrench for edit actions.
