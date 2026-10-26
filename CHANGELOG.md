@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-dev.27 — 2026-10-26
+
+- Add uncatalogued SR items by name and match them without case or extra-space sensitivity, including real item links and confirmed receipts.
+- Accept typed item names in New Roll without requiring an item link or cache entry.
+- Preserve named reservations in saved raids, statistics and selective custom-change review after import.
+
 ## 0.1.0-dev.26 — 2026-10-26
 
 - Start sessions outside a raid and keep their roster and controls available after disband.

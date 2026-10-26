@@ -350,8 +350,9 @@ end
 
 function RaidService.GetSoftReserveRollRights(itemLink)
     local reserved, allowed, names, rankRights, rankNames, reyCoinRights, reyCoinUsed = {}, {}, {}, {}, {}, {}, {}
-    local itemId = tonumber(Match(tostring(itemLink or ""), "item:(%d+)"))
-    if not itemId then return false, reserved, allowed, names, rankRights, rankNames, reyCoinRights, reyCoinUsed end
+    local reference = Raider.Services.ItemReference
+    local itemKey = reference.Key(itemLink)
+    if not itemKey then return false, reserved, allowed, names, rankRights, rankNames, reyCoinRights, reyCoinUsed end
     local testRaid = Raider.Services.TestRaid
     local testing = testRaid and testRaid.IsActive and testRaid.IsActive()
     local attendance = testing and testRaid.GetAttendance() or Raider.Database.GetRaidAttendance()
@@ -394,7 +395,7 @@ function RaidService.GetSoftReserveRollRights(itemLink)
                 rankNames[name] = (displayRank ~= member.guildRank and displayRank) or (rank and rank ~= "" and rank) or (member.guildRank and member.guildRank ~= "" and member.guildRank) or "Guest"
                 local exception = false
                 if member.srException == true then
-                    for _, reservedId in ipairs(itemIds or {}) do if tonumber(reservedId) == itemId then exception = true; break end end
+                    for _, reservedId in ipairs(itemIds or {}) do if reference.Matches(reservedId, itemLink) then exception = true; break end end
                 end
                 if exception or (rule and rule.sr) or (not rule and defaultSoftReserveRanks[rank]) then
                     rankRights[name] = true
@@ -406,9 +407,11 @@ function RaidService.GetSoftReserveRollRights(itemLink)
             if member.name and itemIds then
                 local reserveIndex
                 for reserveIndex = 1, table.getn(itemIds) do
-                    local consumedAt = member.srConsumedAt and tonumber(member.srConsumedAt[itemId]) or 0
-                    if tonumber(itemIds[reserveIndex]) == itemId
-                        and (not consumedAt or consumedAt < (tonumber(attendance.sessionStartedAt) or 0)) then
+                    local consumed = member.srConsumedAt
+                    local consumedAt = consumed and math.max(tonumber(consumed[itemKey]) or 0,
+                        tonumber(consumed[reference.Key(itemIds[reserveIndex])]) or 0) or 0
+                    if reference.Matches(itemIds[reserveIndex], itemLink)
+                        and (consumedAt <= 0 or consumedAt < (tonumber(attendance.sessionStartedAt) or 0)) then
                         local name = string.lower(member.name)
                         reserved[name] = true
                         local rank = GetSoftReserveRank(member)
@@ -572,13 +575,20 @@ end
 
 function RaidService.ConfirmSoftReserveReceipt(recipient, itemLink, expectedSessionToken)
     if expectedSessionToken ~= nil and not RaidService.IsLootSessionCurrent(expectedSessionToken) then return false end
-    local itemId = tonumber(Match(tostring(itemLink or ""), "item:(%d+)"))
+    local reference = Raider.Services.ItemReference
+    local itemKey = reference.Key(itemLink)
     local attendance = ActiveLootAttendance()
-    if not recipient or not itemId or not attendance or not attendance.members then return false end
+    if not recipient or not itemKey or not attendance or not attendance.members then return false end
     local member = FindLootMember(attendance, recipient)
     if member then
         member.srConsumedAt = member.srConsumedAt or {}
-        member.srConsumedAt[itemId] = time()
+        local usedAt = time()
+        member.srConsumedAt[itemKey] = usedAt
+        local nameKey = reference.NameKey(itemLink)
+        if nameKey then member.srConsumedAt[nameKey] = usedAt end
+        for _, reserved in ipairs(member.srItemIds or {}) do
+            if reference.Matches(reserved, itemLink) then member.srConsumedAt[reference.Key(reserved)] = usedAt end
+        end
         return true
     end
     return false

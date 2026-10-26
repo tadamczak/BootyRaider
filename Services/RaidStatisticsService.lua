@@ -49,8 +49,7 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
         }
         for itemIndex = 1, table.getn(member.srItemIds or {}) do
             local itemId = tonumber(member.srItemIds[itemIndex])
-            local itemName
-            if itemId and type(GetItemInfo) == "function" then itemName = GetItemInfo(itemId) end
+            local itemName = Raider.Services.ItemReference.Name(member.srItemIds[itemIndex])
             savedMember.srItems[itemIndex] = { itemId = itemId, name = itemName, count = 1 }
         end
         for lootIndex = 1, table.getn(member.loot or {}) do
@@ -70,7 +69,7 @@ local function AppendItems(target, source, raid)
     for index = 1, table.getn(source or {}) do
         local item = source[index]
         local itemId = tonumber(item.itemId)
-        if itemId then
+        if itemId or (type(item.name) == "string" and item.name ~= "") then
             target[table.getn(target) + 1] = {
                 itemId = itemId, name = item.name, count = tonumber(item.count) or 1,
                 raidId = raid.id, savedAt = raid.savedAt,

@@ -601,7 +601,12 @@ local function OnGroupClick()
     if row and row.controller and row.controller.onGroup then row.controller.onGroup(row) end
 end
 
-local function OnSoftReserveEnter() Raider.UI.Components.ShowItemTooltip(this) end
+local function OnSoftReserveEnter()
+    if this.itemId then Raider.UI.Components.ShowItemTooltip(this)
+    elseif this.itemName then
+        Raider.UI.Components.AnchorTooltip(this); GameTooltip:SetText(this.itemName); GameTooltip:Show()
+    end
+end
 local function OnSoftReserveClick() Raider.UI.Components.HandleItemClick(this) end
 local function OnSoftReserveLeave() GameTooltip:Hide() end
 local function OnSoftReserveDeleteClick()
@@ -2103,10 +2108,11 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
     row.class:SetText(shorten(member.class, 12))
     row.rank:SetText(shorten(Raider.Services.RankPolicy.GetDisplayName(member.guildRank ~= "" and member.guildRank or "Guest"), 18))
     local itemId = member.srItemIds and member.srItemIds[1]
-    row.sr:SetText(itemId and ((member.srException and "* " or "") .. Raider.UI.Components.GetItemLabel(itemId)) or "")
-    row.srHit.itemId = itemId
-    local srTexture = itemId and type(GetItemIcon) == "function" and GetItemIcon(itemId) or nil
-    if not srTexture and itemId then local _, _, _, _, _, _, _, _, _, cachedTexture = GetItemInfo(itemId); srTexture = cachedTexture end
+    local numericId = tonumber(itemId)
+    row.sr:SetText(itemId and ((member.srException and "* " or "") .. (numericId and Raider.UI.Components.GetItemLabel(numericId) or itemId)) or "")
+    row.srHit.itemId, row.srHit.itemName = numericId, itemId and Raider.Services.ItemReference.Name(itemId)
+    local srTexture = numericId and type(GetItemIcon) == "function" and GetItemIcon(numericId) or nil
+    if not srTexture and numericId then local _, _, _, _, _, _, _, _, _, cachedTexture = GetItemInfo(numericId); srTexture = cachedTexture end
     if srTexture then row.srIcon:SetTexture(srTexture); row.srIcon:Show() else row.srIcon:Hide() end
     if itemId and not lootMasterMode then row.srDelete:Show() else row.srDelete:Hide() end
     row.srEdit:SetText(itemId and "Edit" or "+")

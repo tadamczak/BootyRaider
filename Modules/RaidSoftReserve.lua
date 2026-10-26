@@ -2,7 +2,12 @@ local Raider = BootyRaider
 Raider.Modules.RaidManagement = Raider.Modules.RaidManagement or {}
 local RaidManagement = Raider.Modules.RaidManagement
 
-local function ShowItemTooltip() Raider.UI.Components.ShowItemTooltip(this) end
+local function ShowItemTooltip()
+    if this.itemId then Raider.UI.Components.ShowItemTooltip(this)
+    elseif this.itemName then
+        Raider.UI.Components.AnchorTooltip(this); GameTooltip:SetText(this.itemName); GameTooltip:Show()
+    end
+end
 local function HideItemTooltip() GameTooltip:Hide() end
 local function HandleItemClick() Raider.UI.Components.HandleItemClick(this) end
 local warningRowColor = {0.10, 0.085, 0.055}
@@ -359,15 +364,17 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
             if memberName then local assigned = dialog.assignments[memberName]; left.label:SetText(RaidManagement.SoftReservePlayerLabel(memberName, dialog.attendance) .. (assigned and ("  <-  " .. RaidManagement.SoftReservePlayerLabel(assigned, dialog.attendance, dialog.reservationByName and dialog.reservationByName[string.lower(assigned)])) or "")); left:Show() else left:Hide() end
             local reservation = dialog.available[dialog.rightOffset + index]; local right = dialog.rightRows[index]; right.reservation = reservation
             if reservation then
-                right.itemId = reservation.itemIds and reservation.itemIds[1] or nil
+                local reference = reservation.itemIds and reservation.itemIds[1] or nil
+                right.itemId = tonumber(reference)
                 right.labelPrefix = RaidManagement.SoftReservePlayerLabel(reservation.name, dialog.attendance, reservation) .. "  -  "
                 right.label:SetText(right.labelPrefix)
                 local inset = math.min(260, right.label:GetStringWidth()) + 6
-                local itemText = right.itemId and Raider.UI.Components.GetItemLabel(right.itemId) or "No item"
+                local itemText = right.itemId and Raider.UI.Components.GetItemLabel(right.itemId) or reference or "No item"
                 right.label:SetText(itemText)
                 local itemWidth = math.min(306 - inset, right.label:GetStringWidth())
                 right.label:SetText(right.labelPrefix .. itemText)
                 right.itemHit.itemId = right.itemId
+                right.itemHit.itemName = reference and Raider.Services.ItemReference.Name(reference)
                 right.itemHit:ClearAllPoints(); right.itemHit:SetPoint("LEFT", right, "LEFT", inset, 0)
                 right.itemHit:SetWidth(math.max(1,itemWidth)); right.itemHit:Show(); right:Show()
             else right.itemId = nil; right.labelPrefix = nil; right:Hide() end

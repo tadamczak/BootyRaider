@@ -360,14 +360,22 @@ function RaidResService.SetMemberReservations(attendance, name, ids)
     local member = FindMember(attendance, name)
     if not member then return false, "This player is no longer in the session roster." end
     if type(ids) ~= "table" or table.getn(ids) > 40 then return false, "Select up to 40 reservations." end
-    local catalogue, failure = Raider.Services.RaidItemCatalog.GetItems(attendance.raidName)
-    if not catalogue then return false, failure end
-    local allowed = {}
-    for _, id in ipairs(catalogue) do allowed[id] = true end
-    for _, id in ipairs(ids) do
-        if type(id) ~= "number" or not allowed[id] then return false, "Select items from this raid's catalogue." end
+    local catalogue = Raider.Services.RaidItemCatalog.GetItems(attendance.raidName)
+    local allowed, normalized = {}, {}
+    for _, id in ipairs(catalogue or {}) do allowed[id] = true end
+    -- Imported custom-server IDs can be retained while adding or removing a
+    -- manual name, even when this raid's built-in catalogue does not know them.
+    for _, id in ipairs(member.srItemIds or {}) do if type(id) == "number" then allowed[id] = true end end
+    for index, id in ipairs(ids) do
+        if type(id) == "number" then
+            if not allowed[id] then return false, "Select items from this raid's catalogue." end
+            normalized[index] = id
+        else
+            normalized[index] = Raider.Services.ItemReference.NormalizeName(id)
+            if not normalized[index] then return false, "Enter an item name (up to 120 characters)." end
+        end
     end
-    AssignItems(member, ids)
+    AssignItems(member, normalized)
     RecordChange(attendance, member, "items"); UpdateMissing(attendance); SyncMutation(attendance)
     return true
 end
@@ -763,7 +771,7 @@ local function CopyConsumedReserves(source)
     if type(source) ~= "table" then return nil end
     local consumed, itemId, usedAt = {}, nil, nil
     for itemId, usedAt in pairs(source) do
-        if tonumber(itemId) and type(usedAt) == "number" then consumed[itemId] = usedAt end
+        if (tonumber(itemId) or (type(itemId) == "string" and string.find(itemId, "^name:"))) and type(usedAt) == "number" then consumed[itemId] = usedAt end
     end
     if next(consumed) == nil then return nil end
     return consumed

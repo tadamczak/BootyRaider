@@ -58,23 +58,22 @@ local function PagedList(frame, x, width, render, clicked)
 end
 
 local function ItemText(id)
-    local name = type(GetItemInfo)=="function" and GetItemInfo(id)
-    return name or ("Item #" .. id)
+    return Raider.Services.ItemReference.Name(id) or ("Item #" .. id)
 end
 
 function Management.CreateReserveEditor(page, getAttendance, refresh)
     local frame = Dialog("BootyRaiderReserveEditor", "Edit Soft Reserves", page)
     local selected, allItems, originalIds, originalException = {}, {}, {}, false
-    frame.search = UI.CreateFramedEditBox(frame, nil, 295)
+    frame.search = UI.CreateFramedEditBox(frame, nil, 197)
     frame.search:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -42); frame.search:SetAutoFocus(false)
-    UI.AttachPlaceholder(frame.search, "Search item name or ID...")
+    UI.AttachPlaceholder(frame.search, "Search or type item name...")
     frame.selectedTitle = UI.CreateLabel(frame, nil, "OVERLAY", "GameFontNormalSmall")
     frame.selectedTitle:SetPoint("TOPLEFT", frame, "TOPLEFT", 330, -48)
     frame.selectedTitle:SetText("Selected SR (click to remove)")
     local available, chosen
     local function RenderItem(row, id)
-        row.itemId = id
-        row.fullText = ItemText(id) .. " (#" .. id .. ")"
+        row.itemId = tonumber(id)
+        row.fullText = ItemText(id) .. (row.itemId and (" (#" .. id .. ")") or "")
         row:SetText(UI.ShortenText(row.fullText, 38))
     end
     local function Filter()
@@ -96,10 +95,22 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     end)
     for _, list in ipairs({available, chosen}) do
         for _, row in ipairs(list.rows) do
-            row:SetScript("OnEnter", function() UI.ShowItemTooltip(this) end)
+            row:SetScript("OnEnter", function()
+                if this.itemId then UI.ShowItemTooltip(this)
+                else UI.AnchorTooltip(this); GameTooltip:SetText(this.fullText); GameTooltip:Show() end
+            end)
             row:SetScript("OnLeave", function() GameTooltip:Hide() end)
         end
     end
+    frame.addName = UI.CreateButton(frame, nil, "Add name", 90, 22)
+    frame.addName:SetPoint("TOPLEFT", frame, "TOPLEFT", 217, -42)
+    frame.addName:SetScript("OnClick", function()
+        local name = Raider.Services.ItemReference.NormalizeName(frame.search:GetText())
+        if not name then frame.message:SetText("Enter an item name (up to 120 characters)."); return end
+        if table.getn(selected)>=40 then frame.message:SetText("Select up to 40 reservations."); return end
+        table.insert(selected,name); chosen.values=selected; chosen:Refresh()
+        frame.message:SetText("Added by name: " .. name)
+    end)
     frame.available, frame.chosen = available, chosen
     frame.search:SetScript("OnTextChanged", Filter)
     frame.exception = UI.CreateCheckButton(nil, frame, "UICheckButtonTemplate")
@@ -132,7 +143,7 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         allItems=allItems or {}; selected={}; originalIds={}
         for index,id in ipairs(member.srItemIds or {}) do selected[index]=id; originalIds[index]=id end
         originalException=member.srException==true
-        self.exception:SetChecked(originalException); self.message:SetText(failure or "Click an available item to add it. Repeated choices reserve multiple copies.")
+        self.exception:SetChecked(originalException); self.message:SetText(failure and "No catalogue for this raid. Type the item name and click Add name." or "Choose an item, or type its name and click Add name. Repeated choices reserve multiple copies.")
         chosen.values=selected; chosen.offset=0; chosen:Refresh(); self.search:SetText(""); Filter(); self:Show()
     end
     frame:SetScript("OnHide", function()

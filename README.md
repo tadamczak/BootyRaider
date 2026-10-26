@@ -20,11 +20,15 @@ Use `/br` to open Raid, `/br stats` for Raid Stats, `/br csr` for CSR and `/br s
 
 Tmog is available for cloaks, head, shoulders, chest/robes, shirts, wrists, gloves, belts, legs, boots and weapons. Other slots and non-equippable items do not offer it. If item data is not cached, refocus the item field after the client receives it.
 
+In **New Roll**, either paste an item link or type its full name. A typed name starts the roll even without an item cache entry. SR names match without case or extra-space sensitivity; use the item's full in-game name. Tmog still needs an item link with cached equipment information.
+
+Name-only reservations work for SR rolls and saved Raid Stats; CSR points still require an item ID.
+
 Current player results include their roll type, for example **97 SR** or **27 Tmog**. In Loot Master message settings, **Send in whisper** can send invalid-roll and unavailable-recipient notices directly to the affected player. It is off by default; winner announcements keep their raid audience.
 
 New Raid also works outside a raid, creating an empty session you can prepare before grouping. In a raid it captures the physical roster independently of guild membership. Leaving or disbanding the group keeps the session, roster and Save controls available until you explicitly save/end or quit. **Convert to Raid**, beside Raid Info, lets a party leader convert the group. Save Raid preserves roster, loot and selected statistics. Live tracking, group/list appearance, the default game Raid tab and Loot Master messages have independent settings.
 
-In the Raid list, use **+** beside an empty SR or **Edit** beside its delete icon. Choose items from the selected raid's catalogue; repeated choices reserve multiple copies. **Allow these SR as a loot-rights exception** admits that player's assigned SR, including restricted items, without changing their guild rank, Reycoin or CSR rights. An asterisk marks an exception in the SR column.
+In the Raid list, use **+** beside an empty SR or **Edit** beside its delete icon. Choose items from the selected raid's catalogue; repeated choices reserve multiple copies. For an item missing from the catalogue, type its full name in the search field and click **Add name**, then **Save**. This also works for Other raids. Named SRs are saved and included in the review after another import. **Allow these SR as a loot-rights exception** admits that player's assigned SR, including restricted items, without changing their guild rank, Reycoin or CSR rights. An asterisk marks an exception in the SR column.
 
 After importing SR again, select which manual changes to reapply in **Reapply custom SR changes**. Unchecked changes are discarded when you press **Apply selected**. Closing keeps the review pending; reopen it through **Import SR → Review custom changes**. Edits, removals, reassignment and exceptions are included. The independent catalogue covers Molten Core, Blackwing Lair, Onyxia's Lair, Zul'Gurub and Karazhan10 (Lower Karazhan Halls). Uncached names appear as item IDs. Other raid types have no catalogue.
 

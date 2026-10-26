@@ -441,6 +441,9 @@ local function ShowItemTooltip(owner, slot, link)
     if slot and GameTooltip.SetLootItem then
         shown = pcall(GameTooltip.SetLootItem, GameTooltip, slot)
     end
+    if not shown and not Raider.Services.ItemReference.Id(link) then
+        GameTooltip:SetText(link); shown = true
+    end
     if not shown and GameTooltip.SetHyperlink then
         local payload = Match(link, "|H([^|]+)|h") or link
         shown = pcall(GameTooltip.SetHyperlink, GameTooltip, payload)
@@ -1178,9 +1181,9 @@ local function Refresh()
             if entry.manual then
                 local itemId = tonumber(Match(tostring(entry.link), "item:(%d+)"))
                 local equipLocation
-                manualName, _, _, _, _, _, _, _, equipLocation, manualTexture = GetItemInfo(itemId or entry.link)
-                if type(GetItemIcon) == "function" then
-                    local icon = GetItemIcon(itemId or entry.link)
+                if itemId then manualName, _, _, _, _, _, _, _, equipLocation, manualTexture = GetItemInfo(itemId) end
+                if itemId and type(GetItemIcon) == "function" then
+                    local icon = GetItemIcon(itemId)
                     if icon then manualTexture = icon end
                 end
                 if not manualTexture and type(equipLocation) == "string"
@@ -1582,8 +1585,8 @@ local function StartRoll(slot, link, request)
     local _, historyKey = FindHistoryForItem(currentLootSession, slot, link)
     local icon
     if slot then icon = GetLootSlotInfo(slot)
-    else
-        local _, _, _, _, _, _, _, _, _, itemTexture = GetItemInfo(link)
+    elseif Raider.Services.ItemReference.Id(link) then
+        local _, _, _, _, _, _, _, _, _, itemTexture = GetItemInfo(Raider.Services.ItemReference.Id(link))
         icon = itemTexture
     end
     activeRoll = { slot = slot, link = link, icon = icon, source = currentLootSession,
