@@ -53,7 +53,7 @@ local function RestoreHeaderFont(control)
     local font, size, flags = label:GetFont()
     control.bootyFitFontSize = control.bootyFitFontSize or size
     label:SetFont(font, control.bootyFitFontSize, flags)
-    label:SetWidth(0)
+    label:SetHeight(control.bootyFitFontSize + 4); label:SetWidth(0)
 end
 
 function RaidManagement.CreateChrome(page, callbacks)
@@ -701,10 +701,14 @@ function RaidManagement.CreateListRow(parent, index, controller)
     AddRaidCell(parent, row, "sr", 500, 55, false)
     row.srHit = Raider.UI.Components.CreateControl(nil, row)
     row.srHit.ownerRow = row; row.srHit.label = row.sr; row.srHit:Hide()
-    row.srDelete = Raider.UI.Components.CreateDeleteButton(row.srHit, nil, 18, 3)
+    row.srDelete = Raider.UI.Components.CreateGoldToolbarButton(row.srHit, "close")
     row.srDelete:SetPoint("LEFT", row.srHit, "LEFT", 0, 0); row.srDelete.ownerRow = row; row.srDelete:SetScript("OnClick", OnSoftReserveDeleteClick); row.srDelete:Hide()
     Raider.UI.Components.AttachTooltip(row.srDelete, "Remove Soft Reserve", "Remove this player's assigned Soft Reserve.")
-    row.srEdit = Raider.UI.Components.CreateButton(row.srHit, nil, "Edit", 34, 18)
+    row.srAdd = Raider.UI.Components.CreateGoldToolbarButton(row.srHit, "import")
+    row.srAdd.ownerRow = row; row.srAdd:SetScript("OnClick", OnSoftReserveEditClick)
+    Raider.UI.Components.AttachTooltip(row.srAdd, "Add Soft Reserve", "Choose one SR for this player.")
+    row.srEdit = Raider.UI.Components.CreateGoldToolbarButton(row.srHit, "fix")
+    row.srActions = {row.srAdd, row.srEdit, row.srDelete}
     row.srEdit:SetPoint("LEFT", row.srDelete, "RIGHT", 2, 0); row.srEdit.ownerRow = row
     row.srEdit:SetScript("OnClick", OnSoftReserveEditClick)
     Raider.UI.Components.AttachTooltip(row.srEdit, "Edit Soft Reserves", "Add or change SR items and allow a loot-rights exception.")
@@ -1021,7 +1025,7 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
 
     local classic = Raider.UI.Components.IsClassicSkin()
     page.reyCoinToggle:Hide(); page.lmConfigToggle:Hide()
-    if not page.lootMasterController or not page.lootMasterController.IsVisible() then if not page.reyCoinSolo then page.reyCoinPanel:Hide() end; page.lmConfigPanel:Hide() end
+    if not page.lootMasterController or not page.lootMasterController.IsVisible() then if not page.reyCoinSolo then page.reyCoinPanel:Hide() end; if not page.lmConfigSolo then page.lmConfigPanel:Hide() end end
     local submenuOffset = classic and ((page.classicSectionOffset or 0) + (page.classicActionOffset or 0) + (page.classicToolbarOffset or 0)) or 0
     local pageWidth = PageSpan(page)
     local available = math.max(1, pageWidth - 12)
@@ -2118,8 +2122,17 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
     if not srTexture and numericId then local _, _, _, _, _, _, _, _, _, cachedTexture = GetItemInfo(numericId); srTexture = cachedTexture end
     if srTexture then row.srIcon:SetTexture(srTexture); row.srIcon:Show() else row.srIcon:Hide() end
     if itemId and not lootMasterMode then row.srDelete:Show() else row.srDelete:Hide() end
-    row.srEdit:SetText(itemId and "Edit" or "+")
-    if lootMasterMode then row.srEdit:Hide() else row.srEdit:Show() end
+    if not itemId and not lootMasterMode then row.srAdd:Show() else row.srAdd:Hide() end
+    if itemId and not lootMasterMode then row.srEdit:Show() else row.srEdit:Hide() end
+    local srInset = 0
+    for _, action in ipairs(row.srActions) do
+        action:ClearAllPoints()
+        if action:IsShown() then action:SetPoint("LEFT", row.srHit, "LEFT", srInset, 0); srInset=srInset+action:GetWidth()+2 end
+    end
+    row.srIcon:ClearAllPoints(); row.srIcon:SetPoint("LEFT", row.srHit, "LEFT", srInset, 0)
+    if srTexture then srInset=srInset+18 end
+    row.sr:ClearAllPoints(); row.sr:SetPoint("LEFT", row.srHit, "LEFT", srInset, 0)
+    row.sr:SetWidth(math.max(1,row.srHit:GetWidth()-srInset))
     local shade = member.online and 1 or 0.55
     SetListTextColor(row, member.online and BootyRaiderDB.raidListTextColor or offlineTextColor, shade)
     row.crown:SetAlpha(member.online and 1 or 0.55); row.lootMasterIcon:SetAlpha(member.online and 1 or 0.55)
@@ -2812,14 +2825,15 @@ local function ToolSpecs(page, kind)
         leader = {{key = "rl-mode", source = controls.leaderMode, caption = "RL Mode", icon = "raid_tools", openRaid = true},
             {key = "ready-check", source = controls.readyCheck, caption = "Ready Check", icon = "check"}},
         loot = {
-            {key = "loot-mode", source = controls.mode, caption = "Loot Master Mode", icon = "loot_tools"},
-            {key = "reset-loot", source = controls.resetLoot, caption = "Reset Loot", icon = "reset"},
-            {key = "import-sr", source = controls.import, caption = "Import SR", icon = "import"},
-            {key = "share-sr", source = controls.shareSr, caption = "Share SR", icon = "link"},
-            {key = "loot-rules", source = controls.lootRules, caption = "Loot Rules", icon = "rules"},
-            {key = "send-loot-rules", source = controls.sendLootRules, caption = "Send Loot Rules", icon = "rules"},
-            {key = "reycoin", source = controls.reycoin, caption = "Reycoin list", icon = "lootmaster"},
+            {key = "loot-mode", source = controls.mode, caption = "LM Mode", icon = "loot_tools"},
+            {key = "lm-config", source = page.lmConfigToggle, caption = "LM Config", icon = "settings"},
             {key = "new-roll", source = controls.newRoll, caption = "New Roll", icon = "dice"},
+            {key = "reycoin", source = controls.reycoin, caption = "Reycoin list", icon = "lootmaster"},
+            {key = "import-sr", source = controls.import, caption = "Import SR", icon = "import"},
+            {key = "share-sr", source = controls.shareSr, caption = "Share SR link", icon = "link"},
+            {key = "loot-rules", source = controls.lootRules, caption = "Set Loot Rules", icon = "rules"},
+            {key = "send-loot-rules", source = controls.sendLootRules, caption = "Send Loot Rules", icon = "rules"},
+            {key = "reset-loot", source = controls.resetLoot, caption = "Reset Loot History", icon = "reset"},
         },
     }
     return page.toolActionSpecs[kind]
@@ -2834,7 +2848,7 @@ end
 
 local function ToolCaption(spec)
     local caption = spec.source and spec.source.label and spec.source.label:GetText()
-    return caption and caption ~= "" and caption or spec.caption
+    return spec.caption or caption
 end
 
 local function InvokeToolChoice()
@@ -2990,7 +3004,7 @@ function RaidManagement.UpdateToolSubmenu(page)
         local option = panel.options[index]
         local sourceLabel = option.toolSource and (option.toolSource.label or option.toolSource)
         local caption = sourceLabel and sourceLabel.GetText and sourceLabel:GetText()
-        option:SetText(caption and caption ~= "" and caption or option.toolCaption)
+        option:SetText(option.toolCaption or caption)
         option.label:ClearAllPoints(); option.label:SetPoint("LEFT", option, "LEFT", 4, 0); option.label:SetWidth(0)
         choiceWidth = math.max(choiceWidth, option.label:GetStringWidth() + 16)
         UI.SetButtonEnabled(option, SourceEnabled(option.toolSource))
@@ -3025,7 +3039,8 @@ local function PlaceRaidHeaderLabel(page, control, width, y, left)
     if size < 9 then label:SetFont(font, 9, flags) end
     if label.SetWordWrap then label:SetWordWrap(false) end
     if control.label then control.bootyCaptionBottomInset = 4; Raider.UI.Components.ApplyButtonCaptionBaseline(control)
-    else label:SetHeight(22); label:SetJustifyV("BOTTOM") end
+    else label:SetHeight(math.max(26, size + 4)); label:SetJustifyV("MIDDLE") end
+    control:Show()
     return left + width + 8
 end
 
@@ -3035,7 +3050,9 @@ function RaidManagement.LayoutActions(page)
         local sectionOffset = page.classicSectionOffset or 0
         local UI = Raider.UI.Components
         local pageWidth = PageSpan(page)
-        local available = math.max(1, pageWidth - 12 - (page.raidInfoButton and 154 or 0))
+        local trailing = page.raidInfoButton and page.raidInfoButton:IsShown() and page.raidInfoButton:GetWidth()+8 or 0
+        if page.convertRaidButton and page.convertRaidButton:IsShown() then trailing=trailing+page.convertRaidButton:GetWidth()+6 end
+        local available = math.max(1, pageWidth - 12 - trailing)
         local showIssues = page.classicIssues:IsShown()
         RestoreHeaderFont(page.classicRaidName); RestoreHeaderFont(page.classicMeta)
         local nameLabel = page.classicRaidName.label or page.classicRaidName
@@ -3056,7 +3073,7 @@ function RaidManagement.LayoutActions(page)
         local metaWidth = math.max(42, metaLabel:GetStringWidth() + 4)
         local total = nameWidth + metaWidth + 108 + (showIssues and 96 or 0) + 108 + 90 + (showIssues and 40 or 32)
         local compact = total > available
-        page.classicActionOffset = compact and 30 or 0
+        page.classicActionOffset = compact and math.max(30, nameLabel:GetHeight()+4, metaLabel:GetHeight()+4) or 0
         local actionOffset = page.classicActionOffset
         local top, left = -9 - sectionOffset, 6
         local scale = 1
@@ -3425,6 +3442,7 @@ function RaidManagement.CreateLifecycle(options)
         if options.page.memberMenuDismiss then options.page.memberMenuDismiss:Hide() end
         if not detached and options.page.softReserveImportDialog then options.page.softReserveImportDialog:Hide() end
         if options.page.raidTypePanel then options.page.raidTypePanel:Hide() end
+        if options.page.lmConfigSolo then options.page.lmConfigPanel:Hide();options.page.lmConfigOpen=false end
         if options.page.srEditor then options.page.srEditor:Hide() end
         if options.page.srReview then options.page.srReview:Hide() end
         if options.page.softReserveFixDialog and options.page.softReserveFixDialog.Close then options.page.softReserveFixDialog:Close() end
@@ -3500,19 +3518,30 @@ function RaidManagement.CreateLootMasterController(options)
     options.page.reyCoinPanel:ClearAllPoints()
     options.page.reyCoinPanel:SetPoint("TOPLEFT", options.page.lmConfigPanel, "TOPLEFT", 0, 0)
     if UI.WindowStack then
-        UI.WindowStack.Register(options.page.lmConfigPanel, {owner = window})
+        UI.WindowStack.Register(options.page.lmConfigPanel, {owner = function() return options.page.lmConfigSolo and options.page or window end})
         UI.WindowStack.Register(options.page.reyCoinPanel, {owner = function()
             return options.page.reyCoinSolo and options.page or window
         end})
     end
     controller.ReanchorPanels = function()
-        options.page.lmConfigPanel:ClearAllPoints()
-        options.page.lmConfigPanel:SetPoint("TOPLEFT", window, "TOPRIGHT", 0, 0)
+        if not options.page.lmConfigSolo then
+            options.page.lmConfigPanel:ClearAllPoints()
+            options.page.lmConfigPanel:SetPoint("TOPLEFT", window, "TOPRIGHT", 0, 0)
+        end
         if not options.page.reyCoinSolo then
             options.page.reyCoinPanel:ClearAllPoints()
             options.page.reyCoinPanel:SetPoint("TOPLEFT", window, "TOPRIGHT", 0, 0)
         end
     end
+    controller.ToggleConfig = function()
+        local panel=options.page.lmConfigPanel
+        if panel:IsShown() then options.page.lmConfigOpen=false;panel:Hide();return end
+        options.page.lmConfigSolo=not window:IsShown()
+        if options.page.lmConfigSolo then panel:ClearAllPoints();panel:SetPoint("CENTER",UIParent,"CENTER",0,0)
+        else controller.ReanchorPanels() end
+        options.page.reyCoinPanel:Hide();options.page.lmConfigOpen=true;panel:Show()
+    end
+    options.page.lmConfigToggle:SetScript("OnClick",controller.ToggleConfig)
     local function SetupSidePanelResize(panel, widthKey, heightKey, minimumWidth, minimumHeight)
         minimumWidth = minimumWidth or 150; minimumHeight = minimumHeight or 90
         local settings = options.getSettings()
@@ -3680,12 +3709,7 @@ function RaidManagement.CreateLootMasterController(options)
         minimize:SetScript("OnClick", function() controller.toggleMinimize() end)
         config = UI.CreateSettingsButton(window); config:SetPoint("RIGHT", minimize, "LEFT", -2, 0)
         UI.AttachTooltip(config, "LM Config", "Open Loot Master configuration.")
-        config:SetScript("OnClick", function()
-            controller.ReanchorPanels()
-            options.page.reyCoinPanel:Hide()
-            options.page.lmConfigOpen = not options.page.lmConfigOpen
-            if options.page.lmConfigOpen then options.page.lmConfigPanel:Show() else options.page.lmConfigPanel:Hide() end
-        end)
+        config:SetScript("OnClick", controller.ToggleConfig)
         reycoin = UI.CreateGoldToolbarButton(window, "list")
         UI.AttachTooltip(reycoin, "Reycoin List", "View used Reycoins and pending item trades.")
         reycoin:SetPoint("RIGHT", config, "LEFT", -2, 0)
@@ -4374,7 +4398,7 @@ function RaidManagement.CreateAutoLootControls(page, view)
     modeLabel:SetFont(font, size, flags); label:SetFont(font, size, flags); exceptionsLabel:SetFont(font, size, flags)
     inclusionsLabel:SetFont(font, size, flags)
     view.lmConfigLabels = { modeLabel, label, exceptionsLabel, inclusionsLabel }
-    local presetLabel = UI.CreateComponentLabel(panel, "Add Exclusions Preset", "white")
+    local presetLabel = UI.CreateComponentLabel(panel, "Add Exclusion Preset:", "white")
     presetLabel:SetFont(font, size, flags); table.insert(view.lmConfigLabels, presetLabel)
     presetLabel:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 8, 34)
     local presets = UI.CreateDropdownButton(panel, nil, "None", 184)
@@ -4395,9 +4419,14 @@ function RaidManagement.CreateAutoLootControls(page, view)
     end
     local function LayoutConfig()
         local width = math.max(94, panel:GetWidth() - 150)
+        mode:ClearAllPoints(); mode:SetPoint("TOPLEFT", panel, "TOPLEFT", 142, -34)
         mode:SetWidth(width); rarity:SetWidth(width); presets:SetWidth(width)
-        presetLabel:ClearAllPoints(); presetLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -94)
         presets:ClearAllPoints(); presets:SetPoint("TOPLEFT", panel, "TOPLEFT", 160, -94); presets:SetWidth(math.max(84,panel:GetWidth()-168))
+        for _, pair in ipairs({{modeLabel,mode},{label,rarity},{presetLabel,presets}}) do
+            local caption,field=pair[1],pair[2]
+            caption:ClearAllPoints();caption:SetPoint("RIGHT",field,"LEFT",-8,0)
+            caption:SetWidth(pair[1]==presetLabel and 144 or 126);caption:SetHeight(field:GetHeight());caption:SetJustifyH("LEFT");caption:SetJustifyV("MIDDLE")
+        end
         exceptionsLabel:ClearAllPoints(); exceptionsLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -124)
         local areaHeight = math.max(64, (panel:GetHeight() - 188) / 2)
         exclusionsArea:ClearAllPoints(); exclusionsArea:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -144)

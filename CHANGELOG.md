@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.30 — 2026-10-26
+
+- Order Loot Master Tools and share LM Config; center dropdown captions, limit manual SR to one item, use compact gold SR actions and retain raid type when header actions wrap.
+
 ## 0.1.0-dev.29 — 2026-10-26
 
 - Change the active raid type from its heading while preserving session data; keep Search inline when filters fit at native control heights.

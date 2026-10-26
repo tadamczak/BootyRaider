@@ -87,8 +87,7 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         available.offset=0; available:Refresh()
     end
     available = PagedList(frame, 12, 295, RenderItem, function(id)
-        if table.getn(selected)>=40 then frame.message:SetText("Select up to 40 reservations."); return end
-        table.insert(selected,id); chosen.values=selected; chosen:Refresh()
+        selected={id}; chosen.values=selected; chosen:Refresh()
     end)
     chosen = PagedList(frame, 330, 298, RenderItem, function(_, index)
         table.remove(selected,index); chosen:Refresh()
@@ -107,8 +106,7 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     frame.addName:SetScript("OnClick", function()
         local name = Raider.Services.ItemReference.NormalizeName(frame.search:GetText())
         if not name then frame.message:SetText("Enter an item name (up to 120 characters)."); return end
-        if table.getn(selected)>=40 then frame.message:SetText("Select up to 40 reservations."); return end
-        table.insert(selected,name); chosen.values=selected; chosen:Refresh()
+        selected={name}; chosen.values=selected; chosen:Refresh()
         frame.message:SetText("Added by name: " .. name)
     end)
     frame.available, frame.chosen = available, chosen
@@ -141,9 +139,11 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         local failure
         allItems,failure=Raider.Services.RaidItemCatalog.GetItems(self.attendance.raidName)
         allItems=allItems or {}; selected={}; originalIds={}
-        for index,id in ipairs(member.srItemIds or {}) do selected[index]=id; originalIds[index]=id end
+        for index,id in ipairs(member.srItemIds or {}) do originalIds[index]=id end
+        if originalIds[1] then selected[1]=originalIds[1] end
         originalException=member.srException==true
-        self.exception:SetChecked(originalException); self.message:SetText(failure and "No catalogue for this raid. Type the item name and click Add name." or "Choose an item, or type its name and click Add name. Repeated choices reserve multiple copies.")
+        self.exception:SetChecked(originalException); self.message:SetText(failure and "No catalogue for this raid. Type the item name and click Add name." or "Choose one item, or type its name and click Add name. A new choice replaces the previous SR.")
+        if table.getn(originalIds)>1 then self.message:SetText("This editor saves one SR. Choose the item to keep; Cancel by closing this window to keep the imported reservations.") end
         chosen.values=selected; chosen.offset=0; chosen:Refresh(); self.search:SetText(""); Filter(); self:Show()
     end
     frame:SetScript("OnHide", function()
