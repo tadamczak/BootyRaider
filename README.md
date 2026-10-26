@@ -22,7 +22,11 @@ Tmog is available for cloaks, head, shoulders, chest/robes, shirts, wrists, glov
 
 Current player results include their roll type, for example **97 SR** or **27 Tmog**. In Loot Master message settings, **Send in whisper** can send invalid-roll and unavailable-recipient notices directly to the affected player. It is off by default; winner announcements keep their raid audience.
 
-New sessions capture the physical raid independently of guild membership. Save Raid preserves roster, loot and selected statistics. Live tracking, group/list appearance, the default game Raid tab and Loot Master messages have independent settings.
+New Raid also works outside a raid, creating an empty session you can prepare before grouping. In a raid it captures the physical roster independently of guild membership. Leaving or disbanding the group keeps the session, roster and Save controls available until you explicitly save/end or quit. **Convert to Raid**, beside Raid Info, lets a party leader convert the group. Save Raid preserves roster, loot and selected statistics. Live tracking, group/list appearance, the default game Raid tab and Loot Master messages have independent settings.
+
+In the Raid list, use **+** beside an empty SR or **Edit** beside its delete icon. Choose items from the selected raid's catalogue; repeated choices reserve multiple copies. **Allow these SR as a loot-rights exception** admits that player's assigned SR, including restricted items, without changing their guild rank, Reycoin or CSR rights. An asterisk marks an exception in the SR column.
+
+After importing SR again, select which manual changes to reapply in **Reapply custom SR changes**. Unchecked changes are discarded when you press **Apply selected**. Closing keeps the review pending; reopen it through **Import SR → Review custom changes**. Edits, removals, reassignment and exceptions are included. The independent catalogue covers Molten Core, Blackwing Lair, Onyxia's Lair, Zul'Gurub and Karazhan10 (Lower Karazhan Halls). Uncached names appear as item IDs. Other raid types have no catalogue.
 
 Master Loot waits up to five seconds for delivery confirmation. If confirmation is missing, it releases the pending request and reports the item and recipient. Check whether the recipient received the item before trying again. Requests are never retried automatically; confirmed SR/Reycoin transfers remain available.
 
@@ -52,7 +56,7 @@ Only current guild ranks **Officer Wukong** and **Mukla** can archive/activate C
 
 Save Raid offers a reload to write data to disk. This waits until other Booty products have no active raid or recording. A failed startup or Stop reports its reason and retains raid data.
 
-An incomplete client roster cannot start a ready session or replace a complete roster. If New Raid fails, the dialog retains your input so you can try again when the roster is available.
+A partially available physical raid roster cannot start a ready session or replace a complete roster. An intentional start outside a raid creates an empty session; a roster disappearing during a raid start still fails safely. If New Raid fails, the dialog retains your input so you can try again when the roster is available.
 
 Import SR validates the entire RaidRes Base64 export before replacing reservations. Participants without reserved items, including RaidRes empty-choice placeholders, are accepted and receive no SR. Damaged exports leave the previous SR, loot and history intact; a valid empty reservation list clears SR. Imports accept up to 16000 bytes of pasted text.
 

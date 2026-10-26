@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-dev.26 — 2026-10-26
+
+- Start sessions outside a raid and keep their roster and controls available after disband.
+- Add Convert to Raid beside Raid Info for party leaders.
+- Add manual SR selection/editing, per-player SR exceptions and selective custom-change review after reimport.
+- Include a compact independent item catalogue for the five named raid types.
+
 ## 0.1.0-dev.25 — 2026-10-25
 
 - Allow cloaks in Tmog rolls, including default categories, commands and New Roll.

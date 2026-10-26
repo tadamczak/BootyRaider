@@ -32,6 +32,7 @@ function RaidManagement.CreateSoftReserveImportDialog(options)
         local result, importError = options.importData(value, dialog.url:GetText() or "")
         if not result then dialog:SetMessage(importError or "The Soft Reserve import failed.", true); return false end
         options.refresh()
+        if options.page and options.page.OpenSRReview then options.page.OpenSRReview() end
         options.printMessage("Soft Reserves imported. Matched: " .. result.matched .. ", outside raid: " .. result.unmatched .. ", raid members without SR: " .. result.missing .. ".")
         return true
     end)
@@ -66,6 +67,11 @@ function RaidManagement.CreateSoftReserveImportDialog(options)
         if testMode then self.url:SetFocus() end
     end
     dialog.cancel:ClearAllPoints(); dialog.cancel:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -86, 8)
+    dialog.review = Raider.UI.Components.CreateButton(dialog, nil, "Review custom changes", 180, 22)
+    dialog.review:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 8, 8)
+    dialog.review:SetScript("OnClick", function()
+        if options.page and options.page.OpenSRReview and not options.page.OpenSRReview() then dialog:SetMessage("No custom changes are awaiting review.", false) end
+    end)
     dialog.save:ClearAllPoints(); dialog.save:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -8, 8)
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(dialog, options.page) end
     return dialog

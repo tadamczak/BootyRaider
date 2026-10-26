@@ -78,9 +78,13 @@ end
 
 function Session:CapturePendingRaid(getPendingId, getPendingName)
     local dependencies = self.dependencies
-    local count, attendance = dependencies.raid.CaptureRoster(true)
+    local solo = self.pendingRaid and self.pendingRaid.offline and type(GetNumRaidMembers) == "function" and GetNumRaidMembers() == 0
+    local count, attendance
+    if solo then
+        count, attendance = 0, {members = {}, scannedAt = dependencies.now(), updatedBy = UnitName("player")}
+    else count, attendance = dependencies.raid.CaptureRoster(true) end
     if count == nil then return nil, attendance end
-    if count <= 0 then return nil, "The physical raid roster is not ready. Retry or cancel the new session." end
+    if count <= 0 and not solo then return nil, "The physical raid roster is not ready. Retry or cancel the new session." end
     if attendance and getPendingId() then
         attendance.snapshotId = getPendingId()
         attendance.raidName = getPendingName() or attendance.raidName
@@ -98,7 +102,8 @@ end
 function Session:BeginPendingRaid()
     -- This reference is transient, never another durable copy of attendance.
     local database = self.dependencies.database
-    local pending = {attendance = database.GetRaidAttendance(), presets = {}}
+    local pending = {attendance = database.GetRaidAttendance(), presets = {},
+        offline = type(GetNumRaidMembers) == "function" and GetNumRaidMembers() == 0}
     self.pendingRaid = pending
     local index
     for index = 1, table.getn(presetKeys) do pending.presets[presetKeys[index]] = database.GetSetting(presetKeys[index]) end

@@ -295,6 +295,134 @@ function RaidResService.HasSession(attendance)
     return raidId and attendance.sessionStartedAt and type(attendance.members) == "table" and true or false
 end
 
+local function CopyIds(values)
+    local copy = {}
+    for index = 1, table.getn(values or {}) do copy[index] = values[index] end
+    return copy
+end
+
+local function FindMember(attendance, name)
+    for _, member in ipairs(attendance and attendance.members or {}) do
+        if NormalizeName(member.name) == NormalizeName(name) then return member end
+    end
+end
+
+local function RecordChange(attendance, member, kind)
+    attendance.srCustomChanges = attendance.srCustomChanges or {}
+    local change = {name = member.name, kind = kind}
+    if kind == "items" then change.itemIds = CopyIds(member.srItemIds); change.sourceName = member.srSourceName
+    else change.allowed = member.srException == true end
+    attendance.srCustomChanges[kind .. ":" .. NormalizeName(member.name)] = change
+end
+
+local function CopyChanges(source)
+    if not source then return nil end
+    local copy = {}
+    for key, change in pairs(source) do
+        copy[key] = {name = change.name, kind = change.kind, allowed = change.allowed,
+            sourceName = change.sourceName, itemIds = change.itemIds and CopyIds(change.itemIds)}
+    end
+    return copy
+end
+
+function RaidResService.GetCustomChanges(attendance)
+    local changes = {}
+    local byKey = {}
+    for _, source in ipairs(attendance and attendance.softReserveImport and attendance.softReserveImport.customReview or {}) do
+        byKey[source.kind .. ":" .. NormalizeName(source.name)] = source
+    end
+    for key, source in pairs(attendance and attendance.srCustomChanges or {}) do byKey[key] = source end
+    for _, source in pairs(byKey) do
+        table.insert(changes, {name = source.name, kind = source.kind, itemIds = source.itemIds and CopyIds(source.itemIds),
+            sourceName = source.sourceName, allowed = source.allowed})
+    end
+    table.sort(changes, function(a,b) if a.name == b.name then return a.kind < b.kind end return a.name < b.name end)
+    return changes
+end
+
+local function UpdateMissing(attendance)
+    local missing = {}
+    for _, member in ipairs(attendance.members) do
+        if table.getn(member.srItemIds or {}) == 0 then table.insert(missing, member.name) end
+    end
+    table.sort(missing); EnsureSnapshotImport(attendance).missingNames = missing
+end
+
+local function AssignItems(member, ids, sourceName)
+    local labels = {}
+    for index = 1, table.getn(ids) do labels[index] = tostring(ids[index]) end
+    member.srItemIds = table.getn(ids) > 0 and CopyIds(ids) or nil
+    member.sr = table.concat(labels, ", ")
+    member.srSourceName = table.getn(ids) > 0 and (sourceName or member.name) or nil
+end
+
+function RaidResService.SetMemberReservations(attendance, name, ids)
+    local member = FindMember(attendance, name)
+    if not member then return false, "This player is no longer in the session roster." end
+    if type(ids) ~= "table" or table.getn(ids) > 40 then return false, "Select up to 40 reservations." end
+    local catalogue, failure = Raider.Services.RaidItemCatalog.GetItems(attendance.raidName)
+    if not catalogue then return false, failure end
+    local allowed = {}
+    for _, id in ipairs(catalogue) do allowed[id] = true end
+    for _, id in ipairs(ids) do
+        if type(id) ~= "number" or not allowed[id] then return false, "Select items from this raid's catalogue." end
+    end
+    AssignItems(member, ids)
+    RecordChange(attendance, member, "items"); UpdateMissing(attendance); SyncMutation(attendance)
+    return true
+end
+
+function RaidResService.SetMemberException(attendance, name, allowed)
+    local member = FindMember(attendance, name)
+    if not member then return false, "This player is no longer in the session roster." end
+    if allowed and table.getn(member.srItemIds or {}) == 0 then return false, "Assign a Soft Reserve before allowing an exception." end
+    member.srException = allowed == true and true or nil
+    RecordChange(attendance, member, "exception"); SyncMutation(attendance)
+    return true
+end
+
+function RaidResService.ReapplyCustomChanges(attendance, importInfo, selected)
+    if not attendance or attendance.softReserveImport ~= importInfo or not importInfo.customReview then
+        return false, "The import changed. Reopen the review for the current import."
+    end
+    for index, change in ipairs(importInfo.customReview) do
+        if selected[index] and not FindMember(attendance, change.name) then
+            return false, change.name .. " is no longer in the session roster. Uncheck this change."
+        end
+    end
+    -- Apply item edits first, then exceptions, independent of display order.
+    for _, kind in ipairs({"items", "exception"}) do
+        for index, change in ipairs(importInfo.customReview) do
+            if selected[index] and change.kind == kind then
+                local member = FindMember(attendance, change.name)
+                if kind == "items" then
+                    AssignItems(member, change.itemIds, change.sourceName)
+                    -- Reassigning a previously unmatched import must not leave
+                    -- a second copy under its source name after reimport.
+                    if change.sourceName and NormalizeName(change.sourceName) ~= NormalizeName(member.name) then
+                        for _, other in ipairs(attendance.members) do
+                            if other ~= member and NormalizeName(other.srSourceName) == NormalizeName(change.sourceName) then
+                                AssignItems(other, {}); RecordChange(attendance, other, "items")
+                            end
+                        end
+                        for position = table.getn(importInfo.unmatchedReservations or {}), 1, -1 do
+                            if NormalizeName(importInfo.unmatchedReservations[position].name) == NormalizeName(change.sourceName) then
+                                table.remove(importInfo.unmatchedReservations,position)
+                            end
+                        end
+                        importInfo.unmatchedNames = {}
+                        for _, reservation in ipairs(importInfo.unmatchedReservations or {}) do table.insert(importInfo.unmatchedNames,reservation.name) end
+                        table.sort(importInfo.unmatchedNames)
+                    end
+                else member.srException = change.allowed == true and true or nil end
+                RecordChange(attendance, member, kind)
+            end
+        end
+    end
+    importInfo.customReview = nil; UpdateMissing(attendance); SyncMutation(attendance)
+    return true
+end
+
 function RaidResService.Import(encoded, attendance, srUrl)
     if type(attendance) ~= "table" or type(attendance.members) ~= "table" then return nil, "Scan the raid roster before importing Soft Reserves." end
     local imported, importError = ReadImport(encoded)
@@ -356,11 +484,18 @@ function RaidResService.Import(encoded, attendance, srUrl)
         unmatchedNames = unmatchedNames,
         unmatchedReservations = unmatchedReservations,
         missingNames = missingNames,
+        customReview = RaidResService.GetCustomChanges(attendance),
     }
+    -- A dismissed review stays durable until explicitly resolved or reimported.
+    if table.getn(importInfo.customReview) == 0 and attendance.softReserveImport then
+        importInfo.customReview = attendance.softReserveImport.customReview
+    end
     for memberIndex = 1, table.getn(updates) do
         local update = updates[memberIndex]
         update.member.sr, update.member.srItemIds, update.member.srSourceName = update.sr, update.itemIds, update.sourceName
+        update.member.srException = nil
     end
+    attendance.srCustomChanges = nil
     attendance.softReserveImport = importInfo
     SyncMutation(attendance)
     return { matched = matched, total = table.getn(reservations), unmatched = unmatched, missing = table.getn(missingNames) }
@@ -387,6 +522,7 @@ function RaidResService.ApplyAssignments(attendance, assignments)
             for index = 1, table.getn(reservation.itemIds or {}) do labels[index] = tostring(reservation.itemIds[index]) end
             if table.getn(labels) > 0 then
                 member.sr = table.concat(labels, ", "); member.srItemIds = reservation.itemIds; member.srSourceName = reservation.name
+                RecordChange(attendance, member, "items")
                 assignedReservations[NormalizeName(reservation.name)] = true
             end
         end
@@ -437,6 +573,7 @@ function RaidResService.RemoveMemberReservation(attendance, memberName)
     for index = 1, table.getn(member.srItemIds) do releasedItemIds[index] = member.srItemIds[index] end
     local releasedName = member.srSourceName or member.name
     member.sr = ""; member.srItemIds = nil; member.srSourceName = nil
+    RecordChange(attendance, member, "items")
     local unmatchedReservations = importInfo.unmatchedReservations or {}
     local unmatchedNames = importInfo.unmatchedNames or {}
     local reservationExists = false
@@ -489,6 +626,7 @@ function RaidResService.ClearInvalidMemberReservations(attendance, rules)
             local labels = {}
             for itemIndex = 1, table.getn(remaining) do labels[itemIndex] = tostring(remaining[itemIndex]) end
             member.sr = table.concat(labels, ", ")
+            RecordChange(attendance, member, "items")
             cleared = cleared + table.getn(invalidIds)
         end
     end
@@ -511,6 +649,7 @@ function RaidResService.Reconcile(previousAttendance, attendance)
     attendance.sessionStartedAt = previousAttendance.sessionStartedAt
     attendance.lastSavedAt = previousAttendance.lastSavedAt
     attendance._sessionDraft = previousAttendance._sessionDraft
+    attendance.srCustomChanges = previousAttendance.srCustomChanges
     local reservationsByName, manualReservations, previousAssignmentState = {}, {}, {}
     local index
     for index = 1, table.getn(previousImport.unmatchedReservations or {}) do
@@ -570,6 +709,12 @@ function RaidResService.Reconcile(previousAttendance, attendance)
     table.sort(missingNames); table.sort(unmatchedNames)
     table.sort(unmatchedReservations, function(a, b) return string.lower(a.name or "") < string.lower(b.name or "") end)
     attendance.softReserveImport = previousImport
+    for _, change in pairs(attendance.srCustomChanges or {}) do
+        local member = FindMember(attendance, change.name)
+        if member then
+            if change.kind == "exception" then member.srException = change.allowed == true and true or nil end
+        end
+    end
     previousImport.missingNames = missingNames; previousImport.unmatchedNames = unmatchedNames; previousImport.unmatchedReservations = unmatchedReservations
     return true
 end
@@ -592,7 +737,7 @@ end
 -- Saved raids own their durable loot records. Runtime award queues, lookup
 -- indexes and UI objects stay with their controllers and are never copied.
 local lootScalarFields = { "recordId", "sourceRecordId", "itemId", "name", "link", "icon", "count", "ordinaryReceipt", "awardHistoryKey", "tradedFrom", "tradedTo" }
-local memberScalarFields = { "name", "raidRank", "subgroup", "level", "class", "classFile", "zone", "online", "guildRank", "guildMember", "sr", "srSourceName" }
+local memberScalarFields = { "name", "raidRank", "subgroup", "level", "class", "classFile", "zone", "online", "guildRank", "guildMember", "sr", "srSourceName", "srException" }
 local function CopyLootRecords(source)
     local records, index, fieldIndex = {}, nil, nil
     for index = 1, table.getn(source or {}) do
@@ -699,6 +844,8 @@ function RaidResService.BuildSnapshot(attendance)
     local snapshot = { version = 4, id = attendance.snapshotId or importInfo.id, raidResId = importInfo.id, srUrl = importInfo.url, rollForExport = importInfo.rollForExport, raidName = attendance.raidName, source = importInfo.origin or "raidres", startedAt = attendance.sessionStartedAt or attendance.scannedAt, savedAt = attendance.lastSavedAt, updatedAt = time(), assignedCount = 0, unmatched = {}, missingNames = {}, members = {}, nextLootRecordId = tonumber(attendance.nextLootRecordId) or 0 }
     snapshot.lootRules = Raider.Database.CopyLootRules(Raider.Database.EnsureRaidLootRules(attendance))
     snapshot.saveOptions = CopySaveOptions(attendance.saveOptions)
+    snapshot.srCustomChanges = CopyChanges(attendance.srCustomChanges)
+    snapshot.srCustomReview = CopyChanges(importInfo.customReview)
     snapshot.createdAt = attendance.createdAt or attendance.sessionStartedAt or attendance.scannedAt
     snapshot.modifiedAt = attendance.modifiedAt or attendance.lastSavedAt or snapshot.updatedAt
     snapshot.endedAt, snapshot.displayName = attendance.endedAt, attendance.displayName
@@ -807,8 +954,10 @@ function RaidResService.RestoreSnapshot(snapshot)
         endedAt = snapshot.endedAt, displayName = snapshot.displayName,
         softReserveImport = { id = snapshot.raidResId or snapshot.id, origin = snapshot.source, url = snapshot.srUrl or "", rollForExport = snapshot.rollForExport or "", importedAt = snapshot.updatedAt, unmatchedNames = unmatchedNames, unmatchedReservations = unmatched, missingNames = missingNames },
         _loadedSnapshotId = snapshot.id,
+        srCustomChanges = CopyChanges(snapshot.srCustomChanges),
         _sessionDraft = true,
     }
+    attendance.softReserveImport.customReview = CopyChanges(snapshot.srCustomReview)
     return Raider.Database.StoreRaidAttendance(attendance)
 end
 

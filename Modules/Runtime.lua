@@ -57,7 +57,7 @@ function Runtime.RequestRaidScan()
     this, event, arg1 = previousThis, previousEvent, previousArg
     if not called then failure, count = tostring(count), nil end
     Runtime.RefreshViews()
-    if count == nil or count <= 0 then
+    if count == nil then
         failure = failure or "The physical raid roster is not ready. Retry or cancel the new session."
         Runtime.Print(failure)
         return false, failure
@@ -270,7 +270,7 @@ function Runtime.Initialize(host)
         showSavedPopup=function() UI.ShowOpaquePopup("BOOTY_RAIDER_ATTENDANCE_RELOAD") end,
         isLiveTrackingWanted=function() return BootyRaiderDB.raidLiveTrackingEnabled and true or false end,
         canStartNewRaid=function()
-            return Raider.Services.Raid.IsInRaid() and not Raider.raidSessionDraft and not Raider.raidScanReady and not Runtime.IsTestRaid()
+            return not Raider.raidSessionDraft and not Raider.raidScanReady and not Runtime.IsTestRaid()
         end,
         applyRaidPreset=Raider.Services.AutoLoot.ApplyRaidPreset,
     })

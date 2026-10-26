@@ -25,8 +25,8 @@ function RaidSessionController.Create(dependencies)
 
     function controller:CompletePendingRaidScan()
         local count, failure = session:CapturePendingRaid(PendingId, PendingName)
-        if count == nil or count <= 0 then return nil, failure or "The physical raid roster is not ready. Retry or cancel the new session." end
-        local live = dependencies.isLiveTrackingWanted()
+        if count == nil then return nil, failure or "The physical raid roster is not ready. Retry or cancel the new session." end
+        local live = count > 0 and dependencies.isLiveTrackingWanted()
         state.pendingRaidSessionId = nil
         state.pendingRaidName = nil
         state.raidScanReady = true

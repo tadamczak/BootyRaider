@@ -306,6 +306,7 @@ function RaidService.GetInvalidSoftReserveItemIds(member, rules, contestedItems)
     local invalid = {}
     local itemIds = member and member.srItemIds
     if not itemIds then return invalid end
+    if member.srException == true then return invalid end
     rules = rules or Raider.Database.GetLootRules()
     local rank = GetSoftReserveRank(member)
     local rule = rules and rules[rank]
@@ -391,7 +392,11 @@ function RaidService.GetSoftReserveRollRights(itemLink)
                 local name = string.lower(member.name)
                 local displayRank = Raider.Services.RankPolicy.GetDisplayName(member.guildRank)
                 rankNames[name] = (displayRank ~= member.guildRank and displayRank) or (rank and rank ~= "" and rank) or (member.guildRank and member.guildRank ~= "" and member.guildRank) or "Guest"
-                if (rule and rule.sr) or (not rule and defaultSoftReserveRanks[rank]) then
+                local exception = false
+                if member.srException == true then
+                    for _, reservedId in ipairs(itemIds or {}) do if tonumber(reservedId) == itemId then exception = true; break end end
+                end
+                if exception or (rule and rule.sr) or (not rule and defaultSoftReserveRanks[rank]) then
                     rankRights[name] = true
                 end
                 if (rule and rule.reyCoin) or (not rule and defaultReyCoinRanks[rank]) then reyCoinRights[name] = true end
@@ -409,7 +414,7 @@ function RaidService.GetSoftReserveRollRights(itemLink)
                         local rank = GetSoftReserveRank(member)
                         local rule = rules and rules[rank]
                         local canContested = (rule and rule.highlyContested) or (not rule and defaultHighlyContestedRanks[rank])
-                        if rankRights[name] and (not contested or canContested) then
+                        if rankRights[name] and (member.srException == true or not contested or canContested) then
                             hasReserve = true
                             allowed[name] = true
                             names[table.getn(names) + 1] = member.name
@@ -1150,7 +1155,7 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
                 local previousMember = collection[previousIndex]
                 local key = string.lower(previousMember.name or "")
                 previousLoot[key] = previousMember.loot or {}
-                previousReserves[key] = { text = previousMember.sr or "", itemIds = previousMember.srItemIds, sourceName = previousMember.srSourceName }
+                previousReserves[key] = { text = previousMember.sr or "", itemIds = previousMember.srItemIds, sourceName = previousMember.srSourceName, exception = previousMember.srException }
                 previousReyCoin[key] = previousMember.reyCoinUsedAt
                 previousReyCoinItems[key] = previousMember.reyCoinItemLink
                 previousSrConsumed[key] = previousMember.srConsumedAt
@@ -1193,6 +1198,7 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
             sr = previousReserve and previousReserve.text or "",
             srItemIds = previousReserve and previousReserve.itemIds or nil,
             srSourceName = previousReserve and previousReserve.sourceName or nil,
+            srException = previousReserve and previousReserve.exception or nil,
             srConsumedAt = previousSrConsumed[string.lower(name)],
             reyCoinUsedAt = previousReyCoin[string.lower(name)],
             reyCoinItemLink = previousReyCoinItems[string.lower(name)],
@@ -1238,6 +1244,7 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         sessionStartedAt = previousAttendance and previousAttendance.sessionStartedAt or nil,
         lastSavedAt = previousAttendance and previousAttendance.lastSavedAt or nil,
         softReserveImport = preservePrevious and previousAttendance.softReserveImport or nil,
+        srCustomChanges = preservePrevious and previousAttendance.srCustomChanges or nil,
         lootRules = preservePrevious and previousAttendance.lootRules or nil,
         saveOptions = preservePrevious and previousAttendance.saveOptions or nil,
         createdAt = preservePrevious and previousAttendance.createdAt or nil,
@@ -1574,6 +1581,18 @@ function RaidService.MoveMemberToSlot(member, targetMember, targetGroup)
     end
     if targetIndex and memberGroup == targetMemberGroup then return true end
     return RaidService.MoveMemberToGroup(member, targetGroup)
+end
+
+function RaidService.CanConvertPartyToRaid()
+    return type(ConvertToRaid) == "function" and type(GetNumPartyMembers) == "function" and GetNumPartyMembers() > 0
+        and GetNumRaidMembers() == 0 and type(IsPartyLeader) == "function" and IsPartyLeader() and true or false
+end
+
+function RaidService.ConvertPartyToRaid()
+    if not RaidService.CanConvertPartyToRaid() then return false, "Only the leader of a party can convert it to a raid." end
+    local called, result = pcall(ConvertToRaid)
+    if not called or result == false then return false, "Raid conversion failed: " .. tostring(result) end
+    return true
 end
 
 function RaidService.GetFilterValues(members)
