@@ -87,3 +87,5 @@ Click the displayed **Raid Type** during a real raid session to choose another r
 Loot Master Tools lists LM Mode, LM Config, New Roll, Reycoin list, Import SR, Share SR link, Set Loot Rules, Send Loot Rules and Reset Loot History. LM Config opens the same configuration with or without LM Mode. Manual Add/Edit SR selects one item; choosing another replaces it. Imported multiple reservations remain intact until you save an edit. Gold Add, Edit and Remove icons occupy space only when visible. The raid type stays visible when header actions wrap; a hidden Convert to Raid reserves no space.
 
 Changing the active Raid Type also selects its auto-loot exclusion preset and updates an open LM Config window. Previous preset entries are replaced while your own exclusions remain. Other clears the preset entries. The save status stays beside the raid type when toolbar buttons wrap. Standalone messages use `[BootyRaider]`; `/bootyraider help` explains the common commands.
+
+LM Config opened from Loot Master Tools can be dragged like Reycoin list. Add SR uses a gold plus, Remove uses a trash bin, and edit actions use the same gold wrench.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.32 — 2026-10-26
+
+- Allow dragging standalone LM Config; use a gold plus for Add SR, a trash bin for Remove and the same gold wrench for edit actions.
+
 ## 0.1.0-dev.31 — 2026-10-26
 
 - Update exclusion presets and open LM Config when changing raid type, preserving custom exclusions; keep save status beside the raid type when actions wrap.
