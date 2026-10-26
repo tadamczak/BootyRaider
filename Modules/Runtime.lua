@@ -9,7 +9,7 @@ end
 
 function Runtime.Print(message)
     if Runtime.host and Runtime.host.Print then Runtime.host.Print(message)
-    elseif DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("BootyRaider: " .. tostring(message)) end
+    elseif DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("[BootyRaider] " .. tostring(message)) end
 end
 function Runtime.PrintAction(message)
     if Raider.Database.GetSetting("chatActionLogs") then Runtime.Print(message) end
@@ -265,7 +265,8 @@ function Runtime.Initialize(host)
     Raider.Database.onRaidAttendanceChanged=Raider.Services.Raid.OnRaidAttendanceChanged
     Raider.Database.onRaidAttendanceMetadataChanged=Raider.Services.Raid.PreserveLootSession
     Runtime.session=Raider.Services.RaidSession.Create({database=Raider.Database,raid=Raider.Services.Raid,raidRes=Raider.Services.RaidRes,
-        raidStatistics=Raider.Services.RaidStatistics,testRaid=Raider.Services.TestRaid,now=function() return time() end})
+        raidStatistics=Raider.Services.RaidStatistics,testRaid=Raider.Services.TestRaid,now=function() return time() end,
+        autoLoot=Raider.Services.AutoLoot,onRaidTypeChanged=function() Raider.OnSettingChanged("lmAutoLootPresets") end})
     Runtime.sessionController=Raider.Modules.RaidSessionController.Create({state=Raider,session=Runtime.session,
         setHistoricalLoaded=function(value) Runtime.historicalLoaded=value and true or false end,
         getHistoricalLoaded=function() return Runtime.historicalLoaded end,

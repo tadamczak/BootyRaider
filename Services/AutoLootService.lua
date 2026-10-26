@@ -73,6 +73,11 @@ function AutoLoot.ApplyPresets(text, mask)
     return table.concat(entries, ", ")
 end
 
+function AutoLoot.GetRaidPreset(raidName, exclusions)
+    local mask = raidPresetMasks[raidName] or 0
+    return mask, AutoLoot.ApplyPresets(exclusions, mask)
+end
+
 function AutoLoot.ApplyRaidPreset(raidName)
     Raider.Database.Ensure()
     local mask = raidPresetMasks[raidName] or 0

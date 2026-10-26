@@ -101,7 +101,7 @@ function Screen.Create(parent, host)
                 choice.raidName=name;table.insert(panel.options,choice)
                 choice:SetScript("OnClick",function()
                     local ok,reason=Runtime.session:SetRaidType(this.raidName,selectedAttendance)
-                    if not ok then Runtime.PrintAction(reason);panel:Hide();return end
+                    if not ok then Runtime.Print(reason);panel:Hide();return end
                     if page.srEditor then page.srEditor:Hide() end
                     if page.srReview then page.srReview:Hide() end
                     panel:Hide();Refresh()
@@ -121,6 +121,7 @@ function Screen.Create(parent, host)
             else raidTypeButton:Hide();if page.raidTypePanel then page.raidTypePanel:Hide() end end
         end
         if page.lootMasterController then page.lootMasterController.Refresh() end
+        if page.lmConfigPanel:IsShown() and page.RefreshAutoLootConfig then page.RefreshAutoLootConfig() end
     end
     Raid.RegisterResetLootDialog({getAttendance=Runtime.GetAttendance,clearSelection=function() selectedName=nil end,
         refresh=Refresh,printMessage=Runtime.PrintAction})

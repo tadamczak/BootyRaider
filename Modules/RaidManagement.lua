@@ -3085,7 +3085,7 @@ function RaidManagement.LayoutActions(page)
             if iconOnly then page.classicSaved:SetText(savedText == "Not saved yet" and "Not saved" or "Saved") end
             metaWidth = math.min(math.max(42, metaLabel:GetStringWidth() + 4), math.max(1, (pageWidth - 36 - savedWidth) * 0.45))
             left = PlaceRaidHeaderLabel(page, page.classicMeta, metaWidth, top, left)
-            left = PlaceRaidHeaderLabel(page, page.classicRaidName, math.max(1, pageWidth - savedWidth - metaWidth - 36), top, left)
+            left = PlaceRaidHeaderLabel(page, page.classicRaidName, math.min(nameWidth, math.max(1, pageWidth - savedWidth - metaWidth - 36)), top, left)
             left = PlaceRaidHeaderButton(page, page.classicSaved, savedWidth, top, left, scale)
             left = 6
             local actionsWidth = 108 + 90 + (showIssues and 96 or 0)
@@ -4465,6 +4465,17 @@ function RaidManagement.CreateAutoLootControls(page, view)
     local modeClick, rarityClick = mode:GetScript("OnClick"), rarity:GetScript("OnClick")
     mode:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); modeClick() end)
     rarity:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); rarityClick() end)
+    local shownPresetMask, shownExclusions
+    page.RefreshAutoLootConfig = function(force)
+        local mask=Raider.Database.GetSetting("lmAutoLootPresets")
+        local text=Raider.Database.GetSetting("lmAutoLootExceptions")
+        if force or mask~=shownPresetMask or text~=shownExclusions then
+            shownPresetMask,shownExclusions=mask,text
+            RefreshPresets()
+            if presetPanel:IsShown() then UI.FilterPanel.Refresh(presetPanel, presetNames, presetSelected, SavePresets, false, true) end
+            if exceptions:GetText()~=text then exceptions:SetText(text) end
+        end
+    end
     panel:SetScript("OnShow", function()
         LayoutConfig()
         if page.lootMasterController then page.lootMasterController.ReanchorPanels() end
@@ -4479,7 +4490,7 @@ function RaidManagement.CreateAutoLootControls(page, view)
         inclusionTooltip:SetFrameStrata(strata); inclusionTooltip:SetFrameLevel(level)
         tooltipHit:SetFrameStrata(strata); tooltipHit:SetFrameLevel(level)
         presets:SetFrameStrata(strata); presets:SetFrameLevel(level)
-        RefreshPresets()
+        page.RefreshAutoLootConfig(true)
         local value = Raider.Database.GetSetting("lmAutoLootMode")
         mode:SetText(value == "auto" and "Auto Loot" or value == "shift" and "Shift Loot" or "Off")
         RefreshRarity(); exceptions:SetText(Raider.Database.GetSetting("lmAutoLootExceptions"))

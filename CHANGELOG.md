@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.31 — 2026-10-26
+
+- Update exclusion presets and open LM Config when changing raid type, preserving custom exclusions; keep save status beside the raid type when actions wrap.
+
 ## 0.1.0-dev.30 — 2026-10-26
 
 - Order Loot Master Tools and share LM Config; center dropdown captions, limit manual SR to one item, use compact gold SR actions and retain raid type when header actions wrap.

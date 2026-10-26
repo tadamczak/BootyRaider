@@ -32,11 +32,25 @@ function Session:SetRaidType(raidName, expectedAttendance)
     local replacement = {}
     for key, value in pairs(attendance) do replacement[key] = value end
     replacement.raidName = raidName
-    -- Keep pending awards attached to this session while invalidating stale editors/save confirmations.
-    if dependencies.database.onRaidAttendanceMetadataChanged then
-        dependencies.database.onRaidAttendanceMetadataChanged(attendance, replacement)
+    local database = dependencies.database
+    local store = database.Ensure()
+    local oldMask, oldExclusions = store.lmAutoLootPresets, store.lmAutoLootExceptions
+    local mask, exclusions = dependencies.autoLoot.GetRaidPreset(raidName, oldExclusions)
+    local function Publish(previous, current)
+        if database.onRaidAttendanceMetadataChanged then database.onRaidAttendanceMetadataChanged(previous, current) end
+        database.StoreRaidAttendance(current)
+        if dependencies.onRaidTypeChanged then dependencies.onRaidTypeChanged() end
     end
-    dependencies.database.StoreRaidAttendance(replacement)
+    -- Publish only after both preset fields and the type have their final values.
+    -- Preserve the loot-session owner; a failed refresh restores the same state.
+    store.lmAutoLootPresets, store.lmAutoLootExceptions = mask, exclusions
+    local ok, failure = pcall(Publish, attendance, replacement)
+    if not ok then
+        store.lmAutoLootPresets, store.lmAutoLootExceptions = oldMask, oldExclusions
+        local restored, reason = pcall(Publish, replacement, attendance)
+        if not restored then return false, tostring(failure) .. " Restore failed: " .. tostring(reason) end
+        return false, tostring(failure)
+    end
     self.preparedSave = nil
     return true
 end
