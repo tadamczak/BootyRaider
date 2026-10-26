@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.29 — 2026-10-26
+
+- Change the active raid type from its heading while preserving session data; keep Search inline when filters fit at native control heights.
+
 ## 0.1.0-dev.28 — 2026-10-26
 
 - Count named SR toward CSR without item IDs, ignoring case and extra spaces; preserve award resets and source archiving.

@@ -81,9 +81,45 @@ function Screen.Create(parent, host)
         getData=Runtime.GetAttendance,getSelectedName=function() return selectedName end,getSortKey=function() return sortKey end,
         getSettings=function() return BootyRaiderDB end,
     })
+    local raidTypeButton=UI.CreateControl(nil,page)
+    page.raidTypeButton=raidTypeButton
+    UI.AttachTooltip(raidTypeButton,"Raid Type","Click to change the type of this session. Existing SR and loot are preserved.")
+    raidTypeButton:Hide()
+    local selectedAttendance
+    raidTypeButton:SetScript("OnClick",function()
+        if page.raidTypePanel and page.raidTypePanel:IsShown() then page.raidTypePanel:Hide();return end
+        selectedAttendance=Runtime.GetAttendance()
+        if Runtime.IsTestRaid() or not Raider.Services.RaidRes.HasSession(selectedAttendance) then return end
+        if not page.raidTypePanel then
+            local names=Raider.Services.RaidStatistics.GetRaidNames()
+            local panel=UI.CreateDropdownPanel(page,raidTypeButton,200,16+table.getn(names)*24,10)
+            page.raidTypePanel=panel
+            panel.options={}
+            for _,name in ipairs(names) do
+                local choice=UI.CreateButton(panel,nil,name,184,22)
+                choice:SetPoint("TOPLEFT",panel,"TOPLEFT",8,-8-table.getn(panel.options)*24)
+                choice.raidName=name;table.insert(panel.options,choice)
+                choice:SetScript("OnClick",function()
+                    local ok,reason=Runtime.session:SetRaidType(this.raidName,selectedAttendance)
+                    if not ok then Runtime.PrintAction(reason);panel:Hide();return end
+                    if page.srEditor then page.srEditor:Hide() end
+                    if page.srReview then page.srReview:Hide() end
+                    panel:Hide();Refresh()
+                end)
+            end
+        end
+        page.raidTypePanel:Show()
+    end)
     Refresh=function()
         if not page:IsVisible() and not (page.lootMasterController and page.lootMasterController.IsVisible()) then return end
-        if page:IsVisible() then Raid.RefreshPage(renderer) end
+        if page:IsVisible() then
+            Raid.RefreshPage(renderer)
+            local attendance=Runtime.GetAttendance()
+            local label=UI.IsClassicSkin() and page.classicRaidName or page.refreshControls.title
+            if not Runtime.IsTestRaid() and Raider.Services.RaidRes.HasSession(attendance) and label:IsShown() then
+                raidTypeButton:ClearAllPoints();raidTypeButton:SetAllPoints(label);raidTypeButton:Show()
+            else raidTypeButton:Hide();if page.raidTypePanel then page.raidTypePanel:Hide() end end
+        end
         if page.lootMasterController then page.lootMasterController.Refresh() end
     end
     Raid.RegisterResetLootDialog({getAttendance=Runtime.GetAttendance,clearSelection=function() selectedName=nil end,

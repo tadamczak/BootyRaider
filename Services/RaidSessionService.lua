@@ -19,6 +19,28 @@ function Session:RaidIdExists(raidId)
     return database.HasSoftReserveSnapshot(raidId) or database.HasRaidStatistic(raidId)
 end
 
+function Session:SetRaidType(raidName, expectedAttendance)
+    local dependencies = self.dependencies
+    local attendance = dependencies.database.GetRaidAttendance()
+    if dependencies.testRaid.IsActive() then return false, "End the test raid before editing a saved session." end
+    if not dependencies.raidRes.HasSession(attendance) then return false, "Start a raid session first." end
+    if attendance ~= expectedAttendance then return false, "The session changed. Select the raid type again." end
+    local valid = false
+    for _, name in ipairs(dependencies.raidStatistics.GetRaidNames()) do if name == raidName then valid = true end end
+    if not valid then return false, "Select an available raid type." end
+    if attendance.raidName == raidName then return true end
+    local replacement = {}
+    for key, value in pairs(attendance) do replacement[key] = value end
+    replacement.raidName = raidName
+    -- Keep pending awards attached to this session while invalidating stale editors/save confirmations.
+    if dependencies.database.onRaidAttendanceMetadataChanged then
+        dependencies.database.onRaidAttendanceMetadataChanged(attendance, replacement)
+    end
+    dependencies.database.StoreRaidAttendance(replacement)
+    self.preparedSave = nil
+    return true
+end
+
 local function SaveRequest(options, attendance)
     if type(options) ~= "table" then
         local enabled = options and true or false

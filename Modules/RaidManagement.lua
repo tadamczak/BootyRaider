@@ -1051,7 +1051,7 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
     local extraRows = settings.raidListShowFilters and filterBottom - 31 or 0
     if settings.raidListShowFilters and settings.raidListShowSearch then
         local remaining = available - filterWidth - 10 - controls.refreshButton:GetWidth() - 4
-        if filterBottom == 31 and remaining >= 90 then
+        if filterWidth <= available and remaining >= 90 then
             controls.searchBox:SetPoint("LEFT", controls.resetButton, "RIGHT", 10, 0)
             searchWidth = remaining
         else
@@ -1290,7 +1290,7 @@ function RaidManagement.RefreshPage(renderer)
             page.classicActionOffset = 0
         else
             page.refreshControls.title:Show(); page.classicRaidName:Hide(); page.classicMeta:Hide(); page.classicSaved:Hide(); page.classicIssues:Hide()
-            page.refreshControls.title:SetText("Raid")
+            page.refreshControls.title:SetText(attendance.raidName or "Raid")
         end
     else
         page.refreshControls.title:Show(); page.classicRaidName:Hide(); page.classicMeta:Hide(); page.classicSaved:Hide(); page.classicIssues:Hide()
@@ -3061,13 +3061,14 @@ function RaidManagement.LayoutActions(page)
         local top, left = -9 - sectionOffset, 6
         local scale = 1
         if compact then
-            page.classicRaidName:Hide()
+            page.classicRaidName:Show()
             metaLabel:SetText(raidId)
             local iconOnly = pageWidth < 300
             local savedWidth = iconOnly and 72 or 108
             if iconOnly then page.classicSaved:SetText(savedText == "Not saved yet" and "Not saved" or "Saved") end
-            metaWidth = math.min(math.max(42, metaLabel:GetStringWidth() + 4), math.max(1, pageWidth - 20 - savedWidth))
+            metaWidth = math.min(math.max(42, metaLabel:GetStringWidth() + 4), math.max(1, (pageWidth - 36 - savedWidth) * 0.45))
             left = PlaceRaidHeaderLabel(page, page.classicMeta, metaWidth, top, left)
+            left = PlaceRaidHeaderLabel(page, page.classicRaidName, math.max(1, pageWidth - savedWidth - metaWidth - 36), top, left)
             left = PlaceRaidHeaderButton(page, page.classicSaved, savedWidth, top, left, scale)
             left = 6
             local actionsWidth = 108 + 90 + (showIssues and 96 or 0)
@@ -3423,6 +3424,7 @@ function RaidManagement.CreateLifecycle(options)
         if options.page.memberMenu then options.page.memberMenu:Hide() end
         if options.page.memberMenuDismiss then options.page.memberMenuDismiss:Hide() end
         if not detached and options.page.softReserveImportDialog then options.page.softReserveImportDialog:Hide() end
+        if options.page.raidTypePanel then options.page.raidTypePanel:Hide() end
         if options.page.srEditor then options.page.srEditor:Hide() end
         if options.page.srReview then options.page.srReview:Hide() end
         if options.page.softReserveFixDialog and options.page.softReserveFixDialog.Close then options.page.softReserveFixDialog:Close() end
