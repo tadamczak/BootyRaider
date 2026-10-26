@@ -1265,12 +1265,7 @@ function RaidManagement.RefreshPage(renderer)
             page.raidInfoButton:ClearAllPoints(); page.raidInfoButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, -9 - page.classicSectionOffset); page.raidInfoButton:Show()
         end
     end
-    if page.convertRaidButton then
-        if lootMasterMode then page.convertRaidButton:Hide() else
-            page.convertRaidButton:Show()
-            if Raider.Services.Raid.CanConvertPartyToRaid() then page.convertRaidButton:Enable() else page.convertRaidButton:Disable() end
-        end
-    end
+    RaidManagement.UpdateConvertRaidButton(page, lootMasterMode)
     local attendance = renderer.getData()
     local issues
     local importInfo = attendance and attendance.softReserveImport
@@ -2076,6 +2071,14 @@ local function SetListTextColor(row, color, shade)
     local r, g, b = color[1] * shade, color[2] * shade, color[3] * shade
     row.name:SetTextColor(r, g, b); row.level:SetTextColor(r, g, b); row.status:SetTextColor(r, g, b)
     row.group:SetTextColor(r, g, b); row.class:SetTextColor(r, g, b); row.rank:SetTextColor(r, g, b); row.sr:SetTextColor(r, g, b)
+end
+
+function RaidManagement.UpdateConvertRaidButton(page, lootMasterMode)
+    local button = page.convertRaidButton
+    if not button then return end
+    if lootMasterMode or Raider.Services.Raid.IsInRaid() then button:Hide(); return end
+    button:Show()
+    Raider.UI.Components.SetButtonEnabled(button, Raider.Services.Raid.CanConvertPartyToRaid())
 end
 
 function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMasterIndex, lootMasterMode, tableLeft, shorten)

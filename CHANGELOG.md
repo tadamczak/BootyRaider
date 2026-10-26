@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-dev.28 — 2026-10-26
+
+- Count named SR toward CSR without item IDs, ignoring case and extra spaces; preserve award resets and source archiving.
+- Grey out unavailable Convert to Raid and hide it while already in a raid; update on party and leader changes.
+
 ## 0.1.0-dev.27 — 2026-10-26
 
 - Add uncatalogued SR items by name and match them without case or extra-space sensitivity, including real item links and confirmed receipts.

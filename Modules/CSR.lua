@@ -1,6 +1,16 @@
 local Raider = BootyRaider
 local UI = Raider.UI.Components
 
+local function ItemLabel(reference, name)
+    if type(reference) == "number" then return UI.GetItemLabel(reference) end
+    return name or reference or "Unknown item"
+end
+
+local function ItemTooltip()
+    if this.itemId then UI.ShowItemTooltip(this)
+    elseif this.itemName then UI.AnchorTooltip(this); GameTooltip:SetText(this.itemName); GameTooltip:Show() end
+end
+
 Raider.Modules = Raider.Modules or {}
 local CSR = {}
 Raider.Modules.CSR = CSR
@@ -268,7 +278,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     end
     local function ItemText(player)
         local count = (tonumber(player.items) or 0) + (tonumber(player.archivedItems) or 0)
-        return UI.GetItemLabel(player.itemId) .. (count > 1 and (" x " .. count) or "")
+        return ItemLabel(player.itemId, player.itemName) .. (count > 1 and (" x " .. count) or "")
     end
     local function KeyValue(node, field)
         local player = node.player
@@ -276,7 +286,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         if field == "count" then return table.getn(node.children or {}) end
         if field == "item" then
             local itemId = player and player.itemId or node.itemId
-            local itemName = GetItemInfo(itemId)
+            local itemName = type(itemId) == "number" and GetItemInfo(itemId) or itemId
             return string.lower(itemName or ("Item " .. tostring(itemId)))
         end
         return string.lower(player and player.name or node.name or "")
@@ -334,7 +344,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                 local key = self.groupMode .. ":" .. (self.groupMode == "player" and string.lower(player.name or "") or tostring(player.itemId))
                 local group = self.groups[key]
                 if not group then
-                    group = { kind = "group", key = key, name = player.name, class = player.class, itemId = player.itemId, children = {}, csr = 0 }
+                    group = { kind = "group", key = key, name = player.name, class = player.class, itemId = player.itemId, itemName = player.itemName, children = {}, csr = 0 }
                     self.groups[key] = group; table.insert(self.nodes, group)
                 end
                 group.csr = group.csr + player.csr; table.insert(group.children, node)
@@ -375,7 +385,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         row.classIcon = UI.CreateClassIcon(row.heading, 16)
         row.iconRegion = UI.CreateTexture(row.heading, nil, "ARTWORK"); row.iconRegion:SetWidth(19); row.iconRegion:SetHeight(19)
         row.itemHit = UI.CreateControl(nil, row.heading); row.itemHit.ownerRow = row
-        row.itemHit:SetScript("OnEnter", function() UI.ShowItemTooltip(this) end)
+        row.itemHit:SetScript("OnEnter", ItemTooltip)
         row.itemHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row.itemHit:SetScript("OnClick", function() if this.ownerRow.node then controller:Toggle(this.ownerRow.node) end end)
         row:SetScript("OnClick", OnRowClick); self.rows[index] = row
@@ -396,7 +406,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         row.classIcon = UI.CreateClassIcon(row, 16)
         row.iconRegion = UI.CreateTexture(row, nil, "ARTWORK"); row.iconRegion:SetWidth(19); row.iconRegion:SetHeight(19)
         row.itemHit = UI.CreateControl(nil, row); row.itemHit.ownerRow = row
-        row.itemHit:SetScript("OnEnter", function() UI.ShowItemTooltip(this) end)
+        row.itemHit:SetScript("OnEnter", ItemTooltip)
         row.itemHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row.itemHit:SetScript("OnClick", function() if this.ownerRow.node then controller:Toggle(this.ownerRow.node) end end)
         row.view = UI.CreateIconButton(row, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\view.tga", 20, 2, UI.Theme.colors.goldIcon)
@@ -510,8 +520,9 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     local function ItemIcon(row, itemId, x)
         local owner = row.heading or row
         row.itemId = itemId; row.iconRegion:ClearAllPoints(); row.iconRegion:SetPoint("TOPLEFT", owner, "TOPLEFT", x, -2)
-        row.itemHit.itemId, row.itemHit.iconRegion = itemId, row.iconRegion
-        row.iconRegion:SetTexture(type(GetItemIcon) == "function" and GetItemIcon(itemId) or "Interface\\Icons\\INV_Misc_QuestionMark")
+        row.itemHit.itemId, row.itemHit.iconRegion = tonumber(itemId), row.iconRegion
+        row.itemHit.itemName = type(itemId) == "string" and itemId or nil
+        row.iconRegion:SetTexture(tonumber(itemId) and type(GetItemIcon) == "function" and GetItemIcon(itemId) or "Interface\\Icons\\INV_Misc_QuestionMark")
         row.iconRegion:Show(); row.itemHit:Show()
     end
     local function PlayerColor(label, class)
@@ -648,7 +659,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                 else
                     local itemMode = self.groupMode == "item"
                     UI.Table.Cell(row.name, row.heading, textX, nameWidth - textX - 8, 24,
-                        itemMode and UI.GetItemLabel(node.itemId) or node.name)
+                        itemMode and ItemLabel(node.itemId, node.itemName) or node.name)
                     UI.Table.Cell(row.label, row.heading, nameWidth + 8, itemWidth - 16, 24, tostring(table.getn(node.children)))
                     UI.Table.Cell(row.csr, row.heading, columnsWidth - csrWidth, csrWidth - 8, 24, tostring(node.csr))
                     if itemMode then

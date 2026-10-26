@@ -1594,8 +1594,9 @@ function RaidService.MoveMemberToSlot(member, targetMember, targetGroup)
 end
 
 function RaidService.CanConvertPartyToRaid()
+    local leader = type(IsPartyLeader) == "function" and IsPartyLeader()
     return type(ConvertToRaid) == "function" and type(GetNumPartyMembers) == "function" and GetNumPartyMembers() > 0
-        and GetNumRaidMembers() == 0 and type(IsPartyLeader) == "function" and IsPartyLeader() and true or false
+        and GetNumRaidMembers() == 0 and leader ~= nil and leader ~= false and leader ~= 0
 end
 
 function RaidService.ConvertPartyToRaid()

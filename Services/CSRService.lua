@@ -48,15 +48,41 @@ local function GetLootCount(member)
     return 0, nil
 end
 
-local function GetItemId(item, scalar)
-    if scalar then return tonumber(item) end
-    if type(item) == "table" then return tonumber(item.itemId or item.id) end
-    return tonumber(item)
+-- Numeric keys retain their existing contract. A name-only key is the full
+-- normalized name; it never reaches native item APIs as an invented item ID.
+function CSR.NormalizeItemReference(value)
+    local id = tonumber(value)
+    if id then
+        if id >= 1 and id <= 2147483647 and id == math.floor(id) then return id end
+        return nil
+    end
+    local name = Raider.Services.ItemReference.NormalizeName(value)
+    return name and string.lower(name) or nil
+end
+
+local function ItemIdentity(item, scalar)
+    local reference, name
+    if not scalar and type(item) == "table" then
+        reference = tonumber(item.itemId or item.id) or Raider.Services.ItemReference.Id(item.link or item.itemLink)
+        name = Raider.Services.ItemReference.Name(item.name or item.itemName or item.link or item.itemLink)
+    else reference = item end
+    local key = CSR.NormalizeItemReference(reference) or CSR.NormalizeItemReference(name)
+    if not name and type(key) == "string" then name = Raider.Services.ItemReference.NormalizeName(reference) end
+    return key, name
 end
 
 local function GetClass(member)
     if type(member.classFile) == "string" and member.classFile ~= "" then return member.classFile end
     return member.class
+end
+
+local function ConsumeSources(state, key)
+    if not key or state.receivedThisRaid[key] then return end
+    state.receivedThisRaid[key] = true
+    local sources = state.sources[key]
+    local count = state.sourceCounts[key] or 0
+    for index = (state.awardedThrough[key] or 0) + 1, count do sources[index].status = "AWARDED" end
+    state.awardedThrough[key] = count
 end
 
 function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selectedRaids, searchText, showArchived)
@@ -94,6 +120,30 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
         return left < right
     end)
 
+    -- Saved labels bridge manual names to known IDs without depending on the
+    -- client's changing cache. Ambiguous names never merge two distinct IDs.
+    local nameIds, labels = {}, {}
+    for _, raid in ipairs(ordered) do
+        for _, member in ipairs(raid.members or {}) do
+            local _, reserves, scalar = GetReserveCount(member)
+            local _, loot = GetLootCount(member)
+            for collectionIndex = 1, 2 do
+                local values = collectionIndex == 1 and reserves or loot
+                for _, item in ipairs(values or {}) do
+                    local key, name = ItemIdentity(item, collectionIndex == 1 and scalar)
+                    if key and name then
+                        labels[key] = labels[key] or name
+                        local nameKey = CSR.NormalizeItemReference(name)
+                        if type(key) == "number" and nameKey then
+                            if nameIds[nameKey] == nil then nameIds[nameKey] = key
+                            elseif nameIds[nameKey] ~= key then nameIds[nameKey] = false end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local function Resolve(key) return nameIds[key] or key end
     local raidIndex, memberIndex, itemIndex
     for raidIndex = 1, table.getn(ordered) do
         local raid = ordered[raidIndex]
@@ -115,7 +165,8 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                 if hasRights then
                     for itemIndex = 1, reserveCount do
                         local reserve = reserveItems[itemIndex]
-                        local itemId = GetItemId(reserve, scalarReserves)
+                        local originalKey = ItemIdentity(reserve, scalarReserves)
+                        local itemId = Resolve(originalKey)
                         if itemId then
                             local count = type(reserve) == "table" and tonumber(reserve.count) or 1
                             count = count or 1
@@ -124,15 +175,15 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                             local sources = state.sources[itemId]
                             local sourceCount = state.sourceCounts[itemId] or 0
                             local previous = sources[sourceCount]
-                            if previous and previous.id == raid.id and previous.savedAt == savedAt then
+                            if previous and previous.id == raid.id and previous.savedAt == savedAt and previous.itemId == originalKey then
                                 previous.count = previous.count + count
                             else
                                 local archivedItems = type(raid.csrArchived) == "table" and raid.csrArchived[key]
-                                local manuallyArchived = type(archivedItems) == "table" and archivedItems[itemId] == true
+                                local manuallyArchived = type(archivedItems) == "table" and archivedItems[originalKey] == true
                                 local expired = savedAt < cutoff
                                 sourceCount = sourceCount + 1; state.sourceCounts[itemId] = sourceCount
                                 sources[sourceCount] = { id = raid.id, raidName = raid.raidName or "Other", savedAt = savedAt,
-                                    playerName = state.name, itemId = itemId, manuallyArchived = manuallyArchived,
+                                    playerName = state.name, itemId = originalKey, manuallyArchived = manuallyArchived,
                                     expired = expired, expiresAt = savedAt + WINDOW_SECONDS,
                                     status = (expired or manuallyArchived) and "ARCHIVED" or "ACTIVE", count = count }
                             end
@@ -143,16 +194,11 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                 -- provenance remains available in the archived ledger. Process
                 -- reserves first so a reserved-and-received item is retained too.
                 for itemIndex = 1, lootCount do
-                    local itemId = GetItemId(lootItems[itemIndex], false)
-                    if itemId and not state.receivedThisRaid[itemId] then
-                        state.receivedThisRaid[itemId] = true
-                        local sources = state.sources[itemId]
-                        local sourceCount = state.sourceCounts[itemId] or 0
-                        for index = (state.awardedThrough[itemId] or 0) + 1, sourceCount do
-                            sources[index].status = "AWARDED"
-                        end
-                        state.awardedThrough[itemId] = sourceCount
-                    end
+                    local key, name = ItemIdentity(lootItems[itemIndex], false)
+                    ConsumeSources(state, Resolve(key))
+                    -- Even an ambiguous label can consume its name-only bucket;
+                    -- it must never consume a different known numeric ID.
+                    ConsumeSources(state, name and CSR.NormalizeItemReference(name))
                 end
             end
         end
@@ -178,7 +224,7 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                 for index = sourceCount, kept + 1, -1 do sources[index] = nil end
                 if activeCount + archivedCount > 0 then
                     playerCount = playerCount + 1
-                    players[playerCount] = { name = state.name, class = state.class, itemId = itemId, items = activeCount, archivedItems = archivedCount,
+                    players[playerCount] = { name = state.name, class = state.class, itemId = itemId, itemName = labels[itemId], items = activeCount, archivedItems = archivedCount,
                         csr = activeCount * POINTS_PER_UNSUCCESSFUL_SR, raids = sources }
                 end
             end
@@ -186,7 +232,11 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
     end
     table.sort(players, function(a, b)
         local left, right = string.lower(a.name), string.lower(b.name)
-        if left == right then return (tonumber(a.itemId) or 0) < (tonumber(b.itemId) or 0) end
+        if left == right then
+            if type(a.itemId) ~= type(b.itemId) then return type(a.itemId) == "number" end
+            if type(a.itemId) == "number" and type(b.itemId) == "number" then return a.itemId < b.itemId end
+            return tostring(a.itemId) < tostring(b.itemId)
+        end
         return left < right
     end)
     summary.cutoff = cutoff

@@ -489,23 +489,21 @@ function Database.SetCSRSourceArchived(raidId, playerName, itemId, archived, sel
     if not allowed then return false, reason end
     if type(archived) ~= "boolean" then return false, "Choose Archive or Activate." end
     if selectedRaids ~= nil and type(selectedRaids) ~= "table" then return false, "Invalid raid filter." end
-    itemId = tonumber(itemId)
-    if not itemId or itemId < 1 or itemId > 2147483647 or itemId ~= math.floor(itemId) then
-        return false, "A valid item ID is required."
-    end
+    local service = Raider.Services and Raider.Services.CSR
+    if not service then return false, "CSR history is unavailable." end
+    itemId = service.NormalizeItemReference(itemId)
+    if not itemId then return false, "A valid item ID or full item name is required." end
     Database.Ensure()
     local canonical, entry = FindSavedRaid(BootyRaiderDB.raidStatistics, raidId)
     if not entry then return false, "This saved raid no longer exists." end
-    local service = Raider.Services and Raider.Services.CSR
-    if not service then return false, "CSR history is unavailable." end
     -- The visible CSR ledger is scoped by raid-type filters, including receipt
     -- resets. Recheck the same context rather than rejecting a visible source
     -- because an award outside that selected ledger cleared the global view.
     local summary = service.BuildSummary(Database.GetRaidStatistics(), nil, time(), nil, nil, selectedRaids, nil, true)
     local wanted, source = string.lower(tostring(playerName or "")), nil
     for _, player in ipairs(summary.players) do
-        if string.lower(tostring(player.name or "")) == wanted and player.itemId == itemId then
-            for _, candidate in ipairs(player.raids) do if candidate.id == canonical then source = candidate end end
+        if string.lower(tostring(player.name or "")) == wanted then
+            for _, candidate in ipairs(player.raids) do if candidate.id == canonical and candidate.itemId == itemId then source = candidate end end
         end
     end
     if not source then return false, "This CSR source is no longer available." end

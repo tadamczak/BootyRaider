@@ -206,11 +206,14 @@ local function RestoreLootHook()
     Runtime.lootBinding=nil
 end
 
-local eventNames={"RAID_ROSTER_UPDATE","PLAYER_ENTERING_WORLD","ZONE_CHANGED_NEW_AREA","CHAT_MSG_LOOT"}
+local eventNames={"PARTY_MEMBERS_CHANGED","PARTY_LEADER_CHANGED","RAID_ROSTER_UPDATE","PLAYER_ENTERING_WORLD","ZONE_CHANGED_NEW_AREA","CHAT_MSG_LOOT"}
 local function Dispatch()
     if not Raider.active then return end
     Raider.Diagnostics.Count("events")
-    if event=="CHAT_MSG_LOOT" then
+    if event=="PARTY_MEMBERS_CHANGED" or event=="PARTY_LEADER_CHANGED" then
+        local view=Runtime.views.raid
+        if view and view.OnGroupChanged then view:OnGroupChanged() end
+    elseif event=="CHAT_MSG_LOOT" then
         if not BootyRaiderDB.raidLiveTrackingEnabled or Raider.raidSessionPaused or Raider.raidSessionTransitionPending
             or Runtime.IsTestRaid() or not Raider.Services.Raid.IsInRaid() then return end
         local attendance=Raider.Database.GetRaidAttendance()

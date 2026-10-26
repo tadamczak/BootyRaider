@@ -148,7 +148,10 @@ function Screen.Create(parent, host)
     function controller:Refresh() Refresh() end
     function controller:HideSessionTransitionPrompt() page.HideSessionTransitionPrompt() end
     function controller:OnResize() SizePage();Refresh() end
-    function controller:OnRosterUpdate() lifecycle:OnRosterUpdate() end
+    function controller:OnGroupChanged()
+        if page:IsVisible() then Raid.UpdateConvertRaidButton(page, false) end
+    end
+    function controller:OnRosterUpdate() self:OnGroupChanged();lifecycle:OnRosterUpdate() end
     function controller:SyncTrackingSetting(skipRefresh) lifecycle:SyncTrackingSetting(skipRefresh) end
     function controller:Stop()
         if page.lootMasterController then page.lootMasterController.Close() end
