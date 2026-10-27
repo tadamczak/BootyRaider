@@ -154,12 +154,14 @@ function Sync.New(options)
         local value=sent.sequence;local position=1
         while ranges[position] and ranges[position][2]<value-1 do position=position+1 end
         local range=ranges[position]
+        local already=range and range[1]<=value and range[2]>=value
         if range and range[1]<=value+1 then
             range[1]=math.min(range[1],value);range[2]=math.max(range[2],value)
             local following=ranges[position+1]
             if following and following[1]<=range[2]+1 then range[2]=following[2];table.remove(ranges,position+1);self.receiptRanges=self.receiptRanges-1 end
         elseif self.receiptRanges<512 then table.insert(ranges,position,{value,value});self.receiptRanges=self.receiptRanges+1 end
         self.statusDirty=true
+        return not already
     end
     local function ValidateSummary(summary)
         if type(summary)~="table" or summary.schema~=self.journal.schema or type(summary.entries)~="table"
@@ -282,7 +284,11 @@ function Sync.New(options)
         local peers,available,confirmed={},0,0
         local confirmedNames={}
         for name,peer in pairs(self.peers) do
-            local stale=options.isOnline and not options.isOnline(name) or not options.isOnline and Now()-(peer.seen or 0)>120
+            -- A validated message is newer evidence than the cached roster it
+            -- arrived against. Only a subsequent roster revision can override it.
+            local witnessed=options.presenceRevision and peer.presenceRevision==options.presenceRevision()
+            local stale=options.isOnline and not options.isOnline(name) and not witnessed
+                or not options.isOnline and Now()-(peer.seen or 0)>120
             local authorized=Authority(name)
             local fresh=not peer.blocked and not peer.unavailable and not stale and authorized
             local receipts=self.receipts[name]
@@ -292,7 +298,7 @@ function Sync.New(options)
             local status=not authorized and "No officer access" or peer.blocked and "Blocked" or peer.unavailable and "Unavailable" or stale and "Possibly stale"
                 or self.request and self.request.peer==name and "Synchronizing" or received and "Received changes" or "Available"
             table.insert(peers,{name=name,status=status,available=fresh,compatible=true,lastSeen=peer.seen,confirmed=received,
-                message=received and "This officer has received your raid updates." or peer.blocked and "Received data was rejected. Retry after reviewing the cause." or nil})
+                message=received and "This officer holds some raid data. Check Synchro Log for individual deliveries." or peer.blocked and "Received data was rejected. Retry after reviewing the cause." or nil})
         end
         for name,peer in pairs(self.incompatiblePeers) do
             if not self.peers[name] then table.insert(peers,{name=name,status="Incompatible",compatible=false,lastSeen=peer.seen,message="Version, data schema or guild scope differs."}) end
@@ -307,7 +313,7 @@ function Sync.New(options)
         elseif available==0 then message="Waiting for another officer to come online. Your raid is kept on this character."
         elseif confirmed==0 then message="Checking raid updates with online officers."
         elseif pending>0 then message="Sending and receiving raid updates."
-        else table.sort(confirmedNames);message="Raid updates shared with "..table.concat(confirmedNames,", ").."." end
+        else table.sort(confirmedNames);message="Raid updates checked with "..table.concat(confirmedNames,", ")..". See Synchro Log for received changes." end
         return {enabled=self.enabled,localOnly=confirmed==0,compatible=available>0 or CountMap(self.incompatiblePeers)==0,reason=self.reason,message=message,
             lastError=self.lastError,scope=self.scope,revision=self.revision,
             peers=peers,peerCount=Count(peers),availableCount=available,confirmedCount=confirmed,pending=pending,queued=Count(self.outbox),receiving=CountMap(self.incoming),
@@ -346,7 +352,7 @@ function Sync.New(options)
         for _,peer in pairs(self.peers) do peer.needsSummary=true;peer.offset=0;peer.cooldown=nil;peer.unavailable=nil;peer.blocked=nil end
         self.announce=true;self.discoveryRemaining=2;self.discoveryAt=Now()+3;return true
     end
-    function self:Receive(prefix,text,channel,sender)
+    local function ReceivePacket(prefix,text,channel,sender)
         if prefix~=Sync.PREFIX then return false,"other-prefix" end
         if not Ready() then return false,self.reason end
         -- Guild addon messages also return to their sender. This is not peer input.
@@ -380,6 +386,7 @@ function Sync.New(options)
             if peer and peer.session and peer.session~=fields[3] then
                 RemovePeer(sender,"peer-session-changed");peer=nil
             end
+            local connected=not peer
             if not peer then
                 if CountMap(self.peers)>=Sync.limits.peers then return Reject("peer-limit") end
                 peer={name=sender,offset=0};self.peers[sender]=peer
@@ -390,6 +397,9 @@ function Sync.New(options)
             end
             if peer.session~=fields[3] or peer.generation~=fields[7] then peer.needsSummary=true;peer.offset=0 end
             peer.session=fields[3];peer.generation=fields[7];peer.seen=Now();peer.cooldown=nil;peer.unavailable=nil
+            peer.presenceRevision=options.presenceRevision and options.presenceRevision() or nil
+            if self.lastError=="peer-session-changed" then self.lastError=nil end
+            if connected and options.onConnected then options.onConnected(sender) end
             if fields[2]=="*" then Hello(sender) end
             return true
         end
@@ -405,7 +415,9 @@ function Sync.New(options)
         elseif fields[1]=="R" then
             local sent=self.sentOperations[fields[4]]
             if Count(fields)~=4 or fields[3]~=self.session or not sent or sent.peer~=sender or sent.peerSession~=peer.session then return false,"stale-receipt" end
-            Confirm(sender,sent);self.sentOperations[fields[4]]=nil;return true
+            local newlyConfirmed=Confirm(sender,sent);self.sentOperations[fields[4]]=nil
+            if newlyConfirmed and options.onDelivered then options.onDelivered(sender,sent.operationId) end
+            return true
         elseif fields[1]=="A" then
             local outgoing=self.outgoing;local acknowledged=tonumber(fields[5])
             if Count(fields)~=5 or not outgoing or outgoing.target~=sender or fields[3]~=self.session or fields[4]~=outgoing.id
@@ -458,6 +470,13 @@ function Sync.New(options)
             return true
         end
         return Reject("unknown-packet")
+    end
+
+    function self:Receive(prefix,text,channel,sender)
+        local accepted,reason=ReceivePacket(prefix,text,channel,sender)
+        local peer=self.peers[sender]
+        if accepted and peer and options.presenceRevision then peer.presenceRevision=options.presenceRevision() end
+        return accepted,reason
     end
 
     local function Schedule()
@@ -537,7 +556,7 @@ function Sync.New(options)
             local operation=message.payload.type=="operation" and message.payload.operation
             self.encoding={target=message.target,priority=message.priority,job=self.codec.BeginEncode(message.payload),
                 receipt=operation and {peer=message.target,peerSession=self.peers[message.target] and self.peers[message.target].session,
-                    raidId=operation.raidId,origin=operation.origin,sequence=operation.sequence} or nil}
+                    raidId=operation.raidId,origin=operation.origin,sequence=operation.sequence,operationId=operation.id} or nil}
         end
         local encoding=self.encoding
         if Combat() and encoding.priority>1 then return end

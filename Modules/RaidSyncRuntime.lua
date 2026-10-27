@@ -149,6 +149,7 @@ function SyncRuntime.RefreshAuthority()
         runtime.raidSync=Raider.Services.RaidSync.Create({db=Raider.Database.Ensure(),journal=Raider.Services.RaidJournal,
             codec=Raider.Services.RaidSyncCodec,now=Now,actor=function() return UnitName("player") end,scope=Scope,authorize=Authority,
             isOnline=function(name) local member=BootyLib.GuildDirectory.Find(name);return member and member.online~=false end,
+            presenceRevision=BootyLib.GuildDirectory.GetGeneration,
             send=function(prefix,text,channel) return SendAddonMessage(prefix,text,channel) end,
             activeRaidId=function() local current=Raider.Database.GetRaidAttendance();return current and current.syncRaidId end,
             priority=function(id)
@@ -160,6 +161,14 @@ function SyncRuntime.RefreshAuthority()
             validateOperation=Raider.Services.RaidReplica.ValidateOperation,
             validateCheckpoint=Raider.Services.RaidReplica.ValidateCheckpoint,
             onApply=function(operation,reason) runtime.replica.OnOperation(operation,reason,false) end,
+            onConnected=function(name) runtime.replica.LogSync("Connected to "..name..". Checking raid updates.") end,
+            onDelivered=function(name,id)
+                local operation=Raider.Services.RaidJournal.GetOperation(BootyRaiderDB,id)
+                if operation and operation.kind~="raid.observe" and not operation.compacted then
+                    local action=Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
+                    runtime.replica.LogSync(name.." confirmed receipt: "..tostring(action))
+                end
+            end,
             onStatus=function(status)
                 if status.lastError and status.lastError~=lastSyncError then runtime.replica.LogSync(status.message) end
                 lastSyncError=status.lastError

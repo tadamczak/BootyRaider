@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.8 — 2026-10-27
+
+- Keep authenticated officers connected when the cached guild roster still says offline; honor subsequent roster updates and officer access changes.
+- Log connections and explicit receipts for new officer changes without duplicate packet entries; clarify status wording.
+
 ## 1.0.0-dev.7 — 2026-10-27
 
 - Automatically reconnect officer synchronization on guild presence changes; keep idle online officers connected.
