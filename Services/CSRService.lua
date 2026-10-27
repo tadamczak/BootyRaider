@@ -85,8 +85,41 @@ local function ConsumeSources(state, key)
     state.awardedThrough[key] = count
 end
 
+-- A synchronized per-player calculation must use the same name/ID associations
+-- as the complete eligible ledger. Ambiguity is shared across players.
+function CSR.BuildItemIndex(ordered)
+    local nameIds, labels = {}, {}
+    for _, raid in ipairs(ordered or {}) do
+        for _, member in ipairs(raid.members or {}) do
+            local _, reserves, scalar = GetReserveCount(member)
+            local _, loot = GetLootCount(member)
+            for collectionIndex = 1, 2 do
+                local values = collectionIndex == 1 and reserves or loot
+                for _, item in ipairs(values or {}) do
+                    local key, name = ItemIdentity(item, collectionIndex == 1 and scalar)
+                    if key and name then
+                        labels[key] = labels[key] or name
+                        local nameKey = CSR.NormalizeItemReference(name)
+                        if type(key) == "number" and nameKey then
+                            if nameIds[nameKey] == nil then nameIds[nameKey] = key
+                            elseif nameIds[nameKey] ~= key then nameIds[nameKey] = false end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nameIds, labels
+end
+
 function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selectedRaids, searchText, showArchived)
     local summary = target or { players = {} }
+    if summary._raidCSR then
+        -- A direct switch to test/untracked data must release the incremental
+        -- cache and its Lua 5.0 array sizes, just like the adapter fallback.
+        summary._raidCSR = nil; summary.players = {}; summary.orderedScratch = nil
+    end
+    summary.provisional = nil
     summary.players = summary.players or {}
     local players, states = summary.players, summary.states or {}
     summary.states = states
@@ -116,33 +149,15 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
     end
     table.sort(ordered, function(a, b)
         local left, right = GetSavedAt(a), GetSavedAt(b)
-        if left == right then return tostring(a.id or "") < tostring(b.id or "") end
+        if left == right then return tostring(a.syncRaidId or a.id or "") < tostring(b.syncRaidId or b.id or "") end
         return left < right
     end)
 
     -- Saved labels bridge manual names to known IDs without depending on the
     -- client's changing cache. Ambiguous names never merge two distinct IDs.
-    local nameIds, labels = {}, {}
-    for _, raid in ipairs(ordered) do
-        for _, member in ipairs(raid.members or {}) do
-            local _, reserves, scalar = GetReserveCount(member)
-            local _, loot = GetLootCount(member)
-            for collectionIndex = 1, 2 do
-                local values = collectionIndex == 1 and reserves or loot
-                for _, item in ipairs(values or {}) do
-                    local key, name = ItemIdentity(item, collectionIndex == 1 and scalar)
-                    if key and name then
-                        labels[key] = labels[key] or name
-                        local nameKey = CSR.NormalizeItemReference(name)
-                        if type(key) == "number" and nameKey then
-                            if nameIds[nameKey] == nil then nameIds[nameKey] = key
-                            elseif nameIds[nameKey] ~= key then nameIds[nameKey] = false end
-                        end
-                    end
-                end
-            end
-        end
-    end
+    local nameIds, labels
+    if entries and entries._csrNameIds then nameIds, labels = entries._csrNameIds, entries._csrLabels or {}
+    else nameIds, labels = CSR.BuildItemIndex(ordered) end
     local function Resolve(key) return nameIds[key] or key end
     local raidIndex, memberIndex, itemIndex
     for raidIndex = 1, table.getn(ordered) do
@@ -160,6 +175,8 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                 if not state then state = { name = member.name or "Unknown", class = GetClass(member),
                     pending = {}, sources = {}, sourceCounts = {}, awardedThrough = {}, receivedThisRaid = {} }; states[key] = state end
                 if not state.class or state.class == "" then state.class = GetClass(member) end
+                local provisional = raid.syncDisputed == true or type(raid.syncDisputedMembers) == "table" and raid.syncDisputedMembers[key] == true
+                if provisional then state.provisional = true end
                 state.sources = state.sources or {}
                 ClearTable(state.receivedThisRaid)
                 if hasRights then
@@ -185,6 +202,7 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                                 sources[sourceCount] = { id = raid.id, raidName = raid.raidName or "Other", savedAt = savedAt,
                                     playerName = state.name, itemId = originalKey, manuallyArchived = manuallyArchived,
                                     expired = expired, expiresAt = savedAt + WINDOW_SECONDS,
+                                    provisional = provisional and true or nil,
                                     status = (expired or manuallyArchived) and "ARCHIVED" or "ACTIVE", count = count }
                             end
                         end
@@ -225,7 +243,8 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                 if activeCount + archivedCount > 0 then
                     playerCount = playerCount + 1
                     players[playerCount] = { name = state.name, class = state.class, itemId = itemId, itemName = labels[itemId], items = activeCount, archivedItems = archivedCount,
-                        csr = activeCount * POINTS_PER_UNSUCCESSFUL_SR, raids = sources }
+                        csr = activeCount * POINTS_PER_UNSUCCESSFUL_SR, raids = sources, provisional = state.provisional }
+                    if state.provisional then summary.provisional = true end
                 end
             end
         end

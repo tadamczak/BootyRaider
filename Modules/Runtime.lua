@@ -33,6 +33,7 @@ function Runtime.RefreshViews()
 end
 function Runtime.WantsGuildDirectory()
     if not Raider.active then return false end
+    if Raider.Modules.RaidSyncRuntime and Raider.Modules.RaidSyncRuntime.WantsDirectory() then return true end
     if Raider.Services.Raid.IsInRaid() then return true end
     for _,view in pairs(Runtime.views) do
         if view and view.page and view.page:IsVisible() then return true end
@@ -44,6 +45,7 @@ function Runtime.RequestHistoryAuthority()
 end
 function Runtime.OnGuildDirectoryUpdated()
     if not Raider.active then return end
+    if Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.RefreshAuthority() end
     if not Runtime.IsTestRaid() then Raider.Services.Raid.RefreshGuildRanks(Raider.Database.GetRaidAttendance()) end
     Runtime.RefreshViews()
 end
@@ -212,6 +214,8 @@ local eventNames={"PARTY_MEMBERS_CHANGED","PARTY_LEADER_CHANGED","RAID_ROSTER_UP
 local function Dispatch()
     if not Raider.active then return end
     Raider.Diagnostics.Count("events")
+    if event=="CHAT_MSG_ADDON" then Raider.Modules.RaidSyncRuntime.Receive(arg1,arg2,arg3,arg4);return end
+    if event=="PLAYER_REGEN_ENABLED" then Raider.Modules.RaidSyncRuntime.Wake();return end
     if event=="PARTY_MEMBERS_CHANGED" or event=="PARTY_LEADER_CHANGED" then
         local view=Runtime.views.raid
         if view and view.OnGroupChanged then view:OnGroupChanged() end
@@ -226,6 +230,13 @@ local function Dispatch()
         Runtime.worldContext.Update()
         local view=Runtime.views.raid
         if event=="RAID_ROSTER_UPDATE" and view and view.OnRosterUpdate then view:OnRosterUpdate() end
+        if Raider.Modules.RaidSyncRuntime then
+            if event=="RAID_ROSTER_UPDATE" then Raider.Modules.RaidSyncRuntime.OnRosterUpdate()
+            elseif event=="PLAYER_ENTERING_WORLD" then
+                Raider.Modules.RaidSyncRuntime.RefreshAuthority()
+                if Runtime.raidSync then Runtime.raidSync:Discover();Raider.Modules.RaidSyncRuntime.Wake() end
+            end
+        end
     end
 end
 
@@ -239,6 +250,7 @@ function Runtime.Initialize(host)
                 Raider.active=true
                 for _,name in ipairs(eventNames) do Runtime.events:RegisterEvent(name) end
                 InstallLootHook()
+                if Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.Initialize(Runtime) end
                 local ready,message=Runtime.nativeRaidTab:Sync()
                 if ready==false and message then return false,message end
                 return true
@@ -256,7 +268,7 @@ function Runtime.Initialize(host)
     if Raider.Diagnostics.Wrap and not Runtime.diagnosticsWrapped then
         Raider.Services.Raid.SaveRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.SaveRoster,1)
         Raider.Services.Raid.CaptureRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.CaptureRoster,1)
-        Raider.Services.Raid.RecordLoot=Raider.Diagnostics.Wrap("Loot message",Raider.Services.Raid.RecordLoot,2)
+        Raider.Services.Raid.RecordLoot=Raider.Diagnostics.Wrap("Loot message",Raider.Services.Raid.RecordLoot,3)
         Raider.Services.RaidStatistics.BuildSummary=Raider.Diagnostics.Wrap("Raid summary",Raider.Services.RaidStatistics.BuildSummary,2)
         Raider.Services.CSR.BuildSummary=Raider.Diagnostics.Wrap("CSR model",Raider.Services.CSR.BuildSummary,8)
         Raider.Services.RaidRes.Import=Raider.Diagnostics.Wrap("SR import",Raider.Services.RaidRes.Import,3)
@@ -309,6 +321,7 @@ function Runtime.Initialize(host)
     InstallLootHook();Runtime.nativeRaidTab:Sync()
     Raider.CompleteRaidSession=Runtime.SaveSession
     Runtime.initialized=true
+    if Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.Initialize(Runtime) end
     return true
 end
 local function SyncNative()
@@ -330,6 +343,7 @@ local function ReleaseResources()
         if not ok or result==false then table.insert(failures,CleanupMessage(reason or result)) end
     end
     Raider.active=false
+    if Raider.Modules.RaidSyncRuntime then Attempt(Raider.Modules.RaidSyncRuntime.Stop) end
     if Runtime.events then
         for _,name in ipairs(eventNames) do Attempt(Runtime.events.UnregisterEvent,Runtime.events,name) end
     end
@@ -381,6 +395,7 @@ local function ApplySettingChanges(keys)
     if not Runtime.initialized or not Raider.active then return end
     local native,tracking,autoLoot,csr=false,false,false,false
     for key in pairs(keys) do
+        if (key=="profile" or key=="raidSyncEnabled") and Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.RefreshAuthority() end
         if key=="profile" or key=="useBootyRaidTab" or key=="useBootyRaidLogo" or string.find(key,"^nativeRaid") then native=true end
         if key=="profile" or key=="raidLiveTrackingEnabled" then tracking=true end
         if key=="profile" or string.find(key,"^lmAutoLoot") then autoLoot=true end

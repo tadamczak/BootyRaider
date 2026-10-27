@@ -31,6 +31,11 @@ function Screen.Create(parent, host)
         if not ok then Runtime.Print(result) end
         return ok,result
     end
+    function page.OpenRaidSync(record)
+        local ok,result=Raider.Modules.RaidSync.Open(record or Runtime.GetAttendance(),page)
+        if not ok then Runtime.Print(result) end
+        return ok,result
+    end
     local function RunAction(member,action) return Runtime.ActiveRaidService().RunMemberAction(member,action) end
     local function Counts() return Runtime.ActiveRaidService().GetGroupCounts() end
     local function MoveGroup(member,group) return Runtime.ActiveRaidService().MoveMemberToGroup(member,group) end
@@ -118,6 +123,7 @@ function Screen.Create(parent, host)
     end)
     Refresh=function()
         if Raider.Modules.RaidLog then Raider.Modules.RaidLog.RefreshVisible() end
+        if Raider.Modules.RaidSync then Raider.Modules.RaidSync.RefreshVisible() end
         if not page:IsVisible() and not (page.lootMasterController and page.lootMasterController.IsVisible()) then return end
         if page:IsVisible() then
             Raid.RefreshPage(renderer)

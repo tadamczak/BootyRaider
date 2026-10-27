@@ -38,6 +38,12 @@ function Raider.HandleCommand(text)
         end
         if arguments=="" then return Raider.Modules.MasterLootWindow.OpenNewRollDialog() end
         return Raider.Modules.MasterLootWindow.OpenLinkedItemRoll(arguments)
+    elseif command=="sync" or command=="conflicts" then
+        local record=Runtime.GetAttendance()
+        if arguments~="" then record=Raider.Services.RaidAudit.FindRaidId(arguments) or arguments end
+        local ok,result=Raider.Modules.RaidSync.Open(record,Runtime.host and Runtime.host.window)
+        if not ok then Runtime.Print(result) end
+        return ok
     elseif command=="log" then
         local record=Runtime.GetAttendance()
         if arguments~="" then
@@ -54,7 +60,7 @@ function Raider.HandleCommand(text)
     elseif command=="csr" then return Runtime.OpenView("csr")
     elseif command=="settings" then if Runtime.host and Runtime.host.OpenSettings then return Runtime.host.OpenSettings() end
     elseif command=="" or command=="raid" then return Runtime.OpenView("raid") end
-    Runtime.Print("Use /br, /br stats, /br csr, /br log [raid ID], /br settings or /br roll [item] [players] [Tmog OS MS RC SR].")
+    Runtime.Print("Use /br, /br stats, /br csr, /br sync [raid ID], /br log [raid ID], /br settings or /br roll [item] [players] [Tmog OS MS RC SR].")
     return false
 end
 local function QuickMenu(host)
@@ -103,12 +109,18 @@ end
 function Raider.GetProfilingTargets()
     local D = BootyLib.Diagnostics
     local descriptor = D.CreateProfilingDescriptor(Raider.version,
-        "Raid event dispatch, roster and loot processing, raid/CSR summaries, SR import/snapshot and Raid refresh. Fixed live targets; not all addon functions or rendering.")
+        "Raid events, roster/loot, incremental synchronization, journal/projection, CSR, SR import and Raid refresh. Selected Lua entry points; not total addon or rendering time.")
     D.AddProfilingScript(descriptor, Runtime.events, "OnEvent", "Raid events", true)
     D.AddProfilingFunction(descriptor, Raider.Services.Raid, "CaptureRoster", "Capture roster")
     D.AddProfilingFunction(descriptor, Raider.Services.Raid, "RecordLoot", "Record loot")
     D.AddProfilingFunction(descriptor, Raider.Services.RaidStatistics, "BuildSummary", "Raid statistics summary")
     D.AddProfilingFunction(descriptor, Raider.Services.CSR, "BuildSummary", "CSR summary")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidCSR, "BuildSummary", "Incremental CSR")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidJournal, "Commit", "Journal local change")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidJournal, "Apply", "Journal received change")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidJournal, "Compact", "Journal checkpoint")
+    D.AddProfilingFunction(descriptor, Raider.Modules.RaidSyncRuntime, "Tick", "Sync scheduled work")
+    D.AddProfilingFunction(descriptor, Runtime.replica, "Flush", "Raid projection")
     D.AddProfilingFunction(descriptor, Raider.Services.RaidRes, "Import", "SR import")
     D.AddProfilingFunction(descriptor, Raider.Services.RaidRes, "BuildSnapshot", "SR snapshot")
     D.AddProfilingFunction(descriptor, Raider.Modules.RaidManagement, "RefreshPage", "Raid refresh")
@@ -120,6 +132,8 @@ function Raider.GetDatabaseStatistics()
         {id = "srSnapshots", label = "Saved SR snapshots", path = {"softReserveHistory", "raids"}, unit = "Snapshots", valueType = "table", emptyWhenMissing = true},
         {id = "sessionMembers", label = "Current session members", path = {"raidAttendance", "members"}, unit = "Members", valueType = "table", emptyWhenMissing = true},
         {id = "sessionDeparted", label = "Current session departed members", path = {"raidAttendance", "departedMembers"}, unit = "Members", valueType = "table", emptyWhenMissing = true},
+        {id = "syncRaids", label = "Synchronized raids", path = {"raidJournal", "raids"}, unit = "Raids", valueType = "table", emptyWhenMissing = true},
+        {id = "syncOperations", label = "Raid changes and causal markers", path = {"raidJournal", "operations"}, unit = "Records", valueType = "table", emptyWhenMissing = true},
     }}
 end
 

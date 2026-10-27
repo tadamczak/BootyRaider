@@ -10,7 +10,7 @@ end
 
 local function OnRaidSelect()
     local controller = this.statisticsController
-    controller.editMode=false;controller.editMembers=nil
+    controller.editMode=false;controller.editMembers=nil;controller.editBase=nil
     if controller.selectedHistoryIds[this.raidId] then controller.selectedHistoryIds[this.raidId] = nil
     else controller.selectedHistoryIds[this.raidId] = true end
     controller.summaryDirty = true
@@ -175,6 +175,11 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.editDialog.cancel:SetScript("OnClick", function() controller.editDialog:Hide() end)
     controller.editDialog.save:SetScript("OnClick", function()
         if not CanManageHistory() then controller.editDialog:Hide(); controller.editMode=false; controller.editMembers=nil; controller:Refresh(); return end
+        local audit=Raider.Services.RaidAudit
+        if audit and audit.CheckEditBase then
+            local current,reason=audit.CheckEditBase(controller.editBase)
+            if not current then controller.editDialog.message:SetText(reason);return end
+        end
         local raidId = controller.editDialog.raidId
         local attendanceEnabled = controller.editDialog.attendance:GetChecked() and true or false
         local csrEnabled = controller.editDialog.csr:GetChecked() and true or false
@@ -187,7 +192,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
             end
             local saved, reason = controller.updateEntry(raidId,members,attendanceEnabled,csrEnabled,controller.editDialog.selectedRaidName)
             if saved then
-                controller.editDialog:Hide();controller.editMode=false;controller.editMembers=nil;controller:Refresh()
+                controller.editDialog:Hide();controller.editMode=false;controller.editMembers=nil;controller.editBase=nil;controller:Refresh()
                 if StaticPopupDialogs and StaticPopupDialogs["BOOTY_RAIDER_ATTENDANCE_RELOAD"] then
                     local popup = UI.ShowOpaquePopup("BOOTY_RAIDER_ATTENDANCE_RELOAD")
                     if popup and UI.WindowStack then UI.WindowStack.Raise(popup, page) end
@@ -203,6 +208,8 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         for entryIndex = 1, table.getn(entries) do if entries[entryIndex].id == raidId then entry = entries[entryIndex]; break end end
         if not entry then return end
         controller.editingEntry=entry;controller.editingRaidId=raidId;controller.editMembers={}
+        local audit=Raider.Services.RaidAudit
+        controller.editBase=audit and audit.CaptureEditBase and audit.CaptureEditBase(entry) or nil
         for entryIndex=1,table.getn(entry.members or {}) do controller.editMembers[entryIndex]=CopyEditableMember(entry.members[entryIndex]) end
         controller.editMode=true;controller.editError:Hide();controller:Render()
     end
@@ -215,7 +222,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         controller.removeDialog:Show()
     end
     controller.headerEdit:SetScript("OnClick", OnEditRaid); controller.headerRemove:SetScript("OnClick", OnRemoveRaid)
-    controller.editCancel:SetScript("OnClick",function() controller.editMode=false;controller.editMembers=nil;controller.editError:Hide();controller:Render() end)
+    controller.editCancel:SetScript("OnClick",function() controller.editMode=false;controller.editMembers=nil;controller.editBase=nil;controller.editError:Hide();controller:Render() end)
     controller.editAdd:SetScript("OnClick",function()
         if not CanManageHistory() then return end
         local member={name="",class="",guildRank="Guest",lootRank="Guest",attendance=1,attendanceText="1",srItemText="",srCount=0,lootCount=0,srItems={},lootItems={}}
@@ -223,6 +230,11 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     end)
     controller.editSave:SetScript("OnClick",function()
         if not CanManageHistory() then controller.editMode=false;controller.editMembers=nil;controller:Refresh();return end
+        local audit=Raider.Services.RaidAudit
+        if audit and audit.CheckEditBase then
+            local current=audit.CheckEditBase(controller.editBase)
+            if not current then controller.editError:SetText("Raid changed. Close and reopen the editor.");controller.editError:Show();return end
+        end
         local rowIndex
         for rowIndex=1,table.getn(controller.rows) do UpdateEditMember(controller.rows[rowIndex]) end
         for rowIndex=1,table.getn(controller.editMembers or {}) do

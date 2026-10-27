@@ -37,8 +37,9 @@ function RaidManagement.AttachReyCoinAdd(view, refresh)
         local name = string.gsub(view.reyCoinInput:GetText() or "", "^%s*(.-)%s*$", "%1")
         if name == "" then view.reyCoinFeedback:SetText("Enter a player name."); return end
         local item = view.reyCoinItem and string.gsub(view.reyCoinItem:GetText() or "", "^%s*(.-)%s*$", "%1") or ""
-        if not Raider.Services.Raid.SetReyCoinUsage(name, item ~= "" and item or nil, true) then
-            view.reyCoinFeedback:SetText("Player not found in this raid."); return
+        local ok,reason=Raider.Services.Raid.SetReyCoinUsage(name, item ~= "" and item or nil, true)
+        if not ok then
+            view.reyCoinFeedback:SetText(reason or "Player not found in this raid."); return
         end
         view.reyCoinFeedback:SetText(""); view.reyCoinInput:SetText(""); view.reyCoinInput:ClearFocus(); if view.reyCoinItem then view.reyCoinItem:SetText(""); view.reyCoinItem:ClearFocus() end; refresh()
     end
@@ -264,7 +265,11 @@ function RaidManagement.CreateChrome(page, callbacks)
             if selected.pendingTransfer then
                 Raider.Services.Raid.CancelPendingReyCoinTransfer(selected.pendingTransfer)
             else
-                Raider.Services.Raid.SetReyCoinUsage(selected.playerName, nil, false)
+                local ok,reason=Raider.Services.Raid.SetReyCoinUsage(selected.playerName, nil, false)
+                if not ok then
+                    if view.reyCoinFeedback then view.reyCoinFeedback:SetText(reason or "Could not reset Reycoin usage.") end
+                    return
+                end
             end
             RefreshReyCoinList()
         end)
@@ -381,6 +386,10 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.SetClassicButtonIcon(controls.raidLog, "rules", 13, 7, 2)
     controls.raidLog:SetScript("OnClick", function() if page.OpenRaidLog then page.OpenRaidLog() end end)
     controls.raidLog:Hide()
+    controls.raidSync = Raider.UI.Components.CreateButton(page,nil,"Raid Sync",118,22)
+    Raider.UI.Components.SetClassicButtonIcon(controls.raidSync,"refresh",13,7,2)
+    controls.raidSync:SetScript("OnClick",function() if page.OpenRaidSync then page.OpenRaidSync() end end)
+    controls.raidSync:Hide()
     controls.raidInfo = Raider.UI.Components.CreateIconButton(page, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\info.tga", 26, 6, Raider.UI.Components.Theme.colors.goldIcon)
     Raider.UI.Components.ApplyDropdownChoiceSurface(controls.raidInfo)
     Raider.UI.Components.AttachGoldHoverBorder(controls.raidInfo, 0.35, 0.35, 0.35, 1)
@@ -1122,7 +1131,7 @@ function RaidManagement.MountChrome(page, chrome, actions)
     })
     RaidManagement.SetRefreshControls(page, {
         leaderMode = page.leaderModeButton,
-        readyCheck = actions.readyCheck, raidInfo = actions.raidInfo, raidLog = actions.raidLog,
+        readyCheck = actions.readyCheck, raidInfo = actions.raidInfo, raidLog = actions.raidLog, raidSync = actions.raidSync,
         title = chrome.title,
         resetFilters = page.resetFiltersButton,
         unavailable = chrome.unavailable,
@@ -1221,7 +1230,7 @@ function RaidManagement.CreateCompactGroupView(parent, dependencies)
         ensureDatabase = dependencies.ensureDatabase or function() end,
         getLootMasterInfo = dependencies.getLootMasterInfo or function() return nil end,
         getRaidMemberCount = function() return math.min(40, table.getn(members)) end,
-        getRaidMemberIndex = function(index) return members[index] and members[index].raidIndex or index end,
+        getRaidMemberIndex = function(index) return members[index] and members[index].raidIndex end,
         getRaidMemberInfo = function(index)
             local member = members[index]
             if member then return member.name, member.raidRank, member.subgroup, member.level, member.class, member.classFile, member.zone, member.online end
@@ -1412,6 +1421,18 @@ function RaidManagement.UpdateActionAvailability(page, testRaid)
         Raider.UI.Components.SetButtonEnabled(controls.readyCheck, not testRaid and Raider.Services.Raid.CanReadyCheck and Raider.Services.Raid.CanReadyCheck() or false)
     end
     if controls.raidLog then Raider.UI.Components.SetButtonEnabled(controls.raidLog,not testRaid) end
+    if controls.raidSync then
+        local attendance=page.listRenderer and page.listRenderer.getData()
+        local count=attendance and attendance.syncConflictCount or 0
+        controls.raidSync:SetText(count>0 and ("Conflicts ("..count..")") or "Raid Sync")
+        Raider.UI.Components.SetButtonEnabled(controls.raidSync,not testRaid)
+    end
+    if controls.live then
+        local runtime=Raider.Runtime
+        local historical=runtime and runtime.historicalLoaded
+        controls.live:SetText(not historical and Raider.raidLiveTracking and "Stop Live Tracking" or "Start Live Tracking")
+        Raider.UI.Components.SetButtonEnabled(controls.live,not testRaid and runtime and runtime.IsInRaid())
+    end
 end
 
 function RaidManagement.ShowReadyState(page, lootMasterMode)
@@ -2611,7 +2632,8 @@ function RaidManagement.RefreshGroupView(page)
             end
         end
         if slot and name then
-            local memberIndex = renderer.getRaidMemberIndex and renderer.getRaidMemberIndex(raidIndex) or raidIndex
+            local memberIndex = raidIndex
+            if renderer.getRaidMemberIndex then memberIndex = renderer.getRaidMemberIndex(raidIndex) end
             slot.raidIndex = memberIndex
             slot.hasMember = true; slot.displayedMember.name = name or "Unknown"; slot.displayedMember.raidRank = raidRank or 0
             slot.displayedMember.raidIndex = memberIndex; slot.displayedMember.subgroup = subgroup
@@ -2844,7 +2866,9 @@ local function ToolSpecs(page, kind)
     page.toolActionSpecs = page.toolActionSpecs or {
         leader = {{key = "rl-mode", source = controls.leaderMode, caption = "RL Mode", icon = "raid_tools", openRaid = true},
             {key = "ready-check", source = controls.readyCheck, caption = "Ready Check", icon = "check"},
-            {key = "raid-log", source = controls.raidLog, caption = "Raid Log", icon = "rules"}},
+            {key = "raid-log", source = controls.raidLog, caption = "Raid Log", icon = "rules"},
+            {key = "raid-sync", source = controls.raidSync, icon = "refresh"},
+            {key = "live-tracking", source = controls.live, icon = "refresh"}},
         loot = {
             {key = "loot-mode", source = controls.mode, caption = "LM Mode", icon = "loot_tools"},
             {key = "lm-config", source = page.lmConfigToggle, caption = "LM Config", icon = "settings"},
@@ -4013,10 +4037,17 @@ function RaidManagement.AttachActionHandlers(options)
     local function OfferCurrentRaidRefresh()
         if not options.isInRaid() then return end
         liveLoadDialog:Open("Refresh members from your current raid? This replaces the member list. Matching members keep their loot and SR. Choose No to keep the current data.", function()
+            if options.acceptLoadedRaid and options.acceptLoadedRaid()==false then
+                if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print("The current raid roster is not ready. Try Start Live Tracking again in a moment.") end
+                return
+            end
             local updated
             if options.refreshCurrentRaid then updated = options.refreshCurrentRaid()
             else options.saveRaidRoster(); options.setHistoricalLoaded(false); updated = true end
-            if updated == false then return end
+            if updated == false then
+                if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print("The current raid roster is not ready. Try Start Live Tracking again in a moment.") end
+                return
+            end
             Raider.Database.SetSetting("raidLiveTrackingEnabled", true); options.setLiveTracking(true); options.refresh()
         end, StopLoadedTracking)
     end
@@ -4326,19 +4357,10 @@ function RaidManagement.AttachActionHandlers(options)
         if not sent and message then options.printMessage(message) end
     end)
     controls.live:SetScript("OnClick", function()
-        local tracking = not options.getLiveTracking()
-        options.setLiveTracking(tracking)
-        controls.live:SetText(tracking and "Stop Live Tracking" or "Start Live Tracking")
-        if tracking then
-            if not options.isInRaid() then
-                options.setLiveTracking(false); controls.live:SetText("Start Live Tracking")
-                options.printMessage("You must be in a raid to start live tracking.")
-            else
-                options.saveRaidRoster(); options.setScanReady(true); options.refresh(); options.printMessage("Raid live tracking started.")
-            end
-        else
-            options.printMessage("Raid live tracking stopped.")
-        end
+        if options.isTestRaid and options.isTestRaid() then return end
+        local historical=Raider.Runtime and Raider.Runtime.historicalLoaded
+        if not historical and options.getLiveTracking() then StopLoadedTracking()
+        elseif options.isInRaid() then OfferCurrentRaidRefresh() end
     end)
     return RaidManagement.CreateQuickActions(options, LoadSelectedRaid)
 end

@@ -2220,7 +2220,7 @@ events:SetScript("OnEvent", function()
             end
             if completedRolls[pendingAward.historyKey] then completedRolls[pendingAward.historyKey].awarded = true end
             if RaidService.IsLootSessionCurrent(pendingAward.lootSessionToken) then
-                RaidService.RecordPendingAwardReceipt(pendingAward.winner, pendingAward.link)
+                RaidService.RecordPendingAwardReceipt(pendingAward.winner, pendingAward.link,pendingAward.softReserve)
                 if pendingAward.softReserve then RaidService.ConfirmSoftReserveReceipt(pendingAward.winner, pendingAward.link, pendingAward.lootSessionToken) end
                 RaidService.ConfirmSoftReserveCarrierReceipt(pendingAward.winner, pendingAward.link)
                 reyCoinEvents.ConfirmAwardReceipt(pendingAward.winner, pendingAward.link)

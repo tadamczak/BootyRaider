@@ -6,6 +6,7 @@ local RaidManagement = Raider.Modules.RaidManagement
 function RaidManagement.HideRaidHistoryControls(controls)
     controls.historyScroll:Hide()
     controls.loadRaid:Hide(); controls.testRaid:Hide(); controls.historyTitle:Hide(); controls.historyEmpty:Hide()
+    if controls.raidSync then controls.raidSync:Hide() end
     for _, group in ipairs({controls.historyButtons, controls.historyDeleteButtons, controls.historyLoadButtons, controls.historyEditButtons or {}, controls.historyLogButtons or {}, controls.historyHeaders}) do
         for index = 1, table.getn(group) do group[index]:Hide() end
     end
@@ -78,7 +79,7 @@ function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
     local fullWidth = math.max(1, Raider.UI.Components.GetFrameSpan(page) - 16)
     local width = fullWidth
     local rightInset = 8 + fullWidth - width
-    local buttonWidth = math.min(110, (width - 8) / 2)
+    local buttonWidth = math.min(110, width)
     if controls.title then
         controls.title:SetText("Raid")
         if BootyRaiderDB.raidHideSectionHeader then controls.title:Hide() else controls.title:Show() end
@@ -106,6 +107,12 @@ function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
     controls.loadRaid:Hide()
     controls.testRaid:ClearAllPoints(); controls.testRaid:SetPoint("LEFT", controls.scan, "RIGHT", 8, 0)
     controls.testRaid:SetWidth(buttonWidth); controls.testRaid:SetHeight(22); controls.testRaid:Show()
+    local actions={controls.scan,controls.testRaid}
+    if controls.raidSync and Raider.Services.RankPolicy.CanManageHistory() then
+        controls.raidSync:SetText("Sync / Recover");controls.raidSync:SetWidth(128);controls.raidSync:SetHeight(22)
+        controls.raidSync:Enable();controls.raidSync:Show();table.insert(actions,controls.raidSync)
+    elseif controls.raidSync then controls.raidSync:Hide() end
+    actionY=22-Raider.UI.Components.LayoutFlow(page,actions,8,-actionY,width,8)
     controls.historyTitle:ClearAllPoints(); controls.historyTitle:SetPoint("TOPLEFT", page, "TOPLEFT", 8, actionY - 38); controls.historyTitle:Show()
     local snapshots = page.getRaidHistory and page.getRaidHistory() or {}; page.raidHistorySnapshots = snapshots
     if not Raider.UI.Components.ApplySelectionListStyle(controls.historyButtons, snapshots, page.selectedRaidHistoryId, controls.loadRaid) then page.selectedRaidHistoryId = nil end

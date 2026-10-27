@@ -1024,13 +1024,13 @@ local function AuditedReserveMutation(name,kind)
         if result==false or result==nil or result==0 then return result,reason end
         local changed,changedMembers=0,{}
         for index,member in ipairs(staged.members) do
-            if not Raider.Services.RaidJournal.Equal(audit.SRValue(member),audit.SRValue(attendance.members[index])) then
+            if not Raider.Services.RaidJournal.Equal(audit.SRValue(member,staged),audit.SRValue(attendance.members[index],attendance)) then
                 changed=changed+1;changedMembers[changed]=member
             end
         end
         local oldSource=attendance.softReserveImport or {}
         local newSource=staged.softReserveImport or {}
-        local sourceChanged=oldSource.url~=newSource.url or not Raider.Services.RaidJournal.Equal(oldSource.unmatchedReservations or {},newSource.unmatchedReservations or {})
+        local sourceChanged=not Raider.Services.RaidJournal.Equal(audit.ImportValue(oldSource),audit.ImportValue(newSource))
         if changed>0 or sourceChanged then
             local subject=type(a)=="string" and (name=="SetMemberReservations" or name=="SetMemberException" or name=="RemoveMemberReservation") and a or nil
             local ok,failure=audit.Reserves(staged,kind,changedMembers,{subject=subject,count=changed},sourceChanged and newSource or nil)

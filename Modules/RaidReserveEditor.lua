@@ -158,6 +158,11 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         for _,member in ipairs(frame.attendance and frame.attendance.members or {}) do if member.name==frame.memberName then return member end end
     end
     local function Save(confirmed)
+        local audit=Raider.Services.RaidAudit
+        if audit and audit.CheckEditBase then
+            local current,reason=audit.CheckEditBase(frame.editBase)
+            if not current then frame.message:SetText(reason);return end
+        end
         if getAttendance() ~= frame.attendance then frame.message:SetText("The session roster changed. Reopen the editor."); return end
         local member=CurrentMember()
         if not member then frame.message:SetText("This player is no longer in the session. Reopen the editor.");return end
@@ -191,6 +196,9 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     frame.save:SetScript("OnClick",function() Save(false) end)
     function frame:Open(member)
         self.attendance=getAttendance(); self.memberName=member.name
+        local audit=Raider.Services.RaidAudit
+        self.editBase=audit and audit.CaptureEditBase and audit.CaptureEditBase(self.attendance,
+            {"sr:"..string.lower(member.name),"member:"..string.lower(member.name),"raid:loot-rules"}) or nil
         self.title:SetText("Soft Reserves: " .. member.name)
         local failure
         allItems,failure=Raider.Services.RaidItemCatalog.GetItems(self.attendance.raidName)
@@ -213,7 +221,7 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         frame:SetScript("OnUpdate",nil);frame.itemWait=nil;requested={};itemLoader:Hide()
         if frame.confirm then frame.confirm:Hide() end
         allItems={}; selected={}; originalIds={}; available.values={}; chosen.values={}
-        available:Refresh(); chosen:Refresh(); frame.attendance=nil
+        available:Refresh(); chosen:Refresh(); frame.attendance=nil;frame.editBase=nil
     end)
     return frame
 end

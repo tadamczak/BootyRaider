@@ -260,7 +260,7 @@ function Session:Complete(saveOptions)
         if Raider.Services.RaidAudit then
             preparedSnapshot=dependencies.raidRes.BuildSnapshot(staged)
             if not preparedSnapshot then return false,"The raid snapshot could not be prepared." end
-            local ok,reason=Raider.Services.RaidAudit.Save(staged,entry)
+            local ok,reason=Raider.Services.RaidAudit.Save(staged,entry,preparedSnapshot)
             if not ok then return false,reason end
             if entry then entry.syncRaidId=staged.syncRaidId end
             preparedSnapshot.syncRaidId=staged.syncRaidId

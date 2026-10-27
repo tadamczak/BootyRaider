@@ -71,6 +71,8 @@ function Settings.Get()
     local db=Raider.Database.Ensure()
     if not fields then
         fields={}
+        Field("raidSyncEnabled","Synchronize raids and CSR with guild officers","checkbox",{"Addon UI","Raid","Synchronization"},nil,nil,nil,nil,
+            "Exchange missing changes with Officer Wukong and Mukla, including outside the raid. Conflicting edits require a decision. Peer copies are held in memory until the client saves them.")
         Field("raidLiveTrackingEnabled","Live tracking","checkbox",{"Addon UI","Raid","General"},nil,nil,nil,nil,
             "Refresh the physical raid roster while the Raid view or Loot Master window is visible. Session loot recording remains active until the session is paused or ended.")
         Field("raidHideSectionHeader","Hide section header","checkbox",{"Addon UI","Raid","General"})

@@ -14,7 +14,16 @@ local captions = {
     ["csr.archive"]="Archived CSR source", ["csr.activate"]="Activated CSR source",
     ["raid.flags"]="Changed raid options", ["raid.members"]="Changed raid participants",
     ["raid.rules"]="Changed loot rules",
+    ["conflict.resolve"]="Resolved conflict", ["raid.merge"]="Merged recordings",
+    ["loot.reconcile"]="Reconciled loot recordings",
+    ["raid.alias.resolve"]="Resolved recording identities", ["reycoin.set"]="Marked Reycoin used", ["reycoin.reset"]="Reset Reycoin usage",
 }
+local statusCaptions={accepted="Accepted",pending="Pending decision",rejected="Rejected",partial="Partly accepted"}
+local function WithStatus(text,entry)
+    local status=statusCaptions[entry.status]
+    if status and (entry.status~="accepted" or entry.kind=="conflict.resolve") then return status.." - "..text end
+    return text
+end
 
 local function Item(value)
     local reference=Raider.Services.ItemReference
@@ -26,11 +35,11 @@ function Log.FormatAction(entry)
     local text=captions[entry.kind] or "Changed raid data"
     if entry.kind=="sr.import" or entry.kind=="sr.reapply" then
         local count=tonumber(detail.count)
-        if count then return text..": "..count..(count==1 and " player changed" or " players changed") end
+        if count then return WithStatus(text..": "..count..(count==1 and " player changed" or " players changed"),entry) end
     end
     if detail.subject and detail.subject~="" then text=text..": "..tostring(detail.subject) end
     if detail.item then text=text.." - "..Item(detail.item) end
-    return text
+    return WithStatus(text,entry)
 end
 
 local function Timestamp(value)
@@ -39,7 +48,7 @@ local function Timestamp(value)
 end
 
 -- Only the selected change is expanded. The journal validates bounded plain
--- payloads; there is no serialization or full-history traversal during refresh.
+-- payloads; refreshing rows never copies or formats whole historical batches.
 local function Describe(value, indent, output)
     if type(value)~="table" then
         table.insert(output,indent..(value==nil and "(none)" or tostring(value)))
@@ -58,7 +67,7 @@ local function Describe(value, indent, output)
 end
 
 function Log.FormatChange(change)
-    local lines={"Record: "..tostring(change.key),"","Before:"}
+    local lines={"Record: "..tostring(change.key),"Status: "..(statusCaptions[change.status] or "Accepted"),"","Before:"}
     if change.beforeDeleted then table.insert(lines,"  (deleted)")
     else Describe(change.before,"  ",lines) end
     table.insert(lines,"");table.insert(lines,"After:")
@@ -143,6 +152,8 @@ function Log.Create(parent)
         local change
         if changes then change=changes[detail.index]
         else change,total=Raider.Services.RaidAudit.GetChange(detail.entry.id,detail.index) end
+        if change and change.operationStatus then detail.entry.status=change.operationStatus end
+        detail.summary:SetText(Timestamp(detail.entry.timestamp).."  |  "..tostring(detail.entry.author or "Unknown").."\n"..Log.FormatAction(detail.entry))
         detail.text:SetText(change and Log.FormatChange(change) or "No record details.")
         detail.count:SetText(total==0 and "No changes" or ("Change "..detail.index.." / "..total))
         UI.SetButtonEnabled(detail.previous,detail.index>1)
@@ -229,6 +240,7 @@ function Log.Create(parent)
         self.count:SetText(total==0 and "0 actions" or (self.offset+1).."-"..math.min(self.offset+pageSize,total).." / "..total.." actions")
         UI.SetButtonEnabled(self.previous,self.offset>0)
         UI.SetButtonEnabled(self.next,self.offset+pageSize<total)
+        if detail and detail:IsVisible() and detail.entry then ShowChange() end
     end
     function controller:Open(raidId,provider)
         self.raidId=raidId;self.provider=provider or DefaultProvider;self.offset=0

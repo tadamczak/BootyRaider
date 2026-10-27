@@ -28,11 +28,14 @@ end
 
 -- History controls use current guild authority, never a raid role or the rank
 -- frozen in a historical member record. An invalidated directory fails closed.
-function RankPolicy.CanManageHistory()
+function RankPolicy.HasOfficerAuthority(name)
     local directory = BootyLib and BootyLib.GuildDirectory
-    local name = type(UnitName) == "function" and UnitName("player")
     local member = directory and directory.Find and name and directory.Find(name)
     local rank = member and string.lower(tostring(member.rank or ""))
-    if rank == "officer wukong" or rank == "mukla" then return true end
+    return rank == "officer wukong" or rank == "mukla"
+end
+function RankPolicy.CanManageHistory()
+    local name = type(UnitName) == "function" and UnitName("player")
+    if RankPolicy.HasOfficerAuthority(name) then return true end
     return false, "Only Officer Wukong and Mukla can manage saved raid history."
 end

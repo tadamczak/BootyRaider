@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-dev.3 — 2026-10-27
+
+- Exchange missing raid and CSR source changes between guild officers, including relay without the author and recovery after disconnects.
+- Preserve conflicting SR/loot edits for explicit resolution; mark affected CSR provisional and compare independently recorded raids before merging.
+- Add Sync / Recover, officer status and conflict details; retain stale editor drafts without overwriting received changes.
+- Keep audit attribution through relays and checkpoints; bound transfer queues and stop idle scheduling. Native multi-client acceptance is pending.
+
 ## 1.0.0-dev.2 — 2026-10-27
 
 - Add a compact local Raid Log for officer edits, imports, loot allocations/corrections, saved raids and CSR archive decisions; unchanged actions stay silent.

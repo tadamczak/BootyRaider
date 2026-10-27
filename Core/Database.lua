@@ -137,6 +137,7 @@ local function InitializeDefaults(store)
         store.raidJournalDataVersion = 1
     end
     MigratePreferenceNames(store)
+    if store.raidSyncEnabled==nil then store.raidSyncEnabled=true end
     FreezeLegacyLootRules(store)
     if Raider.Services and Raider.Services.LootMessages then Raider.Services.LootMessages.EnsureDefaults(BootyRaiderDB) end
     if (tonumber(BootyRaiderDB.groupLayoutVersion) or 0) < 2 then
@@ -712,6 +713,12 @@ function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnable
     if raidName and not IsRaidType(raidName) then return false, "Choose a valid raid type." end
     attendanceEnabled, csrEnabled = attendanceEnabled and true or false, csrEnabled and true or false
     local changes, current, included = {}, {}, {}
+    local audit = Raider.Services and Raider.Services.RaidAudit
+    if audit and audit.PrepareSavedMemberChanges then
+        local prepared,failure = audit.PrepareSavedMemberChanges(entry,members,changes)
+        if not prepared then return false,failure end
+        members=prepared
+    end
     for _, member in ipairs(entry.members or {}) do current[string.lower(member.name or "")] = member end
     for _, member in ipairs(members) do
         local key = string.lower(member.name or "")

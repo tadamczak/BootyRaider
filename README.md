@@ -9,6 +9,7 @@ BootyRaider provides raid sessions, loot tools, Raid Stats and CSR for WoW 1.12.
 - [Installation](#installation)
 - [Basic usage](#basic-usage)
 - [Existing data](#existing-data)
+- [Officer synchronization](#officer-synchronization)
 
 ## Installation
 
@@ -36,7 +37,7 @@ Master Loot waits up to five seconds for delivery confirmation. If confirmation 
 
 Logging in outside a raid does not show a raid-departure warning. An unfinished session from an earlier login remains accessible in Raid for review, Save or Quit. Refresh explicitly to update its roster; leaving a raid observed during the current login still asks whether to continue or end the session.
 
-Loot Rules belong to the current raid. Unsaved changes do not change saved CSR. Saving an existing Raid ID asks before replacing it; a different ID creates an independent copy. Each raid keeps its own save choices. CSR uses only raids saved with **Save CSR** and their saved eligibility rules. Loading a saved raid accepts that session immediately.
+Loot Rules belong to the current raid. Each raid keeps its own save choices. Saving under another display name retains the same session identity; use **New Raid** for an independent recording. CSR uses only raids saved with **Save CSR** and their saved eligibility rules. Subsequent synchronized SR, loot, eligibility and archive corrections update that raid's CSR sources. Loading a saved raid accepts that session immediately.
 
 Saved raids show **Duration**, **Created At** and **Modified At**. Duration uses the recorded raid end and displays, for example, **1h 05min 09s**. **Save raid end time** records the end when saving; **Modify raid end time** enables changing an existing end in **DD.MM.YYYY HH:MM:SS** format. Without a recorded end, duration is **Unknown**. Editing or copying a raid preserves its original creation date and recorded end.
 
@@ -76,9 +77,7 @@ Raid Leader Tools and Loot Master Tools menus open above every part of these war
 
 ## Existing data
 
-Previous data is imported by the optional **Booty Legacy Data Import** addon. Keep the old SavedVariables until migration has been confirmed in game.
-
-Older raids did not store their own Loot Rules. They receive one independent copy of the existing rules on migration. Original choices that were never recorded cannot be recovered; load, review and save individual raids to correct their history.
+This experimental branch clears pre-journal active raids, saved raids and CSR history once, retaining addon preferences. These records were test data; there is no migration or backward data recovery. The new synchronized records survive subsequent loads.
 
 With current BootyProfiler installed, **Booty Diagnostics → Profile Booty** can measure selected BootyRaider operations after you select the addon and press **Start**. **Stop** ends the capture. The report covers the listed Lua entry points; it does not measure total addon CPU, RAM or disk size.
 
@@ -94,6 +93,14 @@ Auto Loot Inclusions follows Raid Type: Molten Core includes Lava Core and Fiery
 
 The SR editor retains resolved item names and quality colours across selection, filtering and reopening for the current login. The missing-rights confirmation uses a short, fully visible message.
 
-Raid Log shows dated officer actions, original nicknames and before/after details. Open it from Raid Leader Tools, the log icon beside a saved raid, or `/br log [raid ID]`. Imports appear as one summary; unchanged saves, UI activity and routine loot observations do not spam the log. Only one page of summaries and the selected change are loaded for display. Officer-to-officer synchronization and remote DC recovery are not enabled yet.
+Raid Log shows dated officer actions, original nicknames and before/after details. Open it from Raid Leader Tools, the log icon beside a saved raid, or `/br log [raid ID]`. Imports appear as one summary; unchanged saves, UI activity and routine observations do not spam the log. Conflict decisions preserve the earlier proposals and their status.
 
-**Experimental data reset:** the first load of this branch clears pre-journal active raids, saved raids and CSR history once. Addon preferences are retained. These records were test data; there is no migration or backward data recovery.
+## Officer synchronization
+
+With synchronization enabled in Settings, guild officers exchange missing raid changes while online, including outside the raid. Any officer holding a copy can pass it on after the author logs out. Everyone needs a compatible BootyRaider build. Data waits when no holder is online.
+
+Open **Sync / Recover** beside New Raid, **Raid Sync / Conflicts** in Raid Leader Tools, or `/br sync`. Select a session and **Recover** to continue with its existing identity, SR, loot and rules. To record the current physical roster, use **Start Live Tracking** in Raid Leader Tools and confirm the refresh. Recovery never repeats loot distribution or announcements.
+
+**Conflicts** shows the agreed value and each officer's proposal. Choose the intended SR or loot correction; a stale editor draft asks you to reopen it before saving. Asterisks mark provisional CSR while a source is disputed. When two officers record separately, use **Compare raids** and decide whether matching awards are duplicates or separate items before merging.
+
+Peer confirmation means another client has received data in memory. `/reload` or normal logout writes SavedVariables; losing every unsaved copy cannot be repaired. A recording gap cannot reconstruct events nobody observed. Raid Log retains author attribution supplied by trusted guild officers; it is not tamper-proof evidence.
