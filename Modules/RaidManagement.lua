@@ -389,7 +389,7 @@ function RaidManagement.CreateActionControls(page)
     controls.raidSync = Raider.UI.Components.CreateButton(page,nil,"Raid Sync",118,22)
     Raider.UI.Components.SetClassicButtonIcon(controls.raidSync,"refresh",13,7,2)
     controls.raidSync:SetScript("OnClick",function() if page.OpenRaidSync then page.OpenRaidSync() end end)
-    controls.raidSync:Hide()
+    controls.raidSync:Hide();page.raidSyncButton=controls.raidSync
     controls.raidInfo = Raider.UI.Components.CreateIconButton(page, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\info.tga", 26, 6, Raider.UI.Components.Theme.colors.goldIcon)
     Raider.UI.Components.ApplyDropdownChoiceSurface(controls.raidInfo)
     Raider.UI.Components.AttachGoldHoverBorder(controls.raidInfo, 0.35, 0.35, 0.35, 1)
@@ -397,7 +397,7 @@ function RaidManagement.CreateActionControls(page)
     controls.raidInfo:SetScript("OnClick", function() if Raider.Modules.RaidInfo then Raider.Modules.RaidInfo.Toggle(this) end end)
     controls.raidInfo:Hide(); page.raidInfoButton = controls.raidInfo
     page.convertRaidButton = Raider.UI.Components.CreateButton(page, nil, "Convert to Raid", 112, 24)
-    page.convertRaidButton:SetPoint("RIGHT", controls.raidInfo, "LEFT", -6, 0)
+    page.convertRaidButton:SetPoint("RIGHT", controls.raidSync, "LEFT", -6, 0)
     Raider.UI.Components.AttachTooltip(page.convertRaidButton, "Convert to Raid", "The party leader can convert the current party to a raid.")
     page.convertRaidButton:SetScript("OnClick", function()
         local ok, failure = Raider.Services.Raid.ConvertPartyToRaid()
@@ -478,7 +478,7 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.SetClassicButtonVariant(controls.quit, "red")
     Raider.UI.Components.SetClassicButtonIcon(controls.quit, "quit")
     Raider.UI.Components.SetClassicButtonGold(controls.quit, true)
-    Raider.UI.Components.AttachTooltip(controls.quit, "End Raid", "End the active raid session.")
+    Raider.UI.Components.AttachTooltip(controls.quit, "End Raid", "End this shared raid session for all officers. Saved raid data will continue to synchronize.")
     controls.raidLeaderTools = Raider.UI.Components.CreateButton(page, nil, "Raid Leader Tools", 118, 22); controls.raidLeaderTools:Hide()
     controls.raidLeaderTools.bootyClassicKeepNormalSurface = true
     controls.raidLeaderTools.bootyHoverTextColor = {1, 0.82, 0.28}
@@ -1424,14 +1424,15 @@ function RaidManagement.UpdateActionAvailability(page, testRaid)
     if controls.raidSync then
         local attendance=page.listRenderer and page.listRenderer.getData()
         local count=attendance and attendance.syncConflictCount or 0
-        controls.raidSync:SetText(count>0 and ("Conflicts ("..count..")") or "Raid Sync")
+        controls.raidSync:SetText("Raid Sync")
+        controls.raidSync:ClearAllPoints();controls.raidSync:SetPoint("RIGHT",page.raidInfoButton,"LEFT",-6,0);controls.raidSync:Show()
         Raider.UI.Components.SetButtonEnabled(controls.raidSync,not testRaid)
     end
     if controls.live then
         local runtime=Raider.Runtime
         local historical=runtime and runtime.historicalLoaded
         controls.live:SetText(not historical and Raider.raidLiveTracking and "Stop Live Tracking" or "Start Live Tracking")
-        Raider.UI.Components.SetButtonEnabled(controls.live,not testRaid and runtime and runtime.IsInRaid())
+        Raider.UI.Components.SetButtonEnabled(controls.live,not testRaid and runtime and runtime.IsInRaid() and not (runtime.GetAttendance() and runtime.GetAttendance().syncEnded))
     end
 end
 
@@ -2121,6 +2122,7 @@ function RaidManagement.UpdateConvertRaidButton(page, lootMasterMode)
     local button = page.convertRaidButton
     if not button then return end
     if lootMasterMode or Raider.Services.Raid.IsInRaid() then button:Hide(); return end
+    button:ClearAllPoints();button:SetPoint("RIGHT",page.raidSyncButton and page.raidSyncButton:IsShown() and page.raidSyncButton or page.raidInfoButton,"LEFT",-6,0)
     button:Show()
     Raider.UI.Components.SetButtonEnabled(button, Raider.Services.Raid.CanConvertPartyToRaid())
 end
@@ -2867,7 +2869,6 @@ local function ToolSpecs(page, kind)
         leader = {{key = "rl-mode", source = controls.leaderMode, caption = "RL Mode", icon = "raid_tools", openRaid = true},
             {key = "ready-check", source = controls.readyCheck, caption = "Ready Check", icon = "check"},
             {key = "raid-log", source = controls.raidLog, caption = "Raid Log", icon = "rules"},
-            {key = "raid-sync", source = controls.raidSync, icon = "refresh"},
             {key = "live-tracking", source = controls.live, icon = "refresh"}},
         loot = {
             {key = "loot-mode", source = controls.mode, caption = "LM Mode", icon = "loot_tools"},
@@ -3096,6 +3097,7 @@ function RaidManagement.LayoutActions(page)
         local UI = Raider.UI.Components
         local pageWidth = PageSpan(page)
         local trailing = page.raidInfoButton and page.raidInfoButton:IsShown() and page.raidInfoButton:GetWidth()+8 or 0
+        if page.raidSyncButton and page.raidSyncButton:IsShown() then trailing=trailing+page.raidSyncButton:GetWidth()+6 end
         if page.convertRaidButton and page.convertRaidButton:IsShown() then trailing=trailing+page.convertRaidButton:GetWidth()+6 end
         local available = math.max(1, pageWidth - 12 - trailing)
         local showIssues = page.classicIssues:IsShown()
@@ -4035,7 +4037,7 @@ function RaidManagement.AttachActionHandlers(options)
         options.refresh()
     end
     local function OfferCurrentRaidRefresh()
-        if not options.isInRaid() then return end
+        if not options.isInRaid() or (options.getAttendance() and options.getAttendance().syncEnded) then return end
         liveLoadDialog:Open("Refresh members from your current raid? This replaces the member list. Matching members keep their loot and SR. Choose No to keep the current data.", function()
             if options.acceptLoadedRaid and options.acceptLoadedRaid()==false then
                 if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print("The current raid roster is not ready. Try Start Live Tracking again in a moment.") end
@@ -4061,7 +4063,7 @@ function RaidManagement.AttachActionHandlers(options)
             options.beginRaidSession()
             if options.acceptLoadedRaid then options.acceptLoadedRaid() end
             options.setHistoricalLoaded(true); options.setScanReady(true); options.refresh()
-            if resumeTracking and not (options.hasPendingRaidTransition and options.hasPendingRaidTransition()) then
+            if resumeTracking and not (options.getAttendance() and options.getAttendance().syncEnded) and not (options.hasPendingRaidTransition and options.hasPendingRaidTransition()) then
                 options.setLiveTracking(false)
                 liveLoadDialog:Open("Do you want to refresh saved raid data with current raid? Pressing No turns off Live Tracking option in Settings. Remember to turn it on if desired.", function()
                     options.saveRaidRoster(); options.setHistoricalLoaded(false); Raider.Database.SetSetting("raidLiveTrackingEnabled", true); options.setLiveTracking(true); options.refresh()
@@ -4246,7 +4248,7 @@ function RaidManagement.AttachActionHandlers(options)
     end)
     controls.addStatistics:Hide()
     StaticPopupDialogs["BOOTY_RAIDER_QUIT_RAID_SESSION"] = {
-        text = "Quit the current raid session without saving?", button1 = "Quit", button2 = "Cancel",
+        text = "End this shared raid session for ALL officers? Saved data will keep synchronizing. Unsaved changes are not saved as a snapshot.", button1 = "Quit", button2 = "Cancel",
         OnAccept = function()
             local ok,reason=options.quitRaidSession()
             if ok==false then Raider.Runtime.Print(reason or "The raid session could not be ended.");return end
@@ -4257,7 +4259,7 @@ function RaidManagement.AttachActionHandlers(options)
     local quitDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderQuitRaidDialog", "Quit Raid", "Quit", "quit")
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(quitDialog, options.page) end
     options.page.quitDialog = quitDialog
-    controls.quit:SetScript("OnClick", function() quitDialog:Open("Quit the current raid session without saving?", StaticPopupDialogs.BOOTY_RAIDER_QUIT_RAID_SESSION.OnAccept) end)
+    controls.quit:SetScript("OnClick", function() quitDialog:Open("End this shared raid session for ALL officers? Saved data will keep synchronizing. Unsaved changes are not saved as a snapshot.", StaticPopupDialogs.BOOTY_RAIDER_QUIT_RAID_SESSION.OnAccept) end)
 
     sessionPrompt = Raider.UI.Components.CreateContainer("BootyRaiderRaidSessionPrompt", UIParent)
     sessionPrompt:SetWidth(390); sessionPrompt:SetHeight(150); sessionPrompt:SetPoint("CENTER", UIParent, "CENTER", 0, 80)

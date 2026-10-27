@@ -280,18 +280,19 @@ function Sync.New(options)
 
     function self:GetStatus(raidId)
         local peers,available,confirmed={},0,0
+        local confirmedNames={}
         for name,peer in pairs(self.peers) do
-            local stale=Now()-(peer.seen or 0)>120
+            local stale=options.isOnline and not options.isOnline(name) or not options.isOnline and Now()-(peer.seen or 0)>120
             local authorized=Authority(name)
             local fresh=not peer.blocked and not peer.unavailable and not stale and authorized
             local receipts=self.receipts[name]
             local received=fresh and receipts and (raidId and receipts[raidId] and next(receipts[raidId])~=nil or not raidId and next(receipts)~=nil) and true or false
             if fresh then available=available+1 end
-            if received then confirmed=confirmed+1 end
+            if received then confirmed=confirmed+1;table.insert(confirmedNames,name) end
             local status=not authorized and "No officer access" or peer.blocked and "Blocked" or peer.unavailable and "Unavailable" or stale and "Possibly stale"
                 or self.request and self.request.peer==name and "Synchronizing" or received and "Received changes" or "Available"
             table.insert(peers,{name=name,status=status,available=fresh,compatible=true,lastSeen=peer.seen,confirmed=received,
-                message=received and "Receipt confirms memory only; no disk save is confirmed." or peer.blocked and "Received data was rejected. Retry after reviewing the cause." or nil})
+                message=received and "This officer has received your raid updates." or peer.blocked and "Received data was rejected. Retry after reviewing the cause." or nil})
         end
         for name,peer in pairs(self.incompatiblePeers) do
             if not self.peers[name] then table.insert(peers,{name=name,status="Incompatible",compatible=false,lastSeen=peer.seen,message="Version, data schema or guild scope differs."}) end
@@ -303,10 +304,10 @@ function Sync.New(options)
         if not self.enabled then message=messages[self.reason] or "Synchronization is stopped."
         elseif self.lastError and messages[self.lastError] then message=messages[self.lastError]
         elseif self.lastError then message="Received data was rejected. Review the blocked officer and retry."
-        elseif available==0 then message="Local copy only. Waiting for an available authorized officer."
-        elseif confirmed==0 then message="Waiting for an officer to confirm received changes."
-        elseif pending>0 then message="Synchronizing changes. Peer receipts confirm memory only."
-        else message="Another officer received changes in memory. A disk save is not confirmed." end
+        elseif available==0 then message="Waiting for another officer to come online. Your raid is kept on this character."
+        elseif confirmed==0 then message="Checking raid updates with online officers."
+        elseif pending>0 then message="Sending and receiving raid updates."
+        else table.sort(confirmedNames);message="Raid updates shared with "..table.concat(confirmedNames,", ").."." end
         return {enabled=self.enabled,localOnly=confirmed==0,compatible=available>0 or CountMap(self.incompatiblePeers)==0,reason=self.reason,message=message,
             lastError=self.lastError,scope=self.scope,revision=self.revision,
             peers=peers,peerCount=Count(peers),availableCount=available,confirmedCount=confirmed,pending=pending,queued=Count(self.outbox),receiving=CountMap(self.incoming),

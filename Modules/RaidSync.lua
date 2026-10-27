@@ -20,11 +20,16 @@ local function Dialog(parent,title,width,height)
     UI.Window.StyleProjectDialog(frame,"raids")
     if UI.WindowStack then UI.WindowStack.SetOwner(frame,parent) end
     frame.close:SetScript("OnClick",function() frame:Hide() end)
+    local sizes=Raider.Database.Ensure().raidDialogSizes or {};Raider.Database.Ensure().raidDialogSizes=sizes
+    local saved=sizes[title] or {}
+    UI.Window.MakeResizable(frame,{minWidth=width,minHeight=height,width=saved.width,height=saved.height,
+        save=function(w,h) sizes[title]={width=w,height=h} end})
     frame:Hide();return frame
 end
 local function Button(parent,text,x,y,width,callback)
     local button=UI.CreateButton(parent,nil,text,width,22)
     button:SetPoint("TOPLEFT",parent,"TOPLEFT",x,y);button:SetScript("OnClick",callback)
+    UI.AttachGoldHoverBorder(button,0.35,0.35,0.35,1)
     return button
 end
 local function Timestamp(value)
@@ -86,7 +91,14 @@ local function TextPane(frame,x,y,width,height,name)
         UI.LayoutResponsiveCanvas(canvas,function(resolved)
             text:SetWidth(math.max(1,resolved-12));text:SetHeight(0)
             return UI.MeasureTextHeight(text,math.max(1,resolved-12),true)+12
-        end,nil,width,height)
+        end,nil,host:GetWidth(),host:GetHeight())
+    end
+    function pane:Resize(w,h)
+        host:SetWidth(w);host:SetHeight(h)
+        UI.LayoutResponsiveCanvas(canvas,function(resolved)
+            text:SetWidth(math.max(1,resolved-12));text:SetHeight(0)
+            return UI.MeasureTextHeight(text,math.max(1,resolved-12),true)+12
+        end,nil,w,h)
     end
     return pane
 end
@@ -117,7 +129,7 @@ function Sync.Create(parent,api)
     local id=serial
     local frame=Dialog(parent,"Raid synchronization",840,490)
     local controller={frame=frame,api=api or Raider.Runtime and Raider.Runtime.replica,rows={},offset=0,tab="sessions"}
-    controller.status=Label(frame,"",10,-36,820,32)
+    controller.status=Label(frame,"",10,-36,820,28)
     controller.message=Label(frame,"",10,-432,820,32)
     controller.empty=Label(frame,"No entries.",14,-128,800,28)
     controller.count=Label(frame,"",80,-462,250,18)
@@ -125,47 +137,67 @@ function Sync.Create(parent,api)
     controller.next=Button(frame,">",42,-458,26,function()
         if controller.offset+pageSize<(controller.total or 0) then controller.offset=controller.offset+pageSize;controller:Refresh() end
     end)
-    controller.discover=Button(frame,"Discover",730,-458,100,function()
-        local ok,reason=controller.api.Discover()
-        Message(controller,ok and "Discovery requested. Available officers can relay their copies." or reason)
-        controller:Refresh()
+    controller.retry=Button(frame,"Retry sync",690,-458,120,function()
+        local ok,reason=controller.api.Discover();Message(controller,ok and "Retrying officer synchronization." or reason);controller:Refresh()
     end)
+    UI.SetClassicButtonIcon(controller.retry,"refresh",13,7,2);controller.retry:Hide()
     controller.tabs={}
-    for index,value in ipairs({{"sessions","Sessions"},{"conflicts","Conflicts"},{"peers","Officers"},{"merge","Compare raids"}}) do
+    for index,value in ipairs({{"sessions","Raids"},{"log","Synchro Log"}}) do
         local key=value[1]
-        local button=Button(frame,value[2],10+(index-1)*135,-80,128,function() controller:SelectTab(key) end)
-        controller.tabs[key]=button
+        controller.tabs[key]=Button(frame,value[2],10+(index-1)*145,-82,138,function() controller:SelectTab(key) end)
+        UI.SetClassicButtonIcon(controller.tabs[key],key=="log" and "rules" or "refresh",13,7,2)
     end
-    controller.recover=Button(frame,"Recover and continue",10,-400,180,function()
-        if not controller.selected then return end
-        local ok,reason=controller.api.Recover(controller.selected.id)
-        if ok then
-            controller.raidId=controller.selected.id
-            Message(controller,"Session recovered. Loot distribution and announcements were not replayed.")
-            controller:Refresh()
-        else Message(controller,reason) end
-    end)
-    controller.inspect=Button(frame,"Show conflicts",200,-400,140,function()
-        if controller.tab=="sessions" and controller.selected then controller.raidId=controller.selected.id;controller:SelectTab("conflicts")
-        elseif controller.tab=="conflicts" and controller.selected then
-            if controller.selected.kind=="merge" then controller:ShowCompare(controller.selected.source or string.sub(controller.selected.id,7))
-            else controller:ShowConflict(controller.selected.id) end
-        elseif controller.tab=="merge" and controller.selected then controller:ShowCompare(controller.selected.id) end
-    end)
-    controller.selection=Label(frame,"Select an entry.",10,-370,820,24)
+    controller.officers=Label(frame,"",10,-66,820,18)
+    controller.headings={Label(frame,"Raid",16,-112,260,18),Label(frame,"Type",290,-112,190,18),Label(frame,"Status",490,-112,140,18),Label(frame,"Actions",690,-112,130,18)}
+    for _,heading in ipairs(controller.headings) do heading:SetTextColor(unpack(UI.Theme.colors.goldText)) end
+    controller.selection=Label(frame,"",10,-398,820,24)
+    controller.recover=Button(frame,"Join session",10,-400,150,function() end);controller.recover:Hide()
+    controller.inspect=Button(frame,"All raids",310,-82,110,function() controller.expanded=nil;controller.offset=0;controller:Refresh() end);controller.inspect:Hide()
+    local function RowAction(row,kind)
+        local entry=row.entry;if not entry then return end
+        if kind=="join" then
+            local ok,reason=controller.api.Recover(entry.id,entry.state=="ended")
+            Message(controller,ok and (entry.state=="ended" and "Opened ended raid. Its updates still synchronize." or "Joined raid session. Updates synchronize automatically.") or reason)
+            if ok then controller.raidId=entry.id end
+        elseif kind=="reopen" then
+            if not controller.reopenDialog then
+                local confirm=Dialog(frame,"Reopen raid",420,150);controller.reopenDialog=confirm
+                confirm.label=Label(confirm,"",12,-40,396,52)
+                confirm.yes=Button(confirm,"Reopen",292,-116,108,function()
+                    local ok,reason=controller.api.Reopen(confirm.raidId,confirm.revision)
+                    if ok then confirm:Hide() end
+                    Message(controller,ok and "Raid reopened for all officers. Join it to continue." or reason);controller:Refresh()
+                end)
+                confirm.no=Button(confirm,"Cancel",176,-116,108,function() confirm:Hide() end)
+                function confirm:LayoutContent(w,h)
+                    self.label:SetWidth(w-24);self.label:SetHeight(h-88)
+                    self.yes:ClearAllPoints();self.yes:SetPoint("BOTTOMRIGHT",self,"BOTTOMRIGHT",-28,12)
+                    self.no:ClearAllPoints();self.no:SetPoint("RIGHT",self.yes,"LEFT",-8,0)
+                end
+            end
+            local confirm=controller.reopenDialog;confirm.raidId=entry.id;confirm.revision=entry.lifecycleRevision
+            confirm.label:SetText("Reopen "..entry.name.." for all officers? Recording stays off until you start Live Tracking.")
+            confirm:Show();confirm:LayoutContent(confirm:GetWidth(),confirm:GetHeight())
+            if UI.WindowStack then UI.WindowStack.Raise(confirm,frame) end
+        elseif kind=="conflicts" then
+            controller.raidId=entry.id;controller.expanded=controller.expanded==entry.id and nil or entry.id;controller.offset=0
+        elseif kind=="resolve" then if entry.kind=="merge" then controller:ShowCompare(entry.source) else controller:ShowConflict(entry.conflictId) end
+        elseif kind=="compare" then controller.selected=entry;controller:ShowCompare(entry.id) end
+        controller:Refresh()
+    end
     for index=1,pageSize do
         local row=UI.CreateControl(nil,frame)
-        row:SetPoint("TOPLEFT",frame,"TOPLEFT",10,-112-(index-1)*32)
-        row:SetWidth(820);row:SetHeight(32)
-        row.label=Label(row,"",6,-3,808,28)
+        row:SetPoint("TOPLEFT",frame,"TOPLEFT",10,-130-(index-1)*32);row:SetWidth(820);row:SetHeight(30)
+        row.label=Label(row,"",6,-7,260,20);row.typeLabel=Label(row,"",280,-7,190,20);row.stateLabel=Label(row,"",480,-7,120,20);row.actions={}
+        if row.typeLabel.SetWordWrap then row.typeLabel:SetWordWrap(false);row.stateLabel:SetWordWrap(false) end
         if row.label.SetWordWrap then row.label:SetWordWrap(false) end
-        row:SetScript("OnClick",function()
-            if not row.entry then return end
-            controller.selected=row.entry;controller:UpdateSelection()
-        end)
+        for actionIndex,spec in ipairs({{"join","start","Open / join raid"},{"reopen","refresh","Reopen ended raid for all officers"},{"conflicts","warning","Review conflicting changes"},{"compare","raids","Compare with the open raid"},{"resolve","fix","Resolve this conflict"}}) do
+            local kind=spec[1];local button=Button(row,"",600+(actionIndex-1)*32,-3,26,function() RowAction(row,kind) end)
+            UI.SetClassicButtonIcon(button,spec[2],14,6,0);UI.AttachTooltip(button,spec[3],spec[3]);row.actions[kind]=button
+        end
+        row:SetScript("OnClick",function() if row.entry then controller.selected=row.entry;controller:UpdateSelection() end end)
         UI.AttachTooltip(row,"Raid synchronization",function() return row.fullText or "" end)
-        UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false)
-        controller.rows[index]=row
+        UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false);controller.rows[index]=row
     end
 
     local conflict,comparison
@@ -266,6 +298,14 @@ function Sync.Create(parent,api)
                 conflict:Hide();controller.selected=nil;Message(controller,"Conflict resolved.");controller:Refresh()
             end)
             conflict.message=Label(conflict,"",10,-510,760,58)
+            local moving={"previous","next","count","use","recordPrevious","recordNext","recordCount","manualHint","itemLabel","item","recipientLabel","recipient","quantityLabel","quantity","exception","exceptionLabel","manual","resolve","progress","message"}
+            local points={}
+            for _,key in ipairs(moving) do local control=conflict[key];if control then local p,r,rp,x,y=control:GetPoint(1);points[key]={p,r,rp,x,y} end end
+            function conflict:LayoutContent(w,h)
+                local dy=h-580;self.heading:SetWidth(w-20);self.pane:Resize(w-20,200+dy)
+                for key,point in pairs(points) do local control=self[key];control:ClearAllPoints();control:SetPoint(point[1],point[2],point[3],point[4],point[5]-dy) end
+                self.message:SetWidth(w-20);self.manualHint:SetWidth(w-20)
+            end
             conflict:SetScript("OnHide",function()
                 conflict.data=nil;conflict.conflictId=nil;conflict.pane.text:SetText("");conflict.heading:SetText("")
                 conflict.choices=nil;conflict.heads=nil
@@ -273,7 +313,7 @@ function Sync.Create(parent,api)
             end)
         end
         conflict.conflictId=conflictId;conflict.index=1;conflict.recordIndex=1;conflict.choices={};conflict.heads=nil
-        conflict:Show();ConflictRefresh()
+        conflict:Show();conflict:LayoutContent(conflict:GetWidth(),conflict:GetHeight());ConflictRefresh()
         if UI.WindowStack then UI.WindowStack.Raise(conflict,frame) end
     end
 
@@ -350,16 +390,30 @@ function Sync.Create(parent,api)
                     if not comparison.details then
                         local details=Dialog(comparison,"Compared values",700,350)
                         details.pane=TextPane(details,10,-40,680,298,"BootyRaidSyncMergeDetails"..id)
+                        function details:LayoutContent(w,h) self.pane:Resize(w-20,h-52) end
                         details:SetScript("OnHide",function() details.pane.text:SetText("") end)
                         comparison.details=details
                     end
                     comparison.details.pane:SetText(tostring(row.entry.label or row.entry.key).."\n\nCurrent raid\n"..Sync.FormatRecord(row.entry.key,row.entry.targetValue,row.entry.targetDeleted).."\n\nIncoming raid\n"..Sync.FormatRecord(row.entry.key,row.entry.sourceValue,row.entry.sourceDeleted))
-                    comparison.details:Show()
+                    comparison.details:Show();comparison.details:LayoutContent(comparison.details:GetWidth(),comparison.details:GetHeight())
                     if UI.WindowStack then UI.WindowStack.Raise(comparison.details,comparison) end
                 end)
                 UI.AttachTooltip(row,"Compare raid records",function() return row.entry and ((row.entry.label or row.entry.key or "").."\nClick for complete values. Same award counts once; separate awards both remain.") or "" end)
                 UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false)
                 comparison.rows[index]=row
+            end
+            function comparison:LayoutContent(w,h)
+                self.heading:SetWidth(w-20);self.message:SetWidth(w-20)
+                self.merge:ClearAllPoints();self.merge:SetPoint("BOTTOMRIGHT",self,"BOTTOMRIGHT",-30,26)
+                self.message:ClearAllPoints();self.message:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,52)
+                self.progress:ClearAllPoints();self.progress:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,26)
+                self.previous:ClearAllPoints();self.previous:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,100)
+                self.next:ClearAllPoints();self.next:SetPoint("LEFT",self.previous,"RIGHT",6,0)
+                self.count:ClearAllPoints();self.count:SetPoint("LEFT",self.next,"RIGHT",12,0)
+                for _,row in ipairs(self.rows) do
+                    row:SetWidth(w-20);row.label:SetWidth(w-336)
+                    for index,button in ipairs(row.buttons) do button:ClearAllPoints();button:SetPoint("RIGHT",row,"RIGHT",-6-(2-index)*154,0) end
+                end
             end
             comparison:SetScript("OnHide",function()
                 comparison.choices=nil;comparison.token=nil;comparison.sourceId=nil;comparison.total=nil
@@ -370,76 +424,94 @@ function Sync.Create(parent,api)
         comparison.sourceId=sourceId;comparison.offset=0;comparison.choices={};comparison.token=nil
         comparison.heading:SetText("Current raid: "..tostring(self.raidName or self.raidId).."\nIncoming raid: "..tostring(self.selected and self.selected.name or sourceId))
         Message(comparison,"Choose each difference explicitly. Click a record to inspect both values.")
-        comparison:Show();CompareRefresh()
+        comparison:Show();comparison:LayoutContent(comparison:GetWidth(),comparison:GetHeight());CompareRefresh()
         if UI.WindowStack then UI.WindowStack.Raise(comparison,frame) end
     end
 
     function controller:UpdateSelection()
-        for _,row in ipairs(self.rows) do UI.StyleSelectableTableRow(row,math.mod(_,2)==0,row.entry~=nil and row.entry==self.selected) end
-        self.selection:SetText(self.selected and (self.selected.name or self.selected.subject or self.selected.id or self.selected.key or "") or "Select an entry.")
-        if self.tab=="sessions" then self.recover:Show();self.inspect:Show();self.inspect:SetText("Show conflicts")
-        elseif self.tab=="conflicts" then self.recover:Hide();self.inspect:Show();self.inspect:SetText("Resolve conflict")
-        elseif self.tab=="merge" then self.recover:Hide();self.inspect:Show();self.inspect:SetText("Compare selected")
-        else self.recover:Hide();self.inspect:Hide() end
-        UI.SetButtonEnabled(self.recover,self.selected~=nil and self.selected.recoverable~=false)
-        UI.SetButtonEnabled(self.inspect,self.selected~=nil)
+        for index,row in ipairs(self.rows) do UI.StyleSelectableTableRow(row,math.mod(index,2)==0,row.entry~=nil and row.entry==self.selected) end
     end
     function controller:SelectTab(tab)
-        if self.tab=="sessions" and self.selected then self.raidId=self.selected.id;self.raidName=self.selected.name end
-        self.tab=tab;self.offset=0;self.selected=nil;Message(self,"")
-        if conflict then conflict:Hide() end
-        if comparison then comparison:Hide() end
+        self.tab=tab;self.expanded=nil;self.offset=0;self.selected=nil;Message(self,"")
+        if conflict then conflict:Hide() end;if comparison then comparison:Hide() end
         self:Refresh()
-    end
-    local function RowText(tab,entry)
-        if tab=="peers" then return tostring(entry.name).."  |  "..tostring(entry.status or "Unknown")..(entry.message and ("\n"..entry.message) or "") end
-        if tab=="conflicts" then return tostring(entry.subject or entry.key or entry.id).."  |  "..tostring(entry.kind or "Raid data").."\n"..tostring(entry.variantCount or 0).." competing variants" end
-        return tostring(entry.name or entry.displayName or entry.id).."  |  "..tostring(entry.raidType or entry.raidName or "Other").."\n"..tostring(entry.state or "Saved").."  |  "..Timestamp(entry.updatedAt)..(entry.conflicts and entry.conflicts>0 and ("  |  "..entry.conflicts.." conflicts") or "")
     end
     function controller:Refresh(status)
         if not self:IsVisible() then return end
-        status=status or self.api.GetStatus(self.raidId)
-        self.revision=status.revision
-        local localOnly=type(status.localOnly)=="boolean" and (status.localOnly and "Yes" or "No") or tostring(status.localOnly or 0)
-        self.status:SetText(tostring(status.message or (status.compatible==false and "Incompatible schema or CSR policy. Synchronization is paused." or "Changes are exchanged with available officers.")).."\nLocal only: "..localOnly.."  |  Pending: "..tostring(status.pending or 0).."  |  Conflicts: "..tostring(status.conflicts or 0))
-        local entries,total
-        if self.tab=="sessions" then entries,total=self.api.ListRaids(self.offset,pageSize)
-        elseif self.tab=="conflicts" then
-            if self.raidId then entries,total=self.api.ListConflicts(self.raidId,self.offset,pageSize) else entries,total={},0 end
-        elseif self.tab=="merge" then
-            if self.raidId then entries,total=self.api.ListMergeCandidates(self.raidId,self.offset,pageSize) else entries,total={},0 end
-        else
-            entries={};local peers=status.peers or {};total=table.getn(peers)
-            for index=self.offset+1,math.min(self.offset+pageSize,total) do table.insert(entries,peers[index]) end
-        end
-        entries,total=entries or {},total or 0
+        status=status or self.api.GetStatus(self.raidId);self.revision=status.revision;self.raidName=status.raidName or self.raidName
+        if status.retryAvailable then self.retry:Show() else self.retry:Hide() end
+        self.status:SetText(status.message or "Raid updates synchronize automatically.")
+        local names={}
+        for _,peer in ipairs(status.peers or {}) do if peer.available then table.insert(names,peer.name) end end
+        self.officers:SetText(table.getn(names)>0 and ("Connected officers: "..table.concat(names,", ")) or "No other officer connected.")
+        local all,total={},0
+        if self.tab=="log" then
+            local log=self.api.GetSyncLog and self.api.GetSyncLog() or {};total=table.getn(log)
+            for index=self.offset+1,math.min(total,self.offset+pageSize) do local entry=log[index];table.insert(all,{name=Timestamp(entry.timestamp).."  "..entry.message,log=true}) end
+        elseif self.expanded then
+            local conflicts;conflicts,total=self.api.ListConflicts(self.expanded,self.offset,pageSize)
+            for _,item in ipairs(conflicts or {}) do table.insert(all,{name=item.subject or item.id,conflictId=item.id,id=self.expanded,conflict=true,kind=item.kind,source=item.source}) end
+        else all,total=self.api.ListRaids(self.offset,pageSize) end
+        self.total=total
         local maximum=math.max(0,math.floor(math.max(0,total-1)/pageSize)*pageSize)
         if self.offset>maximum then self.offset=maximum;return self:Refresh(status) end
-        self.total=total
-        local selectedId=self.selected and (self.selected.id or self.selected.name)
-        self.selected=nil
+        if self.expanded and self.tab~="log" then self.inspect:Show() else self.inspect:Hide() end
         for index,row in ipairs(self.rows) do
-            local entry=entries[index];row.entry=entry;row.fullText=entry and RowText(self.tab,entry) or ""
-            row.label:SetText(row.fullText)
-            if entry then row:Show();if (entry.id or entry.name)==selectedId then self.selected=entry end else row:Hide() end
+            local entry=all[index];row.entry=entry
+            row.fullText=entry and (entry.name..(not entry.log and not entry.conflict and ("  |  "..tostring(entry.raidType).."  |  "..(entry.state=="ended" and "Ended" or "Open").."  |  "..tostring(entry.conflicts or 0).." conflicts") or "")) or ""
+            row.label:SetText(entry and entry.name or "")
+            row.typeLabel:SetText(entry and not entry.log and not entry.conflict and entry.raidType or "")
+            row.stateLabel:SetText(entry and not entry.log and not entry.conflict and ((entry.state=="ended" and "Ended" or "Open")..((entry.conflicts or 0)>0 and (" / "..entry.conflicts.." conflicts") or "")) or "")
+            for kind,button in pairs(row.actions) do
+                local show=entry and not entry.log and ((entry.conflict and kind=="resolve") or (not entry.conflict and (kind=="join" or kind=="reopen" and entry.state=="ended" or kind=="conflicts" and (entry.conflicts or 0)>0 or kind=="compare" and self.raidId and self.raidId~=entry.id)))
+                if show then button:Show() else button:Hide() end
+            end
+            if entry then row:Show() else row:Hide() end
         end
-        self.empty:SetText((self.tab=="conflicts" or self.tab=="merge") and not self.raidId and "Select a session first." or (self.tab=="conflicts" and "No unresolved conflicts." or "No entries. Use Discover to request available copies."))
+        self.empty:SetText(self.tab=="log" and "No synchronization events yet." or self.expanded and "No unresolved conflicts for this raid." or "No raids yet. New raids appear automatically when an officer shares them.")
         if total==0 then self.empty:Show() else self.empty:Hide() end
         self.count:SetText(total==0 and "0 entries" or (self.offset+1).."-"..math.min(self.offset+pageSize,total).." / "..total)
         UI.SetButtonEnabled(self.previous,self.offset>0);UI.SetButtonEnabled(self.next,self.offset+pageSize<total)
         for key,button in pairs(self.tabs) do UI.SetClassicButtonSelected(button,key==self.tab) end
-        self:UpdateSelection()
+        self:UpdateSelection();frame:LayoutContent(frame:GetWidth(),frame:GetHeight())
+    end
+    function frame:LayoutContent(w,h)
+        controller.status:SetWidth(w-20);controller.officers:SetWidth(w-20)
+        controller.message:ClearAllPoints();controller.message:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,40);controller.message:SetWidth(w-20)
+        controller.previous:ClearAllPoints();controller.previous:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,10)
+        controller.next:ClearAllPoints();controller.next:SetPoint("LEFT",controller.previous,"RIGHT",6,0)
+        controller.retry:ClearAllPoints();controller.retry:SetPoint("BOTTOMRIGHT",self,"BOTTOMRIGHT",-30,10)
+        controller.count:ClearAllPoints();controller.count:SetPoint("LEFT",controller.next,"RIGHT",10,0)
+        for _,heading in ipairs(controller.headings) do if controller.tab=="log" or controller.expanded then heading:Hide() else heading:Show() end end
+        local titleSpace=w-38-134;local first=math.floor(titleSpace*0.44);local second=math.floor(titleSpace*0.32)
+        controller.headings[4]:ClearAllPoints();controller.headings[4]:SetPoint("TOPRIGHT",self,"TOPRIGHT",-16,-112)
+        controller.headings[2]:ClearAllPoints();controller.headings[2]:SetPoint("TOPLEFT",self,"TOPLEFT",first+22,-112)
+        controller.headings[3]:ClearAllPoints();controller.headings[3]:SetPoint("TOPLEFT",self,"TOPLEFT",first+second+28,-112)
+        for _,row in ipairs(controller.rows) do
+            row:SetWidth(w-20);local right=-6
+            for _,key in ipairs({"compare","conflicts","reopen","join","resolve"}) do
+                local button=row.actions[key]
+                if button:IsShown() then button:ClearAllPoints();button:SetPoint("RIGHT",row,"RIGHT",right,0);right=right-32 end
+            end
+            if row.entry and (row.entry.log or row.entry.conflict) then row.label:SetWidth(w-38+right)
+            else
+                local available=w-38-134;local nameWidth=math.floor(available*0.44);local typeWidth=math.floor(available*0.32)
+                row.label:SetWidth(nameWidth);row.typeLabel:ClearAllPoints();row.typeLabel:SetPoint("TOPLEFT",row,"TOPLEFT",nameWidth+12,-7);row.typeLabel:SetWidth(typeWidth)
+                row.stateLabel:ClearAllPoints();row.stateLabel:SetPoint("TOPLEFT",row,"TOPLEFT",nameWidth+typeWidth+18,-7);row.stateLabel:SetWidth(available-nameWidth-typeWidth-12)
+            end
+        end
     end
     function controller:Open(raidId,tab)
         if conflict then conflict:Hide() end
         if comparison then comparison:Hide() end
-        self.raidId=raidId;self.raidName=nil;self.offset=0;self.selected=nil;self.tab=tab or "sessions"
+        self.raidId=raidId;self.raidName=nil;self.offset=0;self.selected=nil;self.tab=tab=="log" and "log" or "sessions";self.expanded=tab=="conflicts" and raidId or nil
         Message(self,"");frame:Show();self:Refresh()
         if UI.WindowStack then UI.WindowStack.Raise(frame,parent) end
     end
     function controller:IsVisible() return frame:IsVisible() end
     function controller:Close() frame:Hide() end
     frame:SetScript("OnHide",function()
+        if controller.reopenDialog then controller.reopenDialog:Hide() end
         if conflict then conflict:Hide() end
         if comparison then comparison:Hide() end
         for _,row in ipairs(controller.rows) do row.entry=nil;row.fullText=nil;row.label:SetText("") end

@@ -2,6 +2,8 @@ local Raider=BootyRaider
 local SyncRuntime={}
 Raider.Modules.RaidSyncRuntime=SyncRuntime
 local runtime,nextWake,changed,statusChanged,registered,rosterAt,lastRosterFailure
+local lastSyncError
+local onlineOfficers
 local maintenance,waitingConfirmation,compactedAt,maintenanceArmed={},{},{},false
 local function Now() return type(GetTime)=="function" and GetTime() or time() end
 local function Combat() return type(UnitAffectingCombat)=="function" and UnitAffectingCombat("player") and true or false end
@@ -95,6 +97,7 @@ local function Restore(attendance)
         or Raider.Modules.MasterLootWindow.IsBusy and Raider.Modules.MasterLootWindow.IsBusy() then return false,"Finish the current loot action or Test Raid before recovering a session." end
     Raider.Database.StoreRaidAttendance(attendance)
     runtime.sessionController:RestoreActive();runtime.sessionController:Begin();runtime.historicalLoaded=true
+    if attendance.syncEnded then Raider.raidSessionPaused=true;Raider.raidLiveTracking=false end
     runtime.CloseSessionPrompts()
     attendance.syncRecoveryNotice="Recovered agreed data. Events missed by every recorder cannot be reconstructed."
     runtime.RefreshViews();return true
@@ -120,7 +123,10 @@ function SyncRuntime.Initialize(owner)
             restore=Restore,onChanged=function(id) changed=true;QueueMaintenance(id) end,
             onAttendance=function(previous,attendance)
                 Raider.Services.Raid.PreserveLootSession(previous,attendance)
-                if attendance.syncEnded then Raider.raidSessionPaused=true end
+                if attendance.syncEnded then
+                    Raider.raidSessionPaused=true
+                    if not previous.syncEnded then runtime.Print(runtime.replica.GetStatus(attendance.syncRaidId).message) end
+                end
                 if previous.raidName~=attendance.raidName then
                     Raider.Services.AutoLoot.ApplyRaidPreset(attendance.raidName);Raider.OnSettingChanged("lmAutoLootPresets")
                 end
@@ -142,6 +148,7 @@ function SyncRuntime.RefreshAuthority()
     if not runtime.raidSync then
         runtime.raidSync=Raider.Services.RaidSync.Create({db=Raider.Database.Ensure(),journal=Raider.Services.RaidJournal,
             codec=Raider.Services.RaidSyncCodec,now=Now,actor=function() return UnitName("player") end,scope=Scope,authorize=Authority,
+            isOnline=function(name) local member=BootyLib.GuildDirectory.Find(name);return member and member.online~=false end,
             send=function(prefix,text,channel) return SendAddonMessage(prefix,text,channel) end,
             activeRaidId=function() local current=Raider.Database.GetRaidAttendance();return current and current.syncRaidId end,
             priority=function(id)
@@ -153,10 +160,20 @@ function SyncRuntime.RefreshAuthority()
             validateOperation=Raider.Services.RaidReplica.ValidateOperation,
             validateCheckpoint=Raider.Services.RaidReplica.ValidateCheckpoint,
             onApply=function(operation,reason) runtime.replica.OnOperation(operation,reason,false) end,
-            onStatus=function() runtime.replica._state.revision=runtime.replica._state.revision+1;statusChanged=true;ArmMaintenance();SyncRuntime.Wake() end})
+            onStatus=function(status)
+                if status.lastError and status.lastError~=lastSyncError then runtime.replica.LogSync(status.message) end
+                lastSyncError=status.lastError
+                runtime.replica._state.revision=runtime.replica._state.revision+1;statusChanged=true;ArmMaintenance();SyncRuntime.Wake() end})
         runtime.replica.SetTransport(runtime.raidSync)
     end
-    local ok,reason=runtime.raidSync:Start();SyncRuntime.Wake();return ok,reason
+    local ok,reason=runtime.raidSync:Start()
+    local names={};local snapshot=BootyLib.GuildDirectory.GetSnapshot()
+    for _,member in ipairs(snapshot and snapshot.members or {}) do
+        if member.online~=false and Authority(member.name,scope) then table.insert(names,member.name) end
+    end
+    table.sort(names);local signature=table.concat(names,",")
+    if ok and signature~=onlineOfficers then onlineOfficers=signature;runtime.raidSync:Discover() end
+    SyncRuntime.Wake();return ok,reason
 end
 function SyncRuntime.Receive(prefix,text,channel,sender)
     if runtime and runtime.raidSync then
@@ -171,6 +188,6 @@ function SyncRuntime.Stop()
         runtime.events:SetScript("OnUpdate",nil)
         if registered then runtime.events:UnregisterEvent("CHAT_MSG_ADDON");runtime.events:UnregisterEvent("PLAYER_REGEN_ENABLED") end
     end
-    registered=nil;nextWake=nil;rosterAt=nil;changed=nil;statusChanged=nil;maintenanceArmed=false;lastRosterFailure=nil
+    lastSyncError=nil;onlineOfficers=nil;registered=nil;nextWake=nil;rosterAt=nil;changed=nil;statusChanged=nil;maintenanceArmed=false;lastRosterFailure=nil
     if Raider.Modules.RaidSync then Raider.Modules.RaidSync.Close() end
 end

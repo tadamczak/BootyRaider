@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-dev.7 — 2026-10-27
+
+- Automatically reconnect officer synchronization on guild presence changes; keep idle online officers connected.
+- Open ended raids with continuing updates, explicitly reopen shared sessions, and load the latest synchronized snapshot data.
+- Keep Raid Sync beside Raid Info; combine raid actions in one table, simplify statuses and add a bounded Synchro Log.
+- Resize synchronization, comparison, conflict and Raid Log dialogs with remembered dimensions.
+
 ## 1.0.0-dev.6 — 2026-10-27
 
 - Ignore guild messages echoed to their own sender instead of showing a false synchronization rejection.

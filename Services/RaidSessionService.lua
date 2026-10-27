@@ -114,6 +114,7 @@ function Session:CaptureActiveRoster(isDraft)
     local dependencies = self.dependencies
     if dependencies.testRaid.IsActive() then return dependencies.testRaid.GetRaidMemberCount() end
     local previousAttendance = dependencies.database.GetRaidAttendance()
+    if previousAttendance and previousAttendance.syncEnded then return nil,"This session has ended. Reopen it in Raid Sync before recording." end
     local count, failure = dependencies.raid.SaveRoster()
     if count == nil then return nil, failure end
     local attendance = dependencies.database.GetRaidAttendance()
@@ -282,7 +283,14 @@ function Session:LoadSnapshot(snapshotId)
     local dependencies = self.dependencies
     local _, snapshot = dependencies.database.GetSavedRaidState(snapshotId)
     if snapshot then
-        local attendance = dependencies.raidRes.RestoreSnapshot(snapshot)
+        local attendance
+        if snapshot.syncRaidId and dependencies.getProjection then
+            local reason
+            attendance,reason=dependencies.getProjection(snapshot.syncRaidId)
+            if not attendance then return nil,reason end
+            attendance._loadedSnapshotId=snapshot.id;attendance._sessionDraft=true
+            dependencies.database.StoreRaidAttendance(attendance)
+        else attendance=dependencies.raidRes.RestoreSnapshot(snapshot) end
         dependencies.raidRes.Reconcile(attendance, attendance)
         return attendance
     end

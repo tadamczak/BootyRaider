@@ -192,6 +192,13 @@ function Replica.Create(options)
     local db=options.db or Raider.Database.Ensure()
     local state={revision=0,dirty={},dirtyNames={},aliases={},aliasSources={},mergeConflicts={},metadata={},transport=nil,projected={},waiting={}}
     local api={}
+    local syncLog=type(db.raidSyncLog)=="table" and db.raidSyncLog or {};db.raidSyncLog=syncLog
+    function api.LogSync(message)
+        if syncLog[1] and syncLog[1].message==message then return end
+        table.insert(syncLog,1,{timestamp=time(),message=message});if table.getn(syncLog)>100 then table.remove(syncLog) end
+        state.revision=state.revision+1
+    end
+    function api.GetSyncLog() return syncLog end
     local function Authorized()
         if options.authorize then return options.authorize() end
         return Raider.Services.RankPolicy.CanManageHistory()
@@ -302,6 +309,10 @@ function Replica.Create(options)
     end
     function api.OnOperation(operation,status,localChange)
         if not operation or status=="duplicate" then return end
+        if not localChange and operation.kind~="raid.observe" then
+            local action=Raider.Modules and Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
+            api.LogSync("Received update by "..tostring(operation.author)..": "..tostring(action))
+        end
         local reindex=operation.kind=="raid.merge"
         for _,change in ipairs(operation.changes or {}) do if change.key=="raid:alias-decision" or string.find(change.key,"^merge:") then reindex=true end end
         local previousTargets={}
@@ -634,7 +645,7 @@ function Replica.Create(options)
         return used
     end
     function api.HasWork() return next(state.dirty)~=nil end
-    function api.Recover(id)
+    function api.Recover(id,viewEnded)
         local allowed,reason=Authorized();if not allowed then return false,reason end
         id=Canonical(id)
         local active=db.raidAttendance
@@ -650,18 +661,27 @@ function Replica.Create(options)
         if localFacts then return false,"Save the current raid successfully before recovering a session. Confirmed loot or loot-right changes are still recorded only locally." end
         if active and active.syncRaidId and Canonical(active.syncRaidId)~=id then return false,"Save or end your current session before recovering another raid." end
         local attendance,failure=Build(id);if not attendance then return false,failure end
-        if Record(id,"raid:lifecycle")=="ended" then return false,"This raid was explicitly ended. Its history is still available." end
+        if Record(id,"raid:lifecycle")=="ended" and not viewEnded then return false,"This raid was explicitly ended. Its history is still available." end
         if options.restore then
             local ok,message=options.restore(attendance);if ok==false then return false,message end
         else db.raidAttendance=attendance end
         state.revision=state.revision+1
         return true
     end
+    function api.Reopen(id,expected)
+        local current=Record(Canonical(id),"raid:lifecycle")
+        if current~="ended" then return false,"This session is no longer ended. Refresh and try again." end
+        local _,record=Record(Canonical(id),"raid:lifecycle")
+        if expected and record.revision~=expected then return false,"Session status changed. Review it again." end
+        local ok,reason=Commit(Canonical(id),"raid.reopen",{{key="raid:lifecycle",value="active"}},{subject="Reopened raid session"})
+        if ok then api.LogSync("Reopened the raid session for all officers.") end
+        return ok,reason
+    end
     function api.GetStatus(id)
         local transport=state.transport and state.transport.GetStatus and state.transport:GetStatus(id) or {}
         local conflicts=id and table.getn(Conflicts(Canonical(id))) or 0
         local blocked=id and state.aliasBlocked[Canonical(id)]
-        local message=blocked and "Overlapping raid recordings: CSR is withheld until their identities are resolved." or id and state.waiting[Canonical(id)] or transport.message or "Peer receipts confirm memory copies; they do not confirm a disk save."
+        local message=blocked and "Overlapping raid recordings: CSR is withheld until their identities are resolved." or id and state.waiting[Canonical(id)] or transport.message or "Waiting for another officer."
         local recordingGap
         if id and options.recorderAvailable and Record(Canonical(id),"raid:lifecycle")~="ended" then
             local found=false
@@ -673,14 +693,21 @@ function Replica.Create(options)
                 end
             end
             recordingGap=not found
-            if recordingGap and not blocked then message="Recording gap: no available recorder confirmed. Missed events cannot be reconstructed." end
+            if recordingGap and not blocked and not transport.lastError then message="Nobody is recording new raid events. Use Start Live Tracking to record on this character." end
         end
         local active=db.raidAttendance
         local localFailure=active and id and Canonical(active.syncRaidId)==Canonical(id) and active.syncLocalAuditFailure
+        local lifecycle=id and Record(Canonical(id),"raid:lifecycle")
+        local metadata=id and Record(Canonical(id),"raid:metadata")
+        if lifecycle=="ended" and not blocked and not transport.lastError then
+            local _,record=Record(Canonical(id),"raid:lifecycle")
+            local operation=record and record.revision and J.GetOperation(db,record.revision)
+            message=tostring(operation and operation.author or "An officer").." ended this raid. Updates still synchronize. Reopen it to continue recording."
+        end
         if localFailure then message="Needs attention: a confirmed loot change is stored only locally. Save the raid to retry synchronization. "..tostring(localFailure) end
         return {revision=state.revision+(transport.revision or 0),localOnly=transport.localOnly~=false,pending=transport.pending or 0,
             conflicts=conflicts,compatible=transport.compatible~=false,peers=type(transport.peers)=="table" and transport.peers or {},
-            recordingGap=recordingGap,csrWithheld=blocked and true or false,needsAttention=localFailure and true or false,message=message}
+            raidName=metadata and metadata.id,retryAvailable=transport.lastError~=nil,lifecycle=lifecycle,recordingGap=recordingGap,csrWithheld=blocked and true or false,needsAttention=localFailure and true or false,message=message}
     end
     local function RaidList()
         if state.catalog then return state.catalog end
@@ -690,9 +717,9 @@ function Replica.Create(options)
                 local metadata,record=Record(id,"raid:metadata")
                 if metadata then
                     local operation=record.revision and J.GetOperation(db,record.revision)
-                    local lifecycle=Record(id,"raid:lifecycle") or "active"
+                    local lifecycle,lifecycleRecord=Record(id,"raid:lifecycle");lifecycle=lifecycle or "active"
                     table.insert(list,{id=id,name=metadata.id,raidType=metadata.raidName,state=lifecycle,author=operation and operation.author,
-                        updatedAt=operation and operation.timestamp or metadata.startedAt or 0,conflicts=table.getn(Conflicts(id)),recoverable=lifecycle~="ended"})
+                        updatedAt=operation and operation.timestamp or metadata.startedAt or 0,conflicts=table.getn(Conflicts(id)),lifecycleRevision=lifecycleRecord and lifecycleRecord.revision,recoverable=true})
                 end
             end
         end

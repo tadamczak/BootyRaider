@@ -278,7 +278,7 @@ function Runtime.Initialize(host)
     end
     Raider.Database.onRaidAttendanceChanged=Raider.Services.Raid.OnRaidAttendanceChanged
     Raider.Database.onRaidAttendanceMetadataChanged=Raider.Services.Raid.PreserveLootSession
-    Runtime.session=Raider.Services.RaidSession.Create({database=Raider.Database,raid=Raider.Services.Raid,raidRes=Raider.Services.RaidRes,
+    Runtime.session=Raider.Services.RaidSession.Create({getProjection=function(id) return Runtime.replica.GetProjection(id) end,database=Raider.Database,raid=Raider.Services.Raid,raidRes=Raider.Services.RaidRes,
         raidStatistics=Raider.Services.RaidStatistics,testRaid=Raider.Services.TestRaid,now=function() return time() end,
         autoLoot=Raider.Services.AutoLoot,onRaidTypeChanged=function() Raider.OnSettingChanged("lmAutoLootPresets") end})
     Runtime.sessionController=Raider.Modules.RaidSessionController.Create({state=Raider,session=Runtime.session,

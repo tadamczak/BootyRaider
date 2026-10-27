@@ -92,7 +92,7 @@ function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
     if controls.unavailable then
         local label = controls.unavailable
         label:ClearAllPoints(); label:SetPoint("TOPLEFT", page, "TOPLEFT", 8, textY)
-        local helpWidth = controls.raidInfo and math.min(width, math.max(1, fullWidth - 34)) or width
+        local helpWidth = controls.raidInfo and math.min(width, math.max(1, fullWidth - 160)) or width
         label:SetWidth(helpWidth); label:SetJustifyH("LEFT")
         if label.SetWordWrap then label:SetWordWrap(true) end
         label:SetText(canStartRaid and "Start a new raid snapshot, or load a saved raid." or "Join a raid to start a new snapshot, or load a saved raid.")
@@ -109,8 +109,8 @@ function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
     controls.testRaid:SetWidth(buttonWidth); controls.testRaid:SetHeight(22); controls.testRaid:Show()
     local actions={controls.scan,controls.testRaid}
     if controls.raidSync and Raider.Services.RankPolicy.CanManageHistory() then
-        controls.raidSync:SetText("Sync / Recover");controls.raidSync:SetWidth(128);controls.raidSync:SetHeight(22)
-        controls.raidSync:Enable();controls.raidSync:Show();table.insert(actions,controls.raidSync)
+        controls.raidSync:SetText("Raid Sync");controls.raidSync:SetWidth(118);controls.raidSync:SetHeight(22)
+        controls.raidSync:Enable();controls.raidSync:ClearAllPoints();controls.raidSync:SetPoint("RIGHT",controls.raidInfo,"LEFT",-6,0);controls.raidSync:Show()
     elseif controls.raidSync then controls.raidSync:Hide() end
     actionY=22-Raider.UI.Components.LayoutFlow(page,actions,8,-actionY,width,8)
     controls.historyTitle:ClearAllPoints(); controls.historyTitle:SetPoint("TOPLEFT", page, "TOPLEFT", 8, actionY - 38); controls.historyTitle:Show()

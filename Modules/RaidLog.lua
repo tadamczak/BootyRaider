@@ -5,7 +5,7 @@ Raider.Modules.RaidLog = Log
 local serial = 0
 local pageSize = 8
 local captions = {
-    ["raid.start"]="Started raid", ["raid.save"]="Saved raid", ["raid.end"]="Ended raid",
+    ["raid.reopen"]="Reopened raid", ["raid.start"]="Started raid", ["raid.save"]="Saved raid", ["raid.end"]="Ended raid",
     ["raid.metadata"]="Changed raid details", ["raid.edit"]="Edited saved raid", ["raid.delete"]="Deleted raid",
     ["raid.snapshot.delete"]="Deleted raid snapshot", ["raid.statistic.delete"]="Deleted raid statistics",
     ["sr.edit"]="Changed SR", ["sr.assign"]="Assigned SR", ["sr.clear"]="Removed SR",
@@ -92,6 +92,10 @@ local function Dialog(parent,title,width,height)
     UI.Window.StyleProjectDialog(frame,"rules")
     if UI.WindowStack then UI.WindowStack.SetOwner(frame,parent) end
     frame.close:SetScript("OnClick",function() frame:Hide() end)
+    local sizes=Raider.Database.Ensure().raidDialogSizes or {};Raider.Database.Ensure().raidDialogSizes=sizes
+    local saved=sizes[title] or {}
+    UI.Window.MakeResizable(frame,{minWidth=width,minHeight=height,width=saved.width,height=saved.height,
+        save=function(w,h) sizes[title]={width=w,height=h} end})
     frame:Hide()
     return frame
 end
@@ -162,7 +166,7 @@ function Log.Create(parent)
         UI.LayoutResponsiveCanvas(detail.canvas,function(width)
             detail.text:SetWidth(math.max(1,width-12));detail.text:SetHeight(0)
             return UI.MeasureTextHeight(detail.text,math.max(1,width-12),true)+12
-        end,nil,640,242)
+        end,nil,detail:GetWidth()-20,detail:GetHeight()-106)
     end
     function controller:ShowDetails(entry)
         if not self:IsVisible() or not entry then return end
@@ -185,11 +189,18 @@ function Log.Create(parent)
             detail.count:SetPoint("LEFT",detail.next,"RIGHT",8,0)
             detail.previous:SetScript("OnClick",function() detail.index=detail.index-1;ShowChange() end)
             detail.next:SetScript("OnClick",function() detail.index=detail.index+1;ShowChange() end)
+            function detail:LayoutContent(w,h)
+                self.summary:SetWidth(w-20);self.body:SetWidth(w-20);self.body:SetHeight(h-106)
+                UI.LayoutResponsiveCanvas(self.canvas,function(width)
+                    self.text:SetWidth(math.max(1,width-12));self.text:SetHeight(0)
+                    return UI.MeasureTextHeight(self.text,math.max(1,width-12),true)+12
+                end,nil,w-20,h-106)
+            end
             detail:SetScript("OnHide",function() detail.entry=nil;detail.text:SetText("");detail.summary:SetText("") end)
         end
         detail.entry=entry;detail.index=1
         detail.summary:SetText(Timestamp(entry.timestamp).."  |  "..tostring(entry.author or "Unknown").."\n"..Log.FormatAction(entry))
-        detail:Show();ShowChange()
+        detail:Show();detail:LayoutContent(detail:GetWidth(),detail:GetHeight());ShowChange()
         if UI.WindowStack then UI.WindowStack.Raise(detail,frame) end
     end
 
@@ -236,16 +247,21 @@ function Log.Create(parent)
             end
         end
         if total==0 then self.empty:Show();y=112 else self.empty:Hide() end
-        frame:SetHeight(y+42)
+        -- Keep the user-selected window height.
         self.count:SetText(total==0 and "0 actions" or (self.offset+1).."-"..math.min(self.offset+pageSize,total).." / "..total.." actions")
         UI.SetButtonEnabled(self.previous,self.offset>0)
         UI.SetButtonEnabled(self.next,self.offset+pageSize<total)
         if detail and detail:IsVisible() and detail.entry then ShowChange() end
     end
+    function frame:LayoutContent(w,h)
+        controller.hint:SetWidth(w-20);controller.empty:SetWidth(w-20)
+        local actionWidth=w-270;controller.headings[3]:SetWidth(actionWidth)
+        for _,row in ipairs(controller.rows) do row:SetWidth(w-20);row.cells[3]:SetWidth(actionWidth-8) end
+    end
     function controller:Open(raidId,provider)
         self.raidId=raidId;self.provider=provider or DefaultProvider;self.offset=0
         if detail then detail:Hide() end
-        frame:Show();self:Refresh()
+        frame:Show();frame:LayoutContent(frame:GetWidth(),frame:GetHeight());self:Refresh()
         if UI.WindowStack then UI.WindowStack.Raise(frame,parent) end
     end
     function controller:Close() frame:Hide() end
