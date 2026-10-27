@@ -386,7 +386,7 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.SetClassicButtonIcon(controls.raidLog, "rules", 13, 7, 2)
     controls.raidLog:SetScript("OnClick", function() if page.OpenRaidLog then page.OpenRaidLog() end end)
     controls.raidLog:Hide()
-    controls.raidSync = Raider.UI.Components.CreateButton(page,nil,"Raid Sync",118,22)
+    controls.raidSync = Raider.UI.Components.CreateButton(page,nil,"Sync",78,22)
     Raider.UI.Components.SetClassicButtonIcon(controls.raidSync,"refresh",13,7,2)
     controls.raidSync:SetScript("OnClick",function() if page.OpenRaidSync then page.OpenRaidSync() end end)
     controls.raidSync:Hide();page.raidSyncButton=controls.raidSync
@@ -431,7 +431,7 @@ function RaidManagement.CreateActionControls(page)
     controls.historyEditButtons = {}
     controls.historyLogButtons = {}
     controls.historyHeaders = {}
-    for index, text in ipairs({"#", "Raid ID", "Raid Type", "Duration", "Created At", "Modified At"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
+    for index, text in ipairs({"#", "Raid ID", "Raid Type", "Duration", "Created At", "Modified At", "Storage", "Last changed by"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
     local historyIndex
     for historyIndex = 1, 10 do
         local button = Raider.UI.Components.CreateSelectionButton(controls.historyCanvas, nil, "", 380, 26); button.historyIndex = historyIndex; button:Hide()
@@ -1302,7 +1302,7 @@ function RaidManagement.RefreshPage(renderer)
     local importInfo = attendance and attendance.softReserveImport
     local raidId = attendance and (attendance.snapshotId or (importInfo and importInfo.id))
     if attendance and raidId and renderer.isScanReady() then
-        local savedText = attendance.lastSavedAt and date("%Y-%m-%d %H:%M", attendance.lastSavedAt) or "Not saved yet"
+        local savedText = attendance.lastSavedAt and ("Last save: "..date("%Y-%m-%d %H:%M", attendance.lastSavedAt)) or "Not saved yet"
         if Raider.UI.Components.IsClassicSkin() and not lootMasterMode then
             local issueCount = 0
             issues = Raider.Services.Raid.GetSoftReserveIssues(attendance, page.getSoftReserveRules and page.getSoftReserveRules())
@@ -1424,7 +1424,7 @@ function RaidManagement.UpdateActionAvailability(page, testRaid)
     if controls.raidSync then
         local attendance=page.listRenderer and page.listRenderer.getData()
         local count=attendance and attendance.syncConflictCount or 0
-        controls.raidSync:SetText("Raid Sync")
+        controls.raidSync:SetText("Sync")
         controls.raidSync:ClearAllPoints();controls.raidSync:SetPoint("RIGHT",page.raidInfoButton,"LEFT",-6,0);controls.raidSync:Show()
         Raider.UI.Components.SetButtonEnabled(controls.raidSync,not testRaid)
     end
@@ -3118,7 +3118,8 @@ function RaidManagement.LayoutActions(page)
         page.exportButton.label:Show(); page.quitButton.label:Show()
         local nameWidth = math.max(48, nameLabel:GetStringWidth() + 4)
         local metaWidth = math.max(42, metaLabel:GetStringWidth() + 4)
-        local total = nameWidth + metaWidth + 108 + (showIssues and 96 or 0) + 108 + 90 + (showIssues and 40 or 32)
+        local savedWidth = math.min(pageWidth-24, math.max(108, page.classicSaved.label:GetStringWidth()+20))
+        local total = nameWidth + metaWidth + savedWidth + (showIssues and 96 or 0) + 108 + 90 + (showIssues and 40 or 32)
         local compact = total > available
         page.classicActionOffset = compact and math.max(30, nameLabel:GetHeight()+4, metaLabel:GetHeight()+4) or 0
         local actionOffset = page.classicActionOffset
@@ -3128,8 +3129,7 @@ function RaidManagement.LayoutActions(page)
             page.classicRaidName:Show()
             metaLabel:SetText(raidId)
             local iconOnly = pageWidth < 300
-            local savedWidth = iconOnly and 72 or 108
-            if iconOnly then page.classicSaved:SetText(savedText == "Not saved yet" and "Not saved" or "Saved") end
+            page.classicSaved:SetText(savedText)
             metaWidth = math.min(math.max(42, metaLabel:GetStringWidth() + 4), math.max(1, (pageWidth - 36 - savedWidth) * 0.45))
             left = PlaceRaidHeaderLabel(page, page.classicMeta, metaWidth, top, left)
             left = PlaceRaidHeaderLabel(page, page.classicRaidName, math.min(nameWidth, math.max(1, pageWidth - savedWidth - metaWidth - 36)), top, left)
@@ -3155,7 +3155,7 @@ function RaidManagement.LayoutActions(page)
             page.classicRaidName:Show()
             left = PlaceRaidHeaderLabel(page, page.classicMeta, metaWidth, top, left)
             left = PlaceRaidHeaderLabel(page, page.classicRaidName, nameWidth, top, left)
-            left = PlaceRaidHeaderButton(page, page.classicSaved, 108, top, left, scale)
+            left = PlaceRaidHeaderButton(page, page.classicSaved, savedWidth, top, left, scale)
             if showIssues then left = PlaceRaidHeaderButton(page, page.classicIssues, 96, top, left, scale) end
             left = PlaceRaidHeaderButton(page, page.exportButton, 108, top, left, scale); left = PlaceRaidHeaderButton(page, page.quitButton, 90, top, left, scale)
         end

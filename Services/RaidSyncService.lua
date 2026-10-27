@@ -128,6 +128,7 @@ function Sync.New(options)
         if transfer then self.bufferBytes=self.bufferBytes-transfer.bytes;self.incoming[key]=nil end
     end
     local function RemovePeer(name,reason)
+        if self.peers[name] and self.peers[name].connected and options.onDisconnected then options.onDisconnected(name,reason) end
         self.peers[name]=nil
         local receipts=self.receipts[name]
         for _,raid in pairs(receipts or {}) do for _,ranges in pairs(raid) do self.receiptRanges=self.receiptRanges-Count(ranges) end end
@@ -199,7 +200,7 @@ function Sync.New(options)
             if not Integer(payload.offset,9007199254740991) then return Reject("invalid-summary-offset") end
             local summary,failure=self.journal.GetSyncSummary(self.db,payload.offset,Sync.limits.summary,Value(options.activeRaidId))
             if not summary then return Reject(failure) end
-            local queued=Queue(peer.name,{type="summary",request=payload.request,summary=summary},1)
+            local queued=Queue(peer.name,{type="summary",request=payload.request,summary=summary,activeRaidId=Value(options.activeRaidId)},1)
             if not queued then return Busy() end
             return true
         elseif kind=="range-request" then
@@ -226,6 +227,8 @@ function Sync.New(options)
             if request.payload.type~="summary-request" or not ValidateSummary(payload.summary) then return Reject("invalid-summary") end
             if payload.summary.nextOffset and (payload.summary.nextOffset<=request.payload.offset
                 or payload.summary.nextOffset>payload.summary.total or Count(payload.summary.entries)==0) then return Reject("invalid-summary-cursor") end
+            if payload.activeRaidId~=nil and not Text(payload.activeRaidId,300) then return Reject("invalid-active-raid") end
+            peer.activeRaidId=payload.activeRaidId
             peer.summary=payload.summary;peer.needsSummary=false;self.request=nil
             return true
         elseif kind=="operation" then
@@ -297,7 +300,14 @@ function Sync.New(options)
             if received then confirmed=confirmed+1;table.insert(confirmedNames,name) end
             local status=not authorized and "No officer access" or peer.blocked and "Blocked" or peer.unavailable and "Unavailable" or stale and "Possibly stale"
                 or self.request and self.request.peer==name and "Synchronizing" or received and "Received changes" or "Available"
-            table.insert(peers,{name=name,status=status,available=fresh,compatible=true,lastSeen=peer.seen,confirmed=received,
+            local busy=peer.needsSummary or self.request and self.request.peer==name or self.outgoing and self.outgoing.target==name
+            busy=busy or self.encoding and self.encoding.target==name
+            for _,queued in ipairs(self.outbox) do if queued.target==name then busy=true end end
+            for _,queued in ipairs(self.exports) do if queued.peer==name then busy=true end end
+            for _,queued in ipairs(self.decodes) do if queued.sender==name then busy=true end end
+            for _,queued in pairs(self.incoming) do if queued.sender==name then busy=true end end
+            local syncState=peer.blocked and "error" or not fresh and "offline" or busy and "pending" or "synced"
+            table.insert(peers,{name=name,status=status,syncState=syncState,activeRaidId=peer.activeRaidId,available=fresh,compatible=true,lastSeen=peer.seen,confirmed=received,
                 message=received and "This officer holds some raid data. Check Synchro Log for individual deliveries." or peer.blocked and "Received data was rejected. Retry after reviewing the cause." or nil})
         end
         for name,peer in pairs(self.incompatiblePeers) do
@@ -399,12 +409,16 @@ function Sync.New(options)
             peer.session=fields[3];peer.generation=fields[7];peer.seen=Now();peer.cooldown=nil;peer.unavailable=nil
             peer.presenceRevision=options.presenceRevision and options.presenceRevision() or nil
             if self.lastError=="peer-session-changed" then self.lastError=nil end
-            if connected and options.onConnected then options.onConnected(sender) end
+            if (connected or not peer.connected) and options.onConnected then options.onConnected(sender) end
+            peer.connected=true
             if fields[2]=="*" then Hello(sender) end
             return true
         end
         local peer=self.peers[sender]
-        if not peer or fields[2]~=self.actor then return Reject("handshake-required") end
+        if not peer or fields[2]~=self.actor then
+            if not self.incompatiblePeers[sender] and (fields[1]=="D" or fields[1]=="A" or fields[1]=="R" or fields[1]=="B") then return false,"handshake-pending" end
+            return Reject("handshake-required")
+        end
         if peer.blocked then return false,"blocked-peer" end
         peer.seen=Now()
         if self.request and self.request.peer==sender then self.request.activity=Now() end
@@ -427,6 +441,8 @@ function Sync.New(options)
             if outgoing.ack==outgoing.total then self.outgoing=nil end
             return true
         elseif fields[1]=="D" then
+            -- Queued chunks from before a reload cannot belong to the new session.
+            if fields[3]~=peer.session then return false,"stale-session" end
             local index,total,priority=tonumber(fields[5]),tonumber(fields[6]),tonumber(fields[7])
             if Count(fields)~=8 or fields[3]~=peer.session or not Text(fields[4],20) or not Integer(index,16384) or index<1
                 or not Integer(total,16384) or total<index or not Integer(priority,3) or priority<1
@@ -476,7 +492,22 @@ function Sync.New(options)
         local accepted,reason=ReceivePacket(prefix,text,channel,sender)
         local peer=self.peers[sender]
         if accepted and peer and options.presenceRevision then peer.presenceRevision=options.presenceRevision() end
+        if accepted and peer and not peer.connected then
+            peer.connected=true
+            if options.onConnected then options.onConnected(sender) end
+        end
         return accepted,reason
+    end
+
+    function self:RefreshPresence()
+        for name,peer in pairs(self.peers) do
+            local witnessed=options.presenceRevision and peer.presenceRevision==options.presenceRevision()
+            local offline=options.isOnline and not options.isOnline(name) and not witnessed
+            if peer.connected and (offline or peer.unavailable or not Authority(name)) then
+                peer.connected=false;self.revision=self.revision+1;self.statusDirty=true
+                if options.onDisconnected then options.onDisconnected(name,peer.unavailable and "no response" or "offline") end
+            end
+        end
     end
 
     local function Schedule()
@@ -589,6 +620,7 @@ function Sync.New(options)
     end
     function self:Tick()
         if not Ready() then return false end
+        self:RefreshPresence()
         local now=Now();self.tokens=math.min(Sync.limits.burst,self.tokens+math.max(0,now-self.lastTick)*Sync.limits.rate);self.lastTick=now
         for name in pairs(self.peers) do if not Authority(name) then RemovePeer(name) end end
         for key,transfer in pairs(self.incoming) do
@@ -598,6 +630,7 @@ function Sync.New(options)
         if self.request and not (Combat() and self.request.priority>1) and now-self.request.activity>Sync.limits.timeout then
             local peer=self.peers[self.request.peer]
             if peer then peer.unavailable=true end
+            self:RefreshPresence()
             self.request=nil;self.stats.retries=self.stats.retries+1;self.lastError="source-timeout"
         end
         if self.announce then Hello();self.announce=nil end
@@ -633,6 +666,7 @@ function Sync.New(options)
             outgoing.sent=outgoing.ack;outgoing.activity=now;outgoing.attempts=outgoing.attempts+1;self.stats.retries=self.stats.retries+1
             if outgoing.attempts>3 then
                 local peer=self.peers[outgoing.target];if peer then peer.unavailable=true end
+                self:RefreshPresence()
                 self.outgoing=nil;outgoing=nil;self.lastError="transfer-timeout"
             end
         end

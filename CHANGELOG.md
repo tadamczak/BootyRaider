@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-dev.9 — 2026-10-27
+
+- List active sessions above saved raids and guard new sessions when a group already has one; loading an ended snapshot reopens its shared session.
+- Show snapshot storage state, last editor and Last save; add concise sync status and per-officer progress.
+- Rename Sync log, use gold timestamps, record disconnects and ignore obsolete packets after reload.
+- Keep sync tabs and officer headers clear of icons and table rows when resizing.
+
 ## 1.0.0-dev.8 — 2026-10-27
 
 - Keep authenticated officers connected when the cached guild roster still says offline; honor subsequent roster updates and officer access changes.

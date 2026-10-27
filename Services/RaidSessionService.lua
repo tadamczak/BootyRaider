@@ -286,8 +286,18 @@ function Session:LoadSnapshot(snapshotId)
         local attendance
         if snapshot.syncRaidId and dependencies.getProjection then
             local reason
+            if dependencies.canJoinRaid then
+                local ok,failure=dependencies.canJoinRaid(snapshot.syncRaidId)
+                if not ok then return nil,failure end
+            end
             attendance,reason=dependencies.getProjection(snapshot.syncRaidId)
             if not attendance then return nil,reason end
+            if attendance.syncEnded and dependencies.resumeRaid then
+                local ok,failure=dependencies.resumeRaid(snapshot.syncRaidId)
+                if not ok then return nil,failure end
+                attendance,reason=dependencies.getProjection(snapshot.syncRaidId)
+                if not attendance then return nil,reason end
+            end
             attendance._loadedSnapshotId=snapshot.id;attendance._sessionDraft=true
             dependencies.database.StoreRaidAttendance(attendance)
         else attendance=dependencies.raidRes.RestoreSnapshot(snapshot) end

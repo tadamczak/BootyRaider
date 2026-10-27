@@ -192,6 +192,21 @@ function Replica.Create(options)
     local db=options.db or Raider.Database.Ensure()
     local state={revision=0,dirty={},dirtyNames={},aliases={},aliasSources={},mergeConflicts={},metadata={},transport=nil,projected={},waiting={}}
     local api={}
+    local function DirectlyFollows(operation,previous)
+        for _,change in ipairs(operation.changes or {}) do
+            if change.base==previous.id then return true end
+            for _,base in ipairs(change.bases or {}) do if base==previous.id then return true end end
+        end
+        return false
+    end
+    local function LaterChange(operation,previous)
+        if not previous then return true end
+        if DirectlyFollows(operation,previous) then return true end
+        if DirectlyFollows(previous,operation) then return false end
+        return operation.timestamp>previous.timestamp or operation.timestamp==previous.timestamp and operation.id>previous.id
+    end
+    state.loadedRaids={};state.changedRaids={};state.raidInfo={};state.latestOperations={}
+    for id in pairs(db.raidJournal and db.raidJournal.raids or {}) do state.loadedRaids[id]=true end
     local syncLog=type(db.raidSyncLog)=="table" and db.raidSyncLog or {};db.raidSyncLog=syncLog
     function api.LogSync(message)
         if syncLog[1] and syncLog[1].message==message then return end
@@ -309,6 +324,12 @@ function Replica.Create(options)
     end
     function api.OnOperation(operation,status,localChange)
         if not operation or status=="duplicate" then return end
+        state.changedRaids[operation.raidId]=true;state.raidInfo[operation.raidId]=nil
+        local latestId=state.latestOperations[operation.raidId]
+        local latest=latestId and J.GetOperation(db,latestId)
+        if latestId~=nil and operation.kind~="raid.observe" and LaterChange(operation,latest) then state.latestOperations[operation.raidId]=operation.id end
+        if not localChange then state.receivedSinceLoad=true end
+        if localChange and (operation.kind=="raid.start" or operation.kind=="raid.reopen" or operation.kind=="raid.save") then db.syncJoinedRaidId=operation.raidId end
         if not localChange and operation.kind~="raid.observe" then
             local action=Raider.Modules and Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
             api.LogSync("Received update by "..tostring(operation.author)..": "..tostring(action))
@@ -523,6 +544,29 @@ function Replica.Create(options)
         return attendance,statistic
     end
     function api.GetProjection(id) return Build(id) end
+    function api.GetJoinedRaidId()
+        local id=db.syncJoinedRaidId
+        if db.raidAttendance then id=db.raidAttendance.syncRaidId end
+        return id and Raid(Canonical(id)) and Record(Canonical(id),"raid:lifecycle")~="ended" and id or nil
+    end
+    function api.GetRaidInfo(id)
+        if not id then return {storage="In memory"} end
+        id=Canonical(id)
+        if state.raidInfo[id] then return state.raidInfo[id] end
+        local metadata=Record(id,"raid:metadata") or {};local latestId=state.latestOperations[id]
+        local latest=latestId and J.GetOperation(db,latestId)
+        local raid=Raid(id)
+        if latestId==nil then
+            for _,operationId in ipairs(raid and raid.operationIds or {}) do
+                local operation=J.GetOperation(db,operationId)
+                if operation and operation.kind~="raid.observe" and LaterChange(operation,latest) then latest=operation end
+            end
+            state.latestOperations[id]=latest and latest.id or false
+        end
+        local info={storage=state.loadedRaids[id] and not state.changedRaids[id] and "On disk" or "In memory",
+            lastAuthor=latest and latest.author or "Unknown",lastSave=metadata.savedAt,modifiedAt=latest and latest.timestamp}
+        state.raidInfo[id]=info;return info
+    end
 
     local function RemoveHistory(history,id)
         if not history or not history.raids then return end
@@ -665,6 +709,8 @@ function Replica.Create(options)
         if options.restore then
             local ok,message=options.restore(attendance);if ok==false then return false,message end
         else db.raidAttendance=attendance end
+        db.syncJoinedRaidId=id
+        if state.transport and state.transport.NotifyChanged then state.transport:NotifyChanged() end
         state.revision=state.revision+1
         return true
     end
@@ -705,7 +751,9 @@ function Replica.Create(options)
             message=tostring(operation and operation.author or "An officer").." ended this raid. Updates still synchronize. Reopen it to continue recording."
         end
         if localFailure then message="Needs attention: a confirmed loot change is stored only locally. Save the raid to retry synchronization. "..tostring(localFailure) end
-        return {revision=state.revision+(transport.revision or 0),localOnly=transport.localOnly~=false,pending=transport.pending or 0,
+        local syncStatus=transport.lastError and "Sync error! Send log" or state.receivedSinceLoad and "New data received. Please reload!"
+            or (transport.pending or 0)>0 and "Syncing…" or "Up to date"
+        return {syncStatus=syncStatus,revision=state.revision+(transport.revision or 0),localOnly=transport.localOnly~=false,pending=transport.pending or 0,
             conflicts=conflicts,compatible=transport.compatible~=false,peers=type(transport.peers)=="table" and transport.peers or {},
             raidName=metadata and metadata.id,retryAvailable=transport.lastError~=nil,lifecycle=lifecycle,recordingGap=recordingGap,csrWithheld=blocked and true or false,needsAttention=localFailure and true or false,message=message}
     end
@@ -728,6 +776,10 @@ function Replica.Create(options)
     end
     function api.ListRaids(offset,limit)
         return Page(RaidList(),offset,limit)
+    end
+    function api.ListActiveRaids(offset,limit)
+        local list={};for _,entry in ipairs(RaidList()) do if entry.state~="ended" then table.insert(list,entry) end end
+        return Page(list,offset,limit)
     end
     function api.ListMergeCandidates(id,offset,limit)
         local list,result=RaidList(),{};id=Canonical(id)

@@ -62,7 +62,10 @@ function RaidSessionController.Create(dependencies)
     end
 
     function controller:StartNew(raidId, raidName)
-        if dependencies.canStartNewRaid and not dependencies.canStartNewRaid() then return false end
+        if dependencies.canStartNewRaid then
+            local allowed,reason=dependencies.canStartNewRaid()
+            if not allowed then return false,reason end
+        end
         pendingState = {historical = dependencies.getHistoricalLoaded and dependencies.getHistoricalLoaded() or false}
         local index
         for index = 1, table.getn(pendingFields) do pendingState[pendingFields[index]] = state[pendingFields[index]] end

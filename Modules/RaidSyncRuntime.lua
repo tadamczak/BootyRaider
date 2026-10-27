@@ -21,6 +21,28 @@ end
 function SyncRuntime.WantsDirectory()
     return Raider.active and type(SendAddonMessage)=="function" and Raider.Database.GetSetting("raidSyncEnabled")~=false
 end
+function SyncRuntime.CanJoinRaid(id)
+    if not runtime or not runtime.replica then return true end
+    local raidCount=type(GetNumRaidMembers)=="function" and GetNumRaidMembers() or 0
+    local partyCount=type(GetNumPartyMembers)=="function" and GetNumPartyMembers() or 0
+    if raidCount==0 and partyCount==0 then return true end
+    local own=runtime.replica.GetJoinedRaidId()
+    if own and own~=id then return false,"An active session already exists. Join it from Active raid sessions." end
+    local peers=runtime.replica.GetStatus().peers
+    if table.getn(peers)==0 then return true end
+    for index=1,(raidCount>0 and raidCount or partyCount) do
+        local name
+        if raidCount>0 then name=GetRaidRosterInfo(index) else name=UnitName("party"..index) end
+        for _,peer in ipairs(peers) do
+            if not id and peer.available and peer.name==name and peer.syncState=="pending" then return false,"Checking the active session with "..name.."." end
+            if peer.available and peer.name==name and peer.activeRaidId and peer.activeRaidId~=id then
+                local status=runtime.replica.GetStatus(peer.activeRaidId)
+                if status.lifecycle~="ended" then return false,"Join the active raid session shared by "..name.."." end
+            end
+        end
+    end
+    return true
+end
 local function MaintenanceReady()
     return maintenanceArmed and next(maintenance)~=nil and not Combat()
         and runtime and runtime.raidSync and not runtime.raidSync:HasWork()
@@ -77,6 +99,8 @@ function SyncRuntime.Tick()
     CompactOne()
     if changed or statusChanged then
         local refresh=changed;changed=false;statusChanged=false
+        local view=runtime.views.raid
+        if view and view.page and view.page:IsVisible() and Raider.Modules.RaidManagement.RefreshSyncStatus then Raider.Modules.RaidManagement.RefreshSyncStatus(view.page) end
         if refresh then runtime.RefreshViews() end
         if Raider.Modules.RaidSync then Raider.Modules.RaidSync.RefreshVisible() end
     end
@@ -151,7 +175,7 @@ function SyncRuntime.RefreshAuthority()
             isOnline=function(name) local member=BootyLib.GuildDirectory.Find(name);return member and member.online~=false end,
             presenceRevision=BootyLib.GuildDirectory.GetGeneration,
             send=function(prefix,text,channel) return SendAddonMessage(prefix,text,channel) end,
-            activeRaidId=function() local current=Raider.Database.GetRaidAttendance();return current and current.syncRaidId end,
+            activeRaidId=function() return runtime.replica.GetJoinedRaidId() end,
             priority=function(id)
                 local current=Raider.Database.GetRaidAttendance();if current and current.syncRaidId==id then return 1 end
                 local record=Raider.Services.RaidJournal.GetRecord(BootyRaiderDB,id,"saved:flags")
@@ -162,6 +186,7 @@ function SyncRuntime.RefreshAuthority()
             validateCheckpoint=Raider.Services.RaidReplica.ValidateCheckpoint,
             onApply=function(operation,reason) runtime.replica.OnOperation(operation,reason,false) end,
             onConnected=function(name) runtime.replica.LogSync("Connected to "..name..". Checking raid updates.") end,
+            onDisconnected=function(name,reason) runtime.replica.LogSync("Lost connection to "..name.." ("..tostring(reason or "offline")..").") end,
             onDelivered=function(name,id)
                 local operation=Raider.Services.RaidJournal.GetOperation(BootyRaiderDB,id)
                 if operation and operation.kind~="raid.observe" and not operation.compacted then
@@ -170,12 +195,13 @@ function SyncRuntime.RefreshAuthority()
                 end
             end,
             onStatus=function(status)
-                if status.lastError and status.lastError~=lastSyncError then runtime.replica.LogSync(status.message) end
+                if status.lastError and status.lastError~=lastSyncError then runtime.replica.LogSync(status.message.." ["..status.lastError.."]") end
                 lastSyncError=status.lastError
                 runtime.replica._state.revision=runtime.replica._state.revision+1;statusChanged=true;ArmMaintenance();SyncRuntime.Wake() end})
         runtime.replica.SetTransport(runtime.raidSync)
     end
     local ok,reason=runtime.raidSync:Start()
+    runtime.raidSync:RefreshPresence()
     local names={};local snapshot=BootyLib.GuildDirectory.GetSnapshot()
     for _,member in ipairs(snapshot and snapshot.members or {}) do
         if member.online~=false and Authority(member.name,scope) then table.insert(names,member.name) end

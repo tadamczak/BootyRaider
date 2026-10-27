@@ -278,7 +278,17 @@ function Runtime.Initialize(host)
     end
     Raider.Database.onRaidAttendanceChanged=Raider.Services.Raid.OnRaidAttendanceChanged
     Raider.Database.onRaidAttendanceMetadataChanged=Raider.Services.Raid.PreserveLootSession
-    Runtime.session=Raider.Services.RaidSession.Create({getProjection=function(id) return Runtime.replica.GetProjection(id) end,database=Raider.Database,raid=Raider.Services.Raid,raidRes=Raider.Services.RaidRes,
+    Runtime.session=Raider.Services.RaidSession.Create({getProjection=function(id) return Runtime.replica.GetProjection(id) end,
+        canJoinRaid=Raider.Modules.RaidSyncRuntime.CanJoinRaid,
+        resumeRaid=function(id)
+            local allowed,reason=Raider.Modules.RaidSyncRuntime.CanJoinRaid(id);if not allowed then return false,reason end
+            -- Recover validates local unsaved loot and the current session before
+            -- publishing a shared reopen. A rejected load must not reopen a raid.
+            local recovered,failure=Runtime.replica.Recover(id,true)
+            if not recovered then return false,failure end
+            if Runtime.replica.GetStatus(id).lifecycle=="ended" then return Runtime.replica.Reopen(id) end
+            return recovered
+        end,database=Raider.Database,raid=Raider.Services.Raid,raidRes=Raider.Services.RaidRes,
         raidStatistics=Raider.Services.RaidStatistics,testRaid=Raider.Services.TestRaid,now=function() return time() end,
         autoLoot=Raider.Services.AutoLoot,onRaidTypeChanged=function() Raider.OnSettingChanged("lmAutoLootPresets") end})
     Runtime.sessionController=Raider.Modules.RaidSessionController.Create({state=Raider,session=Runtime.session,
@@ -288,7 +298,8 @@ function Runtime.Initialize(host)
         showSavedPopup=function() UI.ShowOpaquePopup("BOOTY_RAIDER_ATTENDANCE_RELOAD") end,
         isLiveTrackingWanted=function() return BootyRaiderDB.raidLiveTrackingEnabled and true or false end,
         canStartNewRaid=function()
-            return not Raider.raidSessionDraft and not Raider.raidScanReady and not Runtime.IsTestRaid()
+            if Raider.raidSessionDraft or Raider.raidScanReady or Runtime.IsTestRaid() then return false,"Finish the current session or scan first." end
+            return Raider.Modules.RaidSyncRuntime.CanJoinRaid()
         end,
         applyRaidPreset=Raider.Services.AutoLoot.ApplyRaidPreset,
     })

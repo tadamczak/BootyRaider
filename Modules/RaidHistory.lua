@@ -2,8 +2,68 @@ local Raider = BootyRaider
 
 Raider.Modules.RaidManagement = Raider.Modules.RaidManagement or {}
 local RaidManagement = Raider.Modules.RaidManagement
+local UI=Raider.UI.Components
+
+function RaidManagement.RefreshSyncStatus(page)
+    local controls=page.syncHistoryControls
+    if not controls or not controls.syncStatus or not controls.syncStatus:IsShown() then return end
+    local replica=Raider.Runtime and Raider.Runtime.replica
+    local status=replica and replica.GetStatus()
+    controls.syncStatus:SetText("Sync status: "..(status and status.syncStatus or "Up to date"))
+    local canJoin=Raider.Modules.RaidSyncRuntime.CanJoinRaid()
+    UI.SetButtonEnabled(controls.scan,controls.canStartRaid and canJoin)
+end
+
+local function ActiveSessions(page,controls,width,y)
+    local api=Raider.Runtime and Raider.Runtime.replica
+    if not api or not api.ListActiveRaids then return y end
+    if not controls.activeTitle then
+        controls.activeTitle=UI.CreateHeading(page,"Active raid sessions",3,"gold","raids")
+        controls.activeRows={};controls.activeOffset=0
+        for index=1,4 do
+            local row=UI.CreateButton(page,nil,"",width,24);row.name=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
+            row.raidType=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
+            row.join=UI.CreateButton(row,nil,"",24,22);UI.SetClassicButtonIcon(row.join,"start",13,6,0)
+            UI.AttachTooltip(row.join,"Join session","Continue this shared raid session.")
+            row.join:SetScript("OnClick",function()
+                local allowed,reason=Raider.Modules.RaidSyncRuntime.CanJoinRaid(row.raidId)
+                if allowed then allowed,reason=Raider.Runtime.replica.Recover(row.raidId) end
+                if not allowed then Raider.Runtime.Print(reason) end
+                Raider.Runtime.RefreshViews()
+            end)
+            controls.activeRows[index]=row
+        end
+        controls.activeEmpty=UI.CreateLabel(page,nil,"OVERLAY","GameFontHighlightSmall");controls.activeEmpty:SetText("No active raid sessions")
+        controls.activePrevious=UI.CreateButton(page,nil,"<",24,22)
+        controls.activeNext=UI.CreateButton(page,nil,">",24,22)
+        controls.activePrevious:SetScript("OnClick",function() controls.activeOffset=math.max(0,controls.activeOffset-4);Raider.Runtime.RefreshViews() end)
+        controls.activeNext:SetScript("OnClick",function() controls.activeOffset=controls.activeOffset+4;Raider.Runtime.RefreshViews() end)
+    end
+    local list,total=api.ListActiveRaids(controls.activeOffset,4)
+    if controls.activeOffset>=total and controls.activeOffset>0 then controls.activeOffset=0;list,total=api.ListActiveRaids(0,4) end
+    controls.activeTitle:ClearAllPoints();controls.activeTitle:SetPoint("TOPLEFT",page,"TOPLEFT",8,y-34);controls.activeTitle:Show()
+    controls.activePrevious:ClearAllPoints();controls.activePrevious:SetPoint("TOPRIGHT",page,"TOPRIGHT",-40,y-30)
+    controls.activeNext:ClearAllPoints();controls.activeNext:SetPoint("TOPRIGHT",page,"TOPRIGHT",-8,y-30)
+    if total>4 then controls.activePrevious:Show();controls.activeNext:Show() else controls.activePrevious:Hide();controls.activeNext:Hide() end
+    UI.SetButtonEnabled(controls.activePrevious,controls.activeOffset>0);UI.SetButtonEnabled(controls.activeNext,controls.activeOffset+4<total)
+    for index,row in ipairs(controls.activeRows) do
+        local entry=list[index];row.raidId=entry and entry.id
+        if entry then
+            row:ClearAllPoints();row:SetPoint("TOPLEFT",page,"TOPLEFT",8,y-60-(index-1)*26);row:SetWidth(width)
+            row.name:ClearAllPoints();row.name:SetPoint("LEFT",row,"LEFT",6,0);row.name:SetWidth((width-52)*0.55);row.name:SetText(entry.name)
+            row.raidType:ClearAllPoints();row.raidType:SetPoint("LEFT",row,"LEFT",(width-52)*0.55+10,0);row.raidType:SetWidth((width-52)*0.45);row.raidType:SetText(entry.raidType)
+            row.join:ClearAllPoints();row.join:SetPoint("RIGHT",row,"RIGHT",-4,0)
+            UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false);row:Show()
+        else row:Hide() end
+    end
+    controls.activeEmpty:ClearAllPoints();controls.activeEmpty:SetPoint("TOPLEFT",page,"TOPLEFT",8,y-60)
+    if total==0 then controls.activeEmpty:Show() else controls.activeEmpty:Hide() end
+    return y-60-math.max(1,table.getn(list))*26
+end
 
 function RaidManagement.HideRaidHistoryControls(controls)
+    for _,key in ipairs({"activeTitle","activeEmpty","activePrevious","activeNext","syncStatus"}) do if controls[key] then controls[key]:Hide() end end
+    for _,row in ipairs(controls.activeRows or {}) do row:Hide() end
     controls.historyScroll:Hide()
     controls.loadRaid:Hide(); controls.testRaid:Hide(); controls.historyTitle:Hide(); controls.historyEmpty:Hide()
     if controls.raidSync then controls.raidSync:Hide() end
@@ -27,12 +87,13 @@ local function MeasureHistory(width, controls)
     local dataWidth = math.max(60, width - (canEdit and 98 or 76))
     local numberWidth = 28
     local remainingWidth = math.max(32, dataWidth - numberWidth)
-    local nameWidth, raidWidth = math.floor(remainingWidth * 0.24), math.floor(remainingWidth * 0.14)
-    local durationWidth, createdWidth = math.floor(remainingWidth * 0.20), math.floor(remainingWidth * 0.21)
-    local modifiedWidth = remainingWidth - nameWidth - raidWidth - durationWidth - createdWidth
-    local widths = {numberWidth, nameWidth, raidWidth, durationWidth, createdWidth, modifiedWidth}
+    local nameWidth, raidWidth = math.floor(remainingWidth * 0.17), math.floor(remainingWidth * 0.12)
+    local durationWidth, createdWidth = math.floor(remainingWidth * 0.15), math.floor(remainingWidth * 0.16)
+    local modifiedWidth,storageWidth=math.floor(remainingWidth * 0.16),math.floor(remainingWidth * 0.11)
+    local authorWidth=remainingWidth-nameWidth-raidWidth-durationWidth-createdWidth-modifiedWidth-storageWidth
+    local widths = {numberWidth, nameWidth, raidWidth, durationWidth, createdWidth, modifiedWidth,storageWidth,authorWidth}
     local x = 8
-    for index = 1, 6 do
+    for index = 1, table.getn(controls.historyHeaders) do
         local heading = controls.historyHeaders[index]
         heading:ClearAllPoints(); heading:SetPoint("TOPLEFT", page, "TOPLEFT", x, actionY - 62); heading:SetWidth(widths[index] - 6); heading:SetJustifyH("LEFT"); heading:Show()
         x = x + widths[index]
@@ -46,7 +107,11 @@ local function MeasureHistory(width, controls)
         local log = controls.historyLogButtons and controls.historyLogButtons[index]
         button:ClearAllPoints(); button:SetPoint("TOPLEFT", controls.historyCanvas, "TOPLEFT", 0, y); button:SetWidth(dataWidth)
         if snapshot then
+            if not button.storage then button.storage=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall");button.author=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall") end
+            local api=Raider.Runtime and Raider.Runtime.replica
+            local info=api and api.GetRaidInfo and api.GetRaidInfo(snapshot.syncRaidId) or {storage="In memory",lastAuthor="Unknown"}
             local createdAt, modifiedAt, duration = Raider.Services.RaidRes.GetSnapshotTimes(snapshot)
+            modifiedAt=info.modifiedAt or modifiedAt
             local durationText = Raider.Services.RaidRes.FormatDuration(duration)
             local durationX = numberWidth + nameWidth + raidWidth
             local height = math.max(26,
@@ -55,7 +120,9 @@ local function MeasureHistory(width, controls)
                 Cell(button.raidName, button, numberWidth + nameWidth, raidWidth, snapshot.raidName or "Unknown zone"),
                 Cell(button.duration, button, durationX, durationWidth, durationText),
                 Cell(button.createdAt, button, durationX + durationWidth, createdWidth, createdAt and date("%Y-%m-%d %H:%M", createdAt) or "Unknown"),
-                Cell(button.savedAt, button, durationX + durationWidth + createdWidth, modifiedWidth, modifiedAt and date("%Y-%m-%d %H:%M", modifiedAt) or "Unknown"))
+                Cell(button.savedAt, button, durationX + durationWidth + createdWidth, modifiedWidth, modifiedAt and date("%Y-%m-%d %H:%M", modifiedAt) or "Unknown"),
+                Cell(button.storage,button,dataWidth-storageWidth-authorWidth,storageWidth,info.storage),
+                Cell(button.author,button,dataWidth-authorWidth,authorWidth,info.lastAuthor or "Unknown"))
             button:SetHeight(height); button:Show()
             Raider.UI.Components.StyleSelectableTableRow(button, math.mod(index, 2) == 0, page.selectedRaidHistoryId == snapshot.id)
             load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(16); deleteButton:SetHeight(16)
@@ -76,6 +143,7 @@ local function MeasureHistory(width, controls)
 end
 
 function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
+    page.syncHistoryControls=controls;controls.canStartRaid=canStartRaid
     local fullWidth = math.max(1, Raider.UI.Components.GetFrameSpan(page) - 16)
     local width = fullWidth
     local rightInset = 8 + fullWidth - width
@@ -109,10 +177,18 @@ function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
     controls.testRaid:SetWidth(buttonWidth); controls.testRaid:SetHeight(22); controls.testRaid:Show()
     local actions={controls.scan,controls.testRaid}
     if controls.raidSync and Raider.Services.RankPolicy.CanManageHistory() then
-        controls.raidSync:SetText("Raid Sync");controls.raidSync:SetWidth(118);controls.raidSync:SetHeight(22)
+        controls.raidSync:SetText("Sync");controls.raidSync:SetWidth(78);controls.raidSync:SetHeight(22)
         controls.raidSync:Enable();controls.raidSync:ClearAllPoints();controls.raidSync:SetPoint("RIGHT",controls.raidInfo,"LEFT",-6,0);controls.raidSync:Show()
     elseif controls.raidSync then controls.raidSync:Hide() end
     actionY=22-Raider.UI.Components.LayoutFlow(page,actions,8,-actionY,width,8)
+    if not controls.syncStatus then controls.syncStatus=UI.CreateLabel(page,nil,"OVERLAY","GameFontHighlightSmall") end
+    controls.syncStatus:ClearAllPoints();controls.syncStatus:SetPoint("TOPRIGHT",page,"TOPRIGHT",-8,actionY-4)
+    controls.syncStatus:SetWidth(math.max(1,width-240));controls.syncStatus:SetJustifyH("RIGHT");controls.syncStatus:Show()
+    if controls.syncStatus.SetWordWrap then controls.syncStatus:SetWordWrap(true) end
+    controls.syncStatus:SetHeight(0)
+    RaidManagement.RefreshSyncStatus(page)
+    actionY=actionY-math.max(0,UI.MeasureTextHeight(controls.syncStatus,math.max(1,width-240),true)-22)
+    actionY=ActiveSessions(page,controls,width,actionY)
     controls.historyTitle:ClearAllPoints(); controls.historyTitle:SetPoint("TOPLEFT", page, "TOPLEFT", 8, actionY - 38); controls.historyTitle:Show()
     local snapshots = page.getRaidHistory and page.getRaidHistory() or {}; page.raidHistorySnapshots = snapshots
     if not Raider.UI.Components.ApplySelectionListStyle(controls.historyButtons, snapshots, page.selectedRaidHistoryId, controls.loadRaid) then page.selectedRaidHistoryId = nil end
