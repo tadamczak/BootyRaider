@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.5 — 2026-10-27
+
+- Fix officer synchronization rejected by the native chat escape parser. All synchronizing officers must reload this transport update.
+
 ## 1.0.0-dev.4 — 2026-10-27
 
 - Preserve confirmed local loot and consumed entitlements after journal errors: recovery requires a successful Save Raid retry before replacing the active session.

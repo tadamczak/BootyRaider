@@ -106,3 +106,5 @@ Open **Sync / Recover** beside New Raid, **Raid Sync / Conflicts** in Raid Leade
 If recording a confirmed loot receipt fails, use **Save Raid** to retry. Recovery stays blocked until those local loot and entitlement changes are safely recorded.
 
 Peer confirmation means another client has received data in memory. `/reload` or normal logout writes SavedVariables; losing every unsaved copy cannot be repaired. A recording gap cannot reconstruct events nobody observed. Raid Log retains author attribution supplied by trusted guild officers; it is not tamper-proof evidence.
+
+Officer synchronization requires the same transport build on all participating clients. After updating to 1.0.0-dev.5, reload every client to enable the native chat-compatible transport. Existing raid data is retained.

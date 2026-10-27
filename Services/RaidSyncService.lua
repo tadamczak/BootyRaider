@@ -1,6 +1,6 @@
 local Raider=BootyRaider
 Raider.Services=Raider.Services or {}
-local Sync={PREFIX="BRSYNC1",protocol=1,policy=1}
+local Sync={PREFIX="BRSYNC1",protocol=2,policy=1}
 Raider.Services.RaidSync=Sync
 Sync.limits={packet=240,rate=1024,burst=2048,packetsPerTick=8,codecNodes=128,
     peers=12,outbox=4,incoming=4,bufferBytes=2097152,window=4,summary=8,range=16,retry=3,timeout=15}
@@ -10,7 +10,7 @@ Sync.limits={packet=240,rate=1024,burst=2048,packetsPerTick=8,codecNodes=128,
 -- assuming the later WHISPER API. Routing is not encryption or authentication.
 local function Count(values) return table.getn(values) end
 local function Text(value,maximum)
-    return type(value)=="string" and string.len(value)>0 and string.len(value)<=maximum and not string.find(value,"[%c|]")
+    return type(value)=="string" and string.len(value)>0 and string.len(value)<=maximum and not string.find(value,"[%c|~]")
 end
 local function Integer(value,maximum)
     return type(value)=="number" and value==value and value>=0 and value<=maximum and value==math.floor(value)
@@ -19,7 +19,7 @@ local function Value(value) if type(value)=="function" then return value() end;r
 local function Fields(text)
     local result,start={},1
     while true do
-        local ending=string.find(text,"|",start,true)
+        local ending=string.find(text,"~",start,true)
         if not ending then table.insert(result,string.sub(text,start));return result end
         table.insert(result,string.sub(text,start,ending-1));start=ending+1
         if Count(result)>8 then return nil end
@@ -29,12 +29,17 @@ local function CountMap(values) local count=0;for _ in pairs(values) do count=co
 local function Scope(value)
     return type(value)=="string" and string.len(value)>0 and string.len(value)<=100 and not string.find(value,"%c")
 end
+-- Raw pipes are chat escapes in the native client. Scope values escape reserved bytes.
 local function EncodeScope(value)
-    local encoded=string.gsub(string.gsub(value,"%%","%%25"),"|","%%7c");return encoded
+    local encoded=string.gsub(value,"%%","%%25")
+    encoded=string.gsub(encoded,"|","%%7c")
+    encoded=string.gsub(encoded,"~","%%7e");return encoded
 end
 local function DecodeScope(value)
-    if type(value)~="string" or string.find(string.gsub(string.gsub(value,"%%25",""),"%%7c",""),"%%") then return nil end
-    return string.gsub(string.gsub(value,"%%7c","|"),"%%25","%%")
+    if type(value)~="string" then return nil end
+    local remainder=string.gsub(string.gsub(string.gsub(value,"%%25",""),"%%7c",""),"%%7e","")
+    if string.find(remainder,"%%") then return nil end
+    return string.gsub(string.gsub(string.gsub(value,"%%7e","~"),"%%7c","|"),"%%25","%%")
 end
 local messages={
     ["disabled"]="Synchronization is off.",
@@ -103,7 +108,7 @@ function Sync.New(options)
         table.insert(self.controls,text);return true
     end
     local function Hello(target)
-        return Control(table.concat({"H",target or "*",self.session,tostring(Sync.protocol),tostring(self.journal.schema),tostring(Sync.policy),tostring(self.generation),EncodeScope(self.scope)},"|"))
+        return Control(table.concat({"H",target or "*",self.session,tostring(Sync.protocol),tostring(self.journal.schema),tostring(Sync.policy),tostring(self.generation),EncodeScope(self.scope)},"~"))
     end
     local function Queue(target,payload,priority)
         if Count(self.outbox)>=Sync.limits.outbox then return false,"outbox-backpressure" end
@@ -186,7 +191,7 @@ function Sync.New(options)
         if not Integer(payload.request,9007199254740991) or payload.request<1 then return Reject("invalid-request") end
         local kind=payload.type
         local function Busy()
-            Control(table.concat({"B",peer.name,peer.session,tostring(payload.request)},"|"));return true,"source-busy"
+            Control(table.concat({"B",peer.name,peer.session,tostring(payload.request)},"~"));return true,"source-busy"
         end
         if kind=="summary-request" then
             if not Integer(payload.offset,9007199254740991) then return Reject("invalid-summary-offset") end
@@ -253,7 +258,7 @@ function Sync.New(options)
             -- A validated complete export also proves that this source held the
             -- same operation in RAM when it sent it; no disk claim is inferred.
             Confirm(peer.name,{raidId=operation.raidId,origin=operation.origin,sequence=operation.sequence})
-            if receiptId then Control(table.concat({"R",peer.name,receiptSession,receiptId},"|")) end
+            if receiptId then Control(table.concat({"R",peer.name,receiptSession,receiptId},"~")) end
             if reason=="duplicate" then self.stats.duplicates=self.stats.duplicates+1
             else
                 self.stats.applied=self.stats.applied+1
@@ -415,7 +420,7 @@ function Sync.New(options)
             local completed=self.completed[key]
             if completed then
                 if completed.total~=total then return Reject("chunk-collision") end
-                Control(table.concat({"A",sender,fields[3],fields[4],tostring(total)},"|"));return true,"duplicate-chunk"
+                Control(table.concat({"A",sender,fields[3],fields[4],tostring(total)},"~"));return true,"duplicate-chunk"
             end
             local transfer=self.incoming[key]
             if not transfer then
@@ -435,7 +440,7 @@ function Sync.New(options)
             transfer.activity=Now()
             while transfer.chunks[transfer.contiguous+1] do transfer.contiguous=transfer.contiguous+1 end
             if math.mod(transfer.contiguous,Sync.limits.window)==0 or transfer.contiguous==total or existing then
-                Control(table.concat({"A",sender,fields[3],fields[4],tostring(transfer.contiguous)},"|"))
+                Control(table.concat({"A",sender,fields[3],fields[4],tostring(transfer.contiguous)},"~"))
             end
             if transfer.contiguous==total then
                 table.insert(self.decodes,{sender=sender,bytes=transfer.bytes,priority=priority,chunks=transfer.chunks,receiptId=transfer.id,receiptSession=transfer.session})
@@ -616,7 +621,7 @@ function Sync.New(options)
                 table.remove(self.controls,1)
             elseif outgoing and (not Combat() or outgoing.priority==1) and outgoing.sent<outgoing.total and outgoing.sent<outgoing.ack+Sync.limits.window then
                 local index=outgoing.sent+1
-                text=table.concat({"D",outgoing.target,self.session,outgoing.id,tostring(index),tostring(outgoing.total),tostring(outgoing.priority),string.sub(outgoing.text,(index-1)*outgoing.size+1,index*outgoing.size)},"|")
+                text=table.concat({"D",outgoing.target,self.session,outgoing.id,tostring(index),tostring(outgoing.total),tostring(outgoing.priority),string.sub(outgoing.text,(index-1)*outgoing.size+1,index*outgoing.size)},"~")
                 if not Send(text) then break end
                 outgoing.sent=index;outgoing.activity=now
             else break end
