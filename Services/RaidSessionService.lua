@@ -45,7 +45,15 @@ function Session:SetRaidType(raidName, expectedAttendance)
     -- Preserve the loot-session owner; a failed refresh restores the same state.
     store.lmAutoLootPresets, store.lmAutoLootExceptions = mask, exclusions
     store.lmAutoLootInclusions = inclusions
-    local ok, failure = pcall(Publish, attendance, replacement)
+    local function PublishChange()
+        Publish(attendance,replacement)
+        local audit=Raider.Services.RaidAudit
+        if audit then
+            local accepted,reason=audit.Commit(replacement,"raid.metadata",{{key="raid:metadata",value=audit.Metadata(replacement)}},{subject=replacement.snapshotId or ""})
+            if not accepted then error(reason) end
+        end
+    end
+    local ok, failure = pcall(PublishChange)
     if not ok then
         store.lmAutoLootPresets, store.lmAutoLootExceptions = oldMask, oldExclusions
         store.lmAutoLootInclusions = oldInclusions
@@ -159,7 +167,13 @@ function Session:CapturePendingPreset()
 end
 
 function Session:CommitPendingRaid()
+    local attendance=self.dependencies.database.GetRaidAttendance()
+    if self.pendingRaid and attendance and Raider.Services.RaidAudit then
+        local ok,reason=Raider.Services.RaidAudit.Start(attendance)
+        if not ok then return false,reason end
+    end
     self.pendingRaid = nil
+    return true
 end
 
 function Session:CancelPendingRaid()
@@ -242,7 +256,17 @@ function Session:Complete(saveOptions)
             entry = dependencies.raidStatistics.BuildEntry(staged, request)
             if not entry then return false, "Raid statistics could not be prepared." end
         end
-        if not dependencies.raidRes.SyncHistory(staged) then return false, "The raid snapshot could not be saved." end
+        local preparedSnapshot
+        if Raider.Services.RaidAudit then
+            preparedSnapshot=dependencies.raidRes.BuildSnapshot(staged)
+            if not preparedSnapshot then return false,"The raid snapshot could not be prepared." end
+            local ok,reason=Raider.Services.RaidAudit.Save(staged,entry)
+            if not ok then return false,reason end
+            if entry then entry.syncRaidId=staged.syncRaidId end
+            preparedSnapshot.syncRaidId=staged.syncRaidId
+        end
+        if preparedSnapshot then dependencies.database.StoreSoftReserveSnapshot(preparedSnapshot)
+        elseif not dependencies.raidRes.SyncHistory(staged) then return false, "The raid snapshot could not be saved." end
         if entry then dependencies.database.StoreRaidStatistic(entry)
         elseif statistic then
             local removed, reason = dependencies.database.RemoveRaidStatisticForSave(request.raidId, attendance)
@@ -293,9 +317,17 @@ end
 function Session:Quit()
     local dependencies = self.dependencies
     local wasTestRaid = dependencies.testRaid.IsActive()
+    if not wasTestRaid and Raider.Services.RaidAudit then
+        local attendance=dependencies.database.GetRaidAttendance()
+        if attendance then
+            local ok,reason=Raider.Services.RaidAudit.End(attendance)
+            if not ok then return false,reason end
+        end
+    end
     dependencies.testRaid.Stop()
     self.preparedSave = nil
     if not wasTestRaid then dependencies.database.StoreRaidAttendance(nil) end
+    return true
 end
 
 function Session:StartTest()

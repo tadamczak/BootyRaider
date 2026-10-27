@@ -3,6 +3,20 @@ local Raider = BootyRaider
 Raider.Database = Raider.Database or {}
 local Database = Raider.Database
 
+local function SameValue(left, right)
+    if type(left) ~= type(right) then return false end
+    if type(left) ~= "table" then return left == right end
+    for key, value in pairs(left) do if not SameValue(value, right[key]) then return false end end
+    for key in pairs(right) do if left[key] == nil then return false end end
+    return true
+end
+
+local function CommitAudit(record, kind, changes, detail)
+    local audit = Raider.Services and Raider.Services.RaidAudit
+    if not audit then return true end -- Isolated legacy service tests do not compose the product.
+    return audit.Commit(record, kind, changes, detail)
+end
+
 -- Read the previous durable spellings only at the owner initialization boundary.
 -- A canonical value, including false, always wins over an older preference.
 local legacyPreferenceKeys = {useBootyRaidTab = "useMOSRaidTab", useBootyRaidLogo = "useMOSRaidLogo"}
@@ -116,6 +130,12 @@ end
 
 local function InitializeDefaults(store)
     BootyRaiderDB = store
+    if store.raidJournalDataVersion ~= 1 then
+        -- These pre-journal raid/CSR records are disposable test data by request.
+        -- Settings/profile preferences are deliberately outside this reset.
+        store.raidAttendance, store.raidStatistics, store.softReserveHistory, store.raidJournal = nil, nil, nil, nil
+        store.raidJournalDataVersion = 1
+    end
     MigratePreferenceNames(store)
     FreezeLegacyLootRules(store)
     if Raider.Services and Raider.Services.LootMessages then Raider.Services.LootMessages.EnsureDefaults(BootyRaiderDB) end
@@ -312,7 +332,13 @@ function Database.SaveLootRules(rules)
     Database.Ensure()
     local saved = Database.CopyLootRules(rules)
     local attendance = BootyRaiderDB.raidAttendance
-    if attendance then attendance.lootRules = saved else BootyRaiderDB.lootRulesByRank = saved end
+    if attendance then
+        if SameValue(attendance.lootRules, saved) then return true end
+        local ok, reason = CommitAudit(attendance, "raid.rules", {{key="raid:loot-rules",value=saved}}, {subject=attendance.snapshotId})
+        if not ok then return false, reason end
+        attendance.lootRules = saved
+    else BootyRaiderDB.lootRulesByRank = saved end
+    return true
 end
 
 local defaultHighlyContestedItems = {
@@ -393,6 +419,8 @@ function Database.DeleteSoftReserveSnapshot(snapshotId)
     Database.Ensure()
     local history = BootyRaiderDB.softReserveHistory
     if not snapshotId or not history or type(history.order) ~= "table" or type(history.raids) ~= "table" or not history.raids[snapshotId] then return false end
+    local ok, reason = CommitAudit(history.raids[snapshotId], "raid.snapshot.delete", {{key="saved:snapshot",deleted=true}}, {subject=snapshotId})
+    if not ok then return false, reason end
     history.raids[snapshotId] = nil
     local index
     for index = table.getn(history.order), 1, -1 do if history.order[index] == snapshotId then table.remove(history.order, index) end end
@@ -473,7 +501,12 @@ end
 function Database.DeleteRaidStatistic(raidId)
     local allowed, reason = Database.CanManageHistory()
     if not allowed then return false, reason end
-    return RemoveRaidStatistic(raidId)
+    Database.Ensure()
+    local canonical, entry = FindSavedRaid(BootyRaiderDB.raidStatistics, raidId)
+    if not entry then return false end
+    local ok, failure = CommitAudit(entry, "raid.statistic.delete", {{key="saved:statistic",deleted=true}}, {subject=canonical})
+    if not ok then return false, failure end
+    return RemoveRaidStatistic(canonical)
 end
 
 -- This operation is reserved for the session controller after it validates the
@@ -511,6 +544,10 @@ function Database.SetCSRSourceArchived(raidId, playerName, itemId, archived, sel
     if not archived and (source.status ~= "ARCHIVED" or source.expired or not source.manuallyArchived) then
         return false, "Only unexpired manually archived CSR can be activated."
     end
+    local ok, failure = CommitAudit(entry, archived and "csr.archive" or "csr.activate",
+        {{key="csr:"..wanted..":"..tostring(itemId),value={player=source.playerName or playerName,item=itemId,archived=archived}}},
+        {subject=source.playerName or playerName,item=itemId})
+    if not ok then return false, failure end
     local records = entry.csrArchived
     if archived then
         if type(records) ~= "table" then records = {}; entry.csrArchived = records end
@@ -555,6 +592,11 @@ function Database.UpdateRaidStatisticFlags(raidId, attendanceEnabled, csrEnabled
     local history = BootyRaiderDB.raidStatistics
     local entry = history and history.raids and history.raids[raidId]
     if not entry then return false end
+    attendanceEnabled, csrEnabled = attendanceEnabled and true or false, csrEnabled and true or false
+    if entry.attendanceEnabled == attendanceEnabled and entry.csrEnabled == csrEnabled then return true end
+    local ok, failure = CommitAudit(entry, "raid.flags",
+        {{key="saved:flags",value={attendanceEnabled=attendanceEnabled,csrEnabled=csrEnabled}}}, {subject=raidId})
+    if not ok then return false, failure end
     entry.attendanceEnabled = attendanceEnabled and true or false
     entry.csrEnabled = csrEnabled and true or false
     return true
@@ -580,7 +622,7 @@ end
 
 -- Metadata edits rename one saved identity. They never load a session, copy a
 -- raid, or rewrite its source timestamps, rules and contribution choices.
-function Database.UpdateRaidMetadata(raidId, metadata)
+function Database.UpdateRaidMetadata(raidId, metadata, auditChanges, auditKind)
     local allowed, reason = Database.CanManageHistory()
     if not allowed then return false, reason end
     Database.Ensure()
@@ -608,6 +650,10 @@ function Database.UpdateRaidMetadata(raidId, metadata)
             return false, "This raid ID already exists. Choose a different ID."
         end
     end
+    local sourceRecord = statistic or snapshot
+    local changed = id ~= (statisticId or snapshotId) or sourceRecord.raidName ~= metadata.raidName
+        or editDisplayName and (sourceRecord.displayName or "") ~= displayName
+    if not changed and table.getn(auditChanges or {}) == 0 then return true, statisticId or snapshotId end
     local now = time()
     local sources = {{BootyRaiderDB.softReserveHistory, snapshotId, snapshot}, {BootyRaiderDB.raidStatistics, statisticId, statistic}}
     local replacements = {}
@@ -629,8 +675,19 @@ function Database.UpdateRaidMetadata(raidId, metadata)
         for key, value in pairs(active) do activeReplacement[key] = value end
         activeReplacement.raidName = metadata.raidName
         if editDisplayName then activeReplacement.displayName = displayName ~= "" and displayName or nil end
-        if Database.onRaidAttendanceMetadataChanged then Database.onRaidAttendanceMetadataChanged(active, activeReplacement) end
     end
+    local audit = Raider.Services and Raider.Services.RaidAudit
+    if audit then
+        local record = replacements[2] or replacements[1]
+        local changes = auditChanges or {}
+        table.insert(changes, {key="raid:metadata",value=audit.Metadata(record)})
+        local ok, failure = CommitAudit(sourceRecord, auditKind or "raid.metadata", changes, {subject=id})
+        if not ok then return false, failure end
+        -- All saved representations and a loaded session retain one stable identity.
+        for index = 1, 2 do if replacements[index] then replacements[index].syncRaidId = sourceRecord.syncRaidId end end
+        if activeReplacement then activeReplacement.syncRaidId = sourceRecord.syncRaidId end
+    end
+    if activeReplacement and Database.onRaidAttendanceMetadataChanged then Database.onRaidAttendanceMetadataChanged(active, activeReplacement) end
     for index = 1, 2 do
         local source, replacement = sources[index], replacements[index]
         if replacement then
@@ -652,10 +709,31 @@ function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnable
     local history=BootyRaiderDB.raidStatistics
     local canonical,entry=FindSavedRaid(history,raidId)
     if not entry or type(members)~="table" then return false end
+    if raidName and not IsRaidType(raidName) then return false, "Choose a valid raid type." end
+    attendanceEnabled, csrEnabled = attendanceEnabled and true or false, csrEnabled and true or false
+    local changes, current, included = {}, {}, {}
+    for _, member in ipairs(entry.members or {}) do current[string.lower(member.name or "")] = member end
+    for _, member in ipairs(members) do
+        local key = string.lower(member.name or "")
+        if key == "" or included[key] then return false, "Saved raid members need unique names." end
+        included[key] = true
+        if not SameValue(member, current[key]) then
+            table.insert(changes, {key="saved:member:"..key,value={name=member.name,class=member.class,guildRank=member.guildRank,
+                lootRank=member.lootRank,attendance=member.attendance,srItems=member.srItems,lootItems=member.lootItems}})
+        end
+    end
+    for key in pairs(current) do if not included[key] then table.insert(changes, {key="saved:member:"..key,deleted=true}) end end
+    if entry.attendanceEnabled ~= attendanceEnabled or entry.csrEnabled ~= csrEnabled then
+        table.insert(changes, {key="saved:flags",value={attendanceEnabled=attendanceEnabled,csrEnabled=csrEnabled}})
+    end
+    if table.getn(changes) == 0 and (not raidName or raidName == entry.raidName) then return true end
     if raidName then
-        local updated, reason = Database.UpdateRaidMetadata(canonical, {id=canonical,raidName=raidName})
+        local updated, reason = Database.UpdateRaidMetadata(canonical, {id=canonical,raidName=raidName}, changes, "raid.edit")
         if not updated then return false, reason end
         entry=history.raids[canonical]
+    else
+        local ok, failure = CommitAudit(entry, "raid.edit", changes, {subject=canonical})
+        if not ok then return false, failure end
     end
     entry.members=members;entry.attendanceEnabled=attendanceEnabled and true or false;entry.csrEnabled=csrEnabled and true or false
     entry.modifiedAt=time()

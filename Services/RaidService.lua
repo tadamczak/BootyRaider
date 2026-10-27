@@ -880,7 +880,7 @@ function RaidService.RecordReyCoinTrade(pending, recipient)
     local senderMember, recipientMember = FindLootMember(attendance, sender), FindLootMember(attendance, recipient)
     local index
     if not recipientMember then return false end
-    local loot, candidateIndex, fallbackIndex
+    local loot, candidateIndex, fallbackIndex, remainder
     if senderMember and senderMember.loot then
         for index = table.getn(senderMember.loot), 1, -1 do
             local candidate = senderMember.loot[index]
@@ -911,6 +911,8 @@ function RaidService.RecordReyCoinTrade(pending, recipient)
                 end
                 AppendRollHistory(loot, candidate.rollHistory)
                 candidate.count = available - quantity
+                remainder=candidate
+                loot.syncRecordId=nil
                 attendance.nextLootRecordId = (tonumber(attendance.nextLootRecordId) or 0) + 1
                 loot.sourceRecordId = candidate.recordId
                 loot.recordId = attendance.nextLootRecordId
@@ -940,6 +942,11 @@ function RaidService.RecordReyCoinTrade(pending, recipient)
     loot.awardHistoryKey = loot.awardHistoryKey or pending.historyKey
     recipientMember.loot = recipientMember.loot or {}
     table.insert(recipientMember.loot, loot)
+    local audit=Raider.Services.RaidAudit
+    if audit then
+        local ok,reason=audit.Trade(attendance,senderMember,remainder,recipientMember,loot)
+        if not ok then audit.LootFailure(loot,reason) end
+    end
     return true
 end
 
@@ -1129,6 +1136,10 @@ end
 
 function RaidService.ResetRecordedLoot(attendance)
     if attendance then
+        if Raider.Services.RaidAudit then
+            local ok,reason=Raider.Services.RaidAudit.ResetLoot(attendance)
+            if not ok then return false,reason end
+        end
         local collectionIndex, memberIndex
         for collectionIndex = 1, 2 do
             local collection = collectionIndex == 1 and attendance.members or attendance.departedMembers
@@ -1141,6 +1152,7 @@ function RaidService.ResetRecordedLoot(attendance)
         if attendance.departedMembers and table.getn(attendance.departedMembers) == 0 then attendance.departedMembers = nil end
     else RaidService.ResetReyCoinUsage(attendance) end
     RaidService.ResetLootSession()
+    return true
 end
 
 function RaidService.CaptureRoster(requirePhysicalRoster)
@@ -1259,6 +1271,8 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         members = members,
         departedMembers = departedMembers,
         snapshotId = previousAttendance and previousAttendance.snapshotId or nil,
+        syncRaidId = preservePrevious and previousAttendance.syncRaidId or nil,
+        _sessionDraft = preservePrevious and previousAttendance._sessionDraft or nil,
         _loadedSnapshotId = previousAttendance and previousAttendance._loadedSnapshotId or nil,
         sessionStartedAt = previousAttendance and previousAttendance.sessionStartedAt or nil,
         lastSavedAt = previousAttendance and previousAttendance.lastSavedAt or nil,
@@ -1373,7 +1387,16 @@ function RaidService.RecordLoot(message, confirmedAward)
     local ordinaryIndex = payload and OrdinaryLootIndex(member.loot)
     local previous = ordinaryIndex and ordinaryIndex[payload]
     if previous then
-        previous.count = LootQuantity(previous.count) + quantity
+        local count=LootQuantity(previous.count)+quantity
+        if Raider.Services.RaidAudit then
+            local proposed={}
+            for key,value in pairs(previous) do proposed[key]=value end
+            proposed.count=count
+            local ok,reason=Raider.Services.RaidAudit.Loot(attendance,member,proposed,"loot.observe",false)
+            if not ok then Raider.Services.RaidAudit.LootFailure(previous,reason) end
+            previous.syncRecordId=proposed.syncRecordId
+        end
+        previous.count = count
         return true
     end
     local _, _, _, _, _, _, _, _, _, itemTexture = GetItemInfo(itemLink)
@@ -1383,6 +1406,10 @@ function RaidService.RecordLoot(message, confirmedAward)
         ordinaryReceipt = ordinary and true or nil,
         awardHistoryKey = award and award.historyKey or (transfer and transfer.historyKey) }
     AppendRollHistory(loot, rollHistory)
+    if Raider.Services.RaidAudit then
+        local ok,reason=Raider.Services.RaidAudit.Loot(attendance,member,loot,ordinary and "loot.observe" or "loot.award",not ordinary)
+        if not ok then Raider.Services.RaidAudit.LootFailure(loot,reason) end
+    end
     table.insert(member.loot, loot)
     if ordinaryIndex then ordinaryIndex[payload] = loot end
     return true

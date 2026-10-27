@@ -6,7 +6,7 @@ local RaidManagement = Raider.Modules.RaidManagement
 function RaidManagement.HideRaidHistoryControls(controls)
     controls.historyScroll:Hide()
     controls.loadRaid:Hide(); controls.testRaid:Hide(); controls.historyTitle:Hide(); controls.historyEmpty:Hide()
-    for _, group in ipairs({controls.historyButtons, controls.historyDeleteButtons, controls.historyLoadButtons, controls.historyEditButtons or {}, controls.historyHeaders}) do
+    for _, group in ipairs({controls.historyButtons, controls.historyDeleteButtons, controls.historyLoadButtons, controls.historyEditButtons or {}, controls.historyLogButtons or {}, controls.historyHeaders}) do
         for index = 1, table.getn(group) do group[index]:Hide() end
     end
 end
@@ -23,7 +23,7 @@ end
 local function MeasureHistory(width, controls)
     local page, snapshots, actionY = controls.historyPage, controls.historyPage.raidHistorySnapshots, controls.historyActionY
     local canEdit = Raider.Services.RankPolicy.CanManageHistory()
-    local dataWidth = math.max(60, width - 74)
+    local dataWidth = math.max(60, width - (canEdit and 98 or 76))
     local numberWidth = 28
     local remainingWidth = math.max(32, dataWidth - numberWidth)
     local nameWidth, raidWidth = math.floor(remainingWidth * 0.24), math.floor(remainingWidth * 0.14)
@@ -42,6 +42,7 @@ local function MeasureHistory(width, controls)
         local snapshot, button = snapshots[index], controls.historyButtons[index]
         local deleteButton, load = controls.historyDeleteButtons[index], controls.historyLoadButtons[index]
         local edit = controls.historyEditButtons and controls.historyEditButtons[index]
+        local log = controls.historyLogButtons and controls.historyLogButtons[index]
         button:ClearAllPoints(); button:SetPoint("TOPLEFT", controls.historyCanvas, "TOPLEFT", 0, y); button:SetWidth(dataWidth)
         if snapshot then
             local createdAt, modifiedAt, duration = Raider.Services.RaidRes.GetSnapshotTimes(snapshot)
@@ -62,9 +63,13 @@ local function MeasureHistory(width, controls)
                 edit:SetWidth(18); edit:SetHeight(18); edit:ClearAllPoints(); edit:SetPoint("LEFT", load, "RIGHT", 4, 0)
                 if canEdit then edit:Show() else edit:Hide() end
             end
-            deleteButton:ClearAllPoints(); deleteButton:SetPoint("LEFT", canEdit and edit or load, "RIGHT", 4, 0); deleteButton:Show()
+            if log then
+                log:SetWidth(18); log:SetHeight(18); log:ClearAllPoints(); log:SetPoint("LEFT", canEdit and edit or load, "RIGHT", 4, 0)
+                Raider.UI.Components.SetButtonEnabled(log,snapshot.syncRaidId~=nil);log:Show()
+            end
+            deleteButton:ClearAllPoints(); deleteButton:SetPoint("LEFT", log or canEdit and edit or load, "RIGHT", 4, 0); deleteButton:Show()
             y = y - height - 2
-        else button.number:Hide(); button:Hide(); load:Hide(); deleteButton:Hide(); if edit then edit:Hide() end end
+        else button.number:Hide(); button:Hide(); load:Hide(); deleteButton:Hide(); if edit then edit:Hide() end; if log then log:Hide() end end
     end
     return math.max(1, -y - 2)
 end

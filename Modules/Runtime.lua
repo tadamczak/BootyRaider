@@ -70,8 +70,10 @@ function Runtime.SaveSession(options)
     return saved,failure
 end
 function Runtime.QuitSession()
-    Runtime.sessionController:Quit()
+    local ok,reason=Runtime.sessionController:Quit()
+    if ok==false then return false,reason end
     Runtime.CloseSessionPrompts()
+    return true
 end
 function Runtime.AcceptLoadedSnapshot()
     -- Loading the same saved ID can occur after a zone change. Re-observe the

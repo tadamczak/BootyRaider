@@ -38,11 +38,23 @@ function Raider.HandleCommand(text)
         end
         if arguments=="" then return Raider.Modules.MasterLootWindow.OpenNewRollDialog() end
         return Raider.Modules.MasterLootWindow.OpenLinkedItemRoll(arguments)
+    elseif command=="log" then
+        local record=Runtime.GetAttendance()
+        if arguments~="" then
+            local _,snapshot,statistic=Raider.Database.GetSavedRaidState(arguments)
+            if record and record.snapshotId==arguments then
+                -- Keep the active identity when its display ID matches.
+            else record=snapshot or statistic or Raider.Services.RaidAudit.FindRaidId(arguments) or arguments end
+        end
+        local owner=Runtime.host and Runtime.host.window
+        local ok,result=Raider.Modules.RaidLog.Open(record,owner)
+        if not ok then Runtime.Print(result) end
+        return ok
     elseif command=="stats" then return Runtime.OpenView("raidStatistics")
     elseif command=="csr" then return Runtime.OpenView("csr")
     elseif command=="settings" then if Runtime.host and Runtime.host.OpenSettings then return Runtime.host.OpenSettings() end
     elseif command=="" or command=="raid" then return Runtime.OpenView("raid") end
-    Runtime.Print("Use /br, /br stats, /br csr, /br settings or /br roll [item] [players] [Tmog OS MS RC SR].")
+    Runtime.Print("Use /br, /br stats, /br csr, /br log [raid ID], /br settings or /br roll [item] [players] [Tmog OS MS RC SR].")
     return false
 end
 local function QuickMenu(host)

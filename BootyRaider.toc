@@ -2,7 +2,7 @@
 ## Title: BootyRaider
 ## Notes: Raid sessions, loot tools, raid statistics and CSR. Works with or without Booty Suite.
 ## Author: Mukla
-## Version: 1.0.0-dev.1
+## Version: 1.0.0-dev.2
 ## X-Release-Version: 1.0.0
 ## RequiredDeps: BootyLib
 ## SavedVariables: BootyRaiderDB
@@ -12,6 +12,7 @@ Services\RankPolicy.lua
 Services\LootMessageService.lua
 Core\Database.lua
 Services\RaidJournalService.lua
+Services\RaidAuditService.lua
 Services\ItemReference.lua
 Services\RaidResService.lua
 Services\RaidItemCatalog.lua
@@ -38,6 +39,7 @@ Modules\RaidSoftReserve.lua
 Modules\RaidReserveEditor.lua
 Modules\RaidManagement.lua
 Modules\RaidInfo.lua
+Modules\RaidLog.lua
 Modules\NativeRaidTab.lua
 Modules\Runtime.lua
 Modules\RaidScreen.lua

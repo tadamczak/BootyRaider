@@ -21,7 +21,7 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
     local now = time()
     local startedAt, endedAt = tonumber(attendance.sessionStartedAt), tonumber(attendance.endedAt)
     local entry = {
-        id = raidId, displayName = attendance.displayName, raidName = attendance.raidName or "Unknown zone", savedAt = now, members = {},
+        id = raidId, syncRaidId = attendance.syncRaidId, displayName = attendance.displayName, raidName = attendance.raidName or "Unknown zone", savedAt = now, members = {},
         startedAt = attendance.sessionStartedAt,
         endedAt = endedAt,
         createdAt = attendance.createdAt or startedAt or attendance.lastSavedAt or now,
@@ -54,7 +54,7 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
         end
         for lootIndex = 1, table.getn(member.loot or {}) do
             local loot = member.loot[lootIndex]
-            savedMember.lootItems[lootIndex] = { itemId = tonumber(loot.itemId), name = loot.name, count = tonumber(loot.count) or 1 }
+            savedMember.lootItems[lootIndex] = { itemId = tonumber(loot.itemId), name = loot.name, count = tonumber(loot.count) or 1, syncRecordId = loot.syncRecordId }
         end
         table.insert(entry.members, savedMember)
         includedNames[key] = true

@@ -182,12 +182,8 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         end
         local changed = table.getn(selected) ~= table.getn(originalIds)
         for index, id in ipairs(selected) do if id ~= originalIds[index] then changed = true end end
-        if changed then
-            local ok, failure = Raider.Services.RaidRes.SetMemberReservations(frame.attendance,frame.memberName,selected)
-            if not ok then frame.message:SetText(failure); return end
-        end
-        if allowed ~= originalException then
-            local ok, failure = Raider.Services.RaidRes.SetMemberException(frame.attendance,frame.memberName,allowed)
+        if changed or allowed ~= originalException then
+            local ok, failure = Raider.Services.RaidRes.SetMemberReservations(frame.attendance,frame.memberName,selected,allowed)
             if not ok then frame.message:SetText(failure); return end
         end
         frame:Hide(); refresh()

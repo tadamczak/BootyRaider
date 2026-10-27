@@ -25,6 +25,12 @@ function Screen.Create(parent, host)
         toggleMinimize=function() if page.lootMasterController then page.lootMasterController.toggleMinimize() end end,
     })
     local actions=Raid.CreateActionControls(page)
+    function page.OpenRaidLog(record)
+        if Runtime.IsTestRaid() then return false end
+        local ok,result=Raider.Modules.RaidLog.Open(record or Runtime.GetAttendance(),page)
+        if not ok then Runtime.Print(result) end
+        return ok,result
+    end
     local function RunAction(member,action) return Runtime.ActiveRaidService().RunMemberAction(member,action) end
     local function Counts() return Runtime.ActiveRaidService().GetGroupCounts() end
     local function MoveGroup(member,group) return Runtime.ActiveRaidService().MoveMemberToGroup(member,group) end
@@ -111,6 +117,7 @@ function Screen.Create(parent, host)
         page.raidTypePanel:Show()
     end)
     Refresh=function()
+        if Raider.Modules.RaidLog then Raider.Modules.RaidLog.RefreshVisible() end
         if not page:IsVisible() and not (page.lootMasterController and page.lootMasterController.IsVisible()) then return end
         if page:IsVisible() then
             Raid.RefreshPage(renderer)
@@ -153,7 +160,7 @@ function Screen.Create(parent, host)
         acceptLoadedRaid=Runtime.AcceptLoadedSnapshot,
         setHistoricalLoaded=function(value) Runtime.historicalLoaded=value and true or false end,getRules=Rules,
         saveRules=function(rules)
-            if Runtime.IsTestRaid() then Raider.Services.TestRaid.SaveLootRules(rules) else Raider.Database.SaveLootRules(rules) end
+            if Runtime.IsTestRaid() then return Raider.Services.TestRaid.SaveLootRules(rules) else return Raider.Database.SaveLootRules(rules) end
         end,
         getHighlyContestedItems=function()
             local items=Raider.Database.GetHighlyContestedItems()
@@ -191,6 +198,7 @@ function Screen.Create(parent, host)
     function controller:OnRosterUpdate() self:OnGroupChanged();lifecycle:OnRosterUpdate() end
     function controller:SyncTrackingSetting(skipRefresh) lifecycle:SyncTrackingSetting(skipRefresh) end
     function controller:Stop()
+        if Raider.Modules.RaidLog then Raider.Modules.RaidLog.Close() end
         if page.lootMasterController then page.lootMasterController.Close() end
         page:Hide();lifecycle:Hide();lifecycle:CancelRosterUpdate()
     end

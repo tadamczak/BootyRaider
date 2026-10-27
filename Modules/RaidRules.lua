@@ -76,7 +76,9 @@ function RaidManagement.CreateLootRulesDialog(options)
     frame.Close = Close
     frame.close:SetScript("OnClick", Close); frame.cancel:SetScript("OnClick", Close)
     frame.save:SetScript("OnClick", function()
-        options.saveRules(frame.working); frame:Hide()
+        local ok,reason=options.saveRules(frame.working)
+        if ok==false then Raider.Runtime.Print(reason or "Loot rules could not be saved.");return end
+        frame:Hide()
         options.refresh()
         options.printMessage(options.isTestRaid and options.isTestRaid() and "Loot rules saved for this Test Raid session." or "Loot rules saved.")
     end)

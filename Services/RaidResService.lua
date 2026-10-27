@@ -282,6 +282,7 @@ end
 -- Mutations do not consume snapshots. Keep metadata preparation, but omit
 -- member/item copies when draft or transient changes cannot be persisted.
 local function SyncMutation(attendance)
+    if attendance and attendance._auditStaged then return end
     if attendance and (attendance._transient or attendance._sessionDraft) then
         if type(attendance.members) == "table" then EnsureSnapshotImport(attendance) end
         return
@@ -356,7 +357,7 @@ local function AssignItems(member, ids, sourceName)
     member.srSourceName = table.getn(ids) > 0 and (sourceName or member.name) or nil
 end
 
-function RaidResService.SetMemberReservations(attendance, name, ids)
+function RaidResService.SetMemberReservations(attendance, name, ids, exception)
     local member = FindMember(attendance, name)
     if not member then return false, "This player is no longer in the session roster." end
     if type(ids) ~= "table" or table.getn(ids) > 40 then return false, "Select up to 40 reservations." end
@@ -375,7 +376,12 @@ function RaidResService.SetMemberReservations(attendance, name, ids)
             if not normalized[index] then return false, "Enter an item name (up to 120 characters)." end
         end
     end
+    if exception and table.getn(normalized)==0 then return false,"Select an SR before enabling an exception." end
     AssignItems(member, normalized)
+    if exception ~= nil then
+        member.srException=exception==true and true or nil
+        RecordChange(attendance, member, "exception")
+    end
     RecordChange(attendance, member, "items"); UpdateMissing(attendance); SyncMutation(attendance)
     return true
 end
@@ -654,6 +660,7 @@ function RaidResService.Reconcile(previousAttendance, attendance)
     local previousImport = previousAttendance and previousAttendance.softReserveImport
     if not attendance or type(attendance.members) ~= "table" or not previousImport then return false end
     attendance.snapshotId = previousAttendance.snapshotId
+    attendance.syncRaidId = previousAttendance.syncRaidId
     attendance.sessionStartedAt = previousAttendance.sessionStartedAt
     attendance.lastSavedAt = previousAttendance.lastSavedAt
     attendance._sessionDraft = previousAttendance._sessionDraft
@@ -744,7 +751,7 @@ end
 
 -- Saved raids own their durable loot records. Runtime award queues, lookup
 -- indexes and UI objects stay with their controllers and are never copied.
-local lootScalarFields = { "recordId", "sourceRecordId", "itemId", "name", "link", "icon", "count", "ordinaryReceipt", "awardHistoryKey", "tradedFrom", "tradedTo" }
+local lootScalarFields = { "recordId", "sourceRecordId", "syncRecordId", "auditFailure", "itemId", "name", "link", "icon", "count", "ordinaryReceipt", "awardHistoryKey", "tradedFrom", "tradedTo" }
 local memberScalarFields = { "name", "raidRank", "subgroup", "level", "class", "classFile", "zone", "online", "guildRank", "guildMember", "sr", "srSourceName", "srException" }
 local function CopyLootRecords(source)
     local records, index, fieldIndex = {}, nil, nil
@@ -851,6 +858,7 @@ function RaidResService.BuildSnapshot(attendance)
     if not importInfo.id and not attendance.snapshotId then return nil end
     local snapshot = { version = 4, id = attendance.snapshotId or importInfo.id, raidResId = importInfo.id, srUrl = importInfo.url, rollForExport = importInfo.rollForExport, raidName = attendance.raidName, source = importInfo.origin or "raidres", startedAt = attendance.sessionStartedAt or attendance.scannedAt, savedAt = attendance.lastSavedAt, updatedAt = time(), assignedCount = 0, unmatched = {}, missingNames = {}, members = {}, nextLootRecordId = tonumber(attendance.nextLootRecordId) or 0 }
     snapshot.lootRules = Raider.Database.CopyLootRules(Raider.Database.EnsureRaidLootRules(attendance))
+    snapshot.syncRaidId = attendance.syncRaidId
     snapshot.saveOptions = CopySaveOptions(attendance.saveOptions)
     snapshot.srCustomChanges = CopyChanges(attendance.srCustomChanges)
     snapshot.srCustomReview = CopyChanges(importInfo.customReview)
@@ -960,6 +968,7 @@ function RaidResService.RestoreSnapshot(snapshot)
         saveOptions = CopySaveOptions(snapshot.saveOptions),
         createdAt = createdAt, modifiedAt = modifiedAt, duration = duration,
         endedAt = snapshot.endedAt, displayName = snapshot.displayName,
+        syncRaidId = snapshot.syncRaidId,
         softReserveImport = { id = snapshot.raidResId or snapshot.id, origin = snapshot.source, url = snapshot.srUrl or "", rollForExport = snapshot.rollForExport or "", importedAt = snapshot.updatedAt, unmatchedNames = unmatchedNames, unmatchedReservations = unmatched, missingNames = missingNames },
         _loadedSnapshotId = snapshot.id,
         srCustomChanges = CopyChanges(snapshot.srCustomChanges),
@@ -976,3 +985,79 @@ function RaidResService.SyncHistory(attendance)
     if snapshot and not attendance._transient and not attendance._sessionDraft then Raider.Database.StoreSoftReserveSnapshot(snapshot) end
     return snapshot
 end
+
+-- Stage only SR-owned state. Loot/roster observations retain their references;
+-- a rejected journal operation must not leave half of an officer edit applied.
+local function CopyReserveData(value)
+    if type(value)~="table" then return value end
+    local copy={}
+    for key,item in pairs(value) do copy[key]=CopyReserveData(item) end
+    return copy
+end
+local reserveFields={"sr","srItemIds","srSourceName","srException"}
+local function AuditedReserveMutation(name,kind)
+    local mutate=RaidResService[name]
+    if name=="Import" then
+        local import=mutate
+        mutate=function(attendance,encoded,url) return import(encoded,attendance,url) end
+    end
+    local function Wrapped(attendance,a,b,c)
+        local audit=Raider.Services.RaidAudit
+        if not audit or not attendance or type(attendance.members)~="table" then return mutate(attendance,a,b,c) end
+        if name=="ReapplyCustomChanges" and attendance.softReserveImport~=a then
+            return false,"The import changed. Reopen the review for the current import."
+        end
+        local staged={}
+        for key,value in pairs(attendance) do staged[key]=value end
+        staged._auditStaged=true;staged.members={}
+        staged.softReserveImport=CopyReserveData(attendance.softReserveImport)
+        staged.srCustomChanges=CopyReserveData(attendance.srCustomChanges)
+        for index,member in ipairs(attendance.members) do
+            local copy={}
+            for key,value in pairs(member) do copy[key]=value end
+            copy.srItemIds=CopyReserveData(member.srItemIds)
+            staged.members[index]=copy
+        end
+        local first=a
+        if name=="ReapplyCustomChanges" then first=staged.softReserveImport end
+        local result,reason=mutate(staged,first,b,c)
+        if result==false or result==nil or result==0 then return result,reason end
+        local changed,changedMembers=0,{}
+        for index,member in ipairs(staged.members) do
+            if not Raider.Services.RaidJournal.Equal(audit.SRValue(member),audit.SRValue(attendance.members[index])) then
+                changed=changed+1;changedMembers[changed]=member
+            end
+        end
+        local oldSource=attendance.softReserveImport or {}
+        local newSource=staged.softReserveImport or {}
+        local sourceChanged=oldSource.url~=newSource.url or not Raider.Services.RaidJournal.Equal(oldSource.unmatchedReservations or {},newSource.unmatchedReservations or {})
+        if changed>0 or sourceChanged then
+            local subject=type(a)=="string" and (name=="SetMemberReservations" or name=="SetMemberException" or name=="RemoveMemberReservation") and a or nil
+            local ok,failure=audit.Reserves(staged,kind,changedMembers,{subject=subject,count=changed},sourceChanged and newSource or nil)
+            if not ok then return false,failure end
+        end
+        attendance.syncRaidId=staged.syncRaidId
+        for index,member in ipairs(attendance.members) do
+            for _,field in ipairs(reserveFields) do member[field]=staged.members[index][field] end
+        end
+        if attendance.softReserveImport and staged.softReserveImport then
+            for key in pairs(attendance.softReserveImport) do attendance.softReserveImport[key]=nil end
+            for key,value in pairs(staged.softReserveImport) do attendance.softReserveImport[key]=value end
+        else attendance.softReserveImport=staged.softReserveImport end
+        attendance.srCustomChanges=staged.srCustomChanges
+        SyncMutation(attendance)
+        return result,reason
+    end
+    if name=="Import" then
+        RaidResService[name]=function(encoded,attendance,url) return Wrapped(attendance,encoded,url) end
+    else RaidResService[name]=Wrapped end
+end
+AuditedReserveMutation("SetMemberReservations","sr.edit")
+AuditedReserveMutation("SetMemberException","sr.edit")
+AuditedReserveMutation("ReapplyCustomChanges","sr.reapply")
+AuditedReserveMutation("Import","sr.import")
+AuditedReserveMutation("ApplyAssignments","sr.assign")
+AuditedReserveMutation("ClearUnmatched","sr.clear")
+AuditedReserveMutation("RemoveMemberReservation","sr.edit")
+AuditedReserveMutation("ClearInvalidMemberReservations","sr.clear")
+AuditedReserveMutation("SetUrl","sr.link")

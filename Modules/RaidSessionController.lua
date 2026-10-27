@@ -26,12 +26,15 @@ function RaidSessionController.Create(dependencies)
     function controller:CompletePendingRaidScan()
         local count, failure = session:CapturePendingRaid(PendingId, PendingName)
         if count == nil then return nil, failure or "The physical raid roster is not ready. Retry or cancel the new session." end
+        if session.CommitPendingRaid then
+            local ok,reason=session:CommitPendingRaid()
+            if ok==false then return nil,reason end
+        end
         local live = count > 0 and dependencies.isLiveTrackingWanted()
         state.pendingRaidSessionId = nil
         state.pendingRaidName = nil
         state.raidScanReady = true
         state.raidLiveTracking = live
-        if session.CommitPendingRaid then session:CommitPendingRaid() end
         pendingState = nil
         return count
     end
@@ -114,7 +117,8 @@ function RaidSessionController.Create(dependencies)
 
     function controller:Quit()
         if dependencies.cancelRaidScan then dependencies.cancelRaidScan() end
-        session:Quit()
+        local ok,reason=session:Quit()
+        if ok==false then return false,reason end
         if session.CommitPendingRaid then session:CommitPendingRaid() end
         pendingState = nil
         state.pendingRaidSessionId = nil; state.pendingRaidName = nil
@@ -124,6 +128,7 @@ function RaidSessionController.Create(dependencies)
         state.raidSessionTransitionPending = false; state.raidSessionMismatchContext = nil
         state.raidPhysicalRosterReady = nil; state.raidSessionAwaitingPhysicalAcceptance = nil
         if session.ResetPhysicalRaid then session:ResetPhysicalRaid() end
+        return true
     end
 
     function controller:Continue(contextKey)

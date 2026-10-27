@@ -377,6 +377,10 @@ function RaidManagement.CreateActionControls(page)
         if Raider.Services.Raid.ReadyCheck then Raider.Services.Raid.ReadyCheck() end
     end)
     controls.readyCheck:Hide()
+    controls.raidLog = Raider.UI.Components.CreateButton(page, nil, "Raid Log", 118, 22)
+    Raider.UI.Components.SetClassicButtonIcon(controls.raidLog, "rules", 13, 7, 2)
+    controls.raidLog:SetScript("OnClick", function() if page.OpenRaidLog then page.OpenRaidLog() end end)
+    controls.raidLog:Hide()
     controls.raidInfo = Raider.UI.Components.CreateIconButton(page, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\info.tga", 26, 6, Raider.UI.Components.Theme.colors.goldIcon)
     Raider.UI.Components.ApplyDropdownChoiceSurface(controls.raidInfo)
     Raider.UI.Components.AttachGoldHoverBorder(controls.raidInfo, 0.35, 0.35, 0.35, 1)
@@ -416,6 +420,7 @@ function RaidManagement.CreateActionControls(page)
     controls.historyDeleteButtons = {}
     controls.historyLoadButtons = {}
     controls.historyEditButtons = {}
+    controls.historyLogButtons = {}
     controls.historyHeaders = {}
     for index, text in ipairs({"#", "Raid ID", "Raid Type", "Duration", "Created At", "Modified At"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
     local historyIndex
@@ -441,6 +446,10 @@ function RaidManagement.CreateActionControls(page)
         edit.historyIndex = historyIndex; edit:Hide()
         Raider.UI.Components.AttachTooltip(edit, "Edit raid", "Change this saved raid's ID, name and raid type.")
         controls.historyEditButtons[historyIndex] = edit
+        local log = Raider.UI.Components.CreateGoldToolbarButton(controls.historyCanvas, "rules")
+        log.historyIndex = historyIndex; log:Hide()
+        Raider.UI.Components.AttachTooltip(log, "Raid Log", "View officer changes made to this raid.")
+        controls.historyLogButtons[historyIndex] = log
     end
     controls.historyEmpty = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontDisable"); controls.historyEmpty:SetText("No raids to load"); controls.historyEmpty:Hide()
     controls.addStatistics = Raider.UI.Components.CreateButton(page, nil, "Add to Raid Statistics", 132, 22); controls.addStatistics:Hide()
@@ -514,7 +523,8 @@ function RaidManagement.RegisterResetLootDialog(options)
         text = "Reset all recorded raid loot?", button1 = "Reset loot", button2 = "Cancel",
         OnAccept = function()
             local attendance = options.getAttendance()
-            Raider.Services.Raid.ResetRecordedLoot(attendance)
+            local ok,reason = Raider.Services.Raid.ResetRecordedLoot(attendance)
+            if ok==false then Raider.Runtime.Print(reason or "Raid loot history could not be reset.");return end
             options.clearSelection(); options.refresh(); options.printMessage("Raid loot history reset.")
         end,
         timeout = 0, whileDead = 1, hideOnEscape = 1,
@@ -902,7 +912,14 @@ function RaidManagement.MountList(page, chrome, options)
     local pendingSoftReserveRemoval = nil
     StaticPopupDialogs["BOOTY_RAIDER_REMOVE_MEMBER_SR"] = {
         text = "Remove the Soft Reserve assigned to %s?", button1 = "Remove SR", button2 = "Cancel",
-        OnAccept = function() if pendingSoftReserveRemoval then options.removeSoftReserve(pendingSoftReserveRemoval); options.refresh() end; pendingSoftReserveRemoval = nil end,
+        OnAccept = function()
+            if pendingSoftReserveRemoval then
+                local ok,reason=options.removeSoftReserve(pendingSoftReserveRemoval)
+                if not ok then RaidManagement.ReportSoftReserveFailure(reason)
+                else options.refresh() end
+            end
+            pendingSoftReserveRemoval = nil
+        end,
         OnCancel = function() pendingSoftReserveRemoval = nil end,
         timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
@@ -1105,7 +1122,7 @@ function RaidManagement.MountChrome(page, chrome, actions)
     })
     RaidManagement.SetRefreshControls(page, {
         leaderMode = page.leaderModeButton,
-        readyCheck = actions.readyCheck, raidInfo = actions.raidInfo,
+        readyCheck = actions.readyCheck, raidInfo = actions.raidInfo, raidLog = actions.raidLog,
         title = chrome.title,
         resetFilters = page.resetFiltersButton,
         unavailable = chrome.unavailable,
@@ -1120,6 +1137,7 @@ function RaidManagement.MountChrome(page, chrome, actions)
         historyDeleteButtons = actions.historyDeleteButtons,
         historyLoadButtons = actions.historyLoadButtons,
         historyEditButtons = actions.historyEditButtons,
+        historyLogButtons = actions.historyLogButtons,
         historyHeaders = actions.historyHeaders,
         historyScroll = actions.historyScroll, historyCanvas = actions.historyCanvas,
         historyEmpty = actions.historyEmpty,
@@ -1393,6 +1411,7 @@ function RaidManagement.UpdateActionAvailability(page, testRaid)
     if controls.readyCheck then
         Raider.UI.Components.SetButtonEnabled(controls.readyCheck, not testRaid and Raider.Services.Raid.CanReadyCheck and Raider.Services.Raid.CanReadyCheck() or false)
     end
+    if controls.raidLog then Raider.UI.Components.SetButtonEnabled(controls.raidLog,not testRaid) end
 end
 
 function RaidManagement.ShowReadyState(page, lootMasterMode)
@@ -2824,7 +2843,8 @@ local function ToolSpecs(page, kind)
     local controls = page.refreshControls
     page.toolActionSpecs = page.toolActionSpecs or {
         leader = {{key = "rl-mode", source = controls.leaderMode, caption = "RL Mode", icon = "raid_tools", openRaid = true},
-            {key = "ready-check", source = controls.readyCheck, caption = "Ready Check", icon = "check"}},
+            {key = "ready-check", source = controls.readyCheck, caption = "Ready Check", icon = "check"},
+            {key = "raid-log", source = controls.raidLog, caption = "Raid Log", icon = "rules"}},
         loot = {
             {key = "loot-mode", source = controls.mode, caption = "LM Mode", icon = "loot_tools"},
             {key = "lm-config", source = page.lmConfigToggle, caption = "LM Config", icon = "settings"},
@@ -3975,6 +3995,10 @@ function RaidManagement.AttachActionHandlers(options)
             local snapshot = options.page.raidHistorySnapshots and options.page.raidHistorySnapshots[this.historyIndex]
             if snapshot then editRaidDialog:Open(snapshot) end
         end)
+        controls.historyLogButtons[historyIndex]:SetScript("OnClick", function()
+            local snapshot = options.page.raidHistorySnapshots and options.page.raidHistorySnapshots[this.historyIndex]
+            if snapshot and options.page.OpenRaidLog then options.page.OpenRaidLog(snapshot) end
+        end)
     end
     local liveLoadDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderLiveLoad", "Live Tracking", "Yes", "refresh")
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(liveLoadDialog, options.page) end
@@ -4192,7 +4216,11 @@ function RaidManagement.AttachActionHandlers(options)
     controls.addStatistics:Hide()
     StaticPopupDialogs["BOOTY_RAIDER_QUIT_RAID_SESSION"] = {
         text = "Quit the current raid session without saving?", button1 = "Quit", button2 = "Cancel",
-        OnAccept = function() options.quitRaidSession(); RaidManagement.ResetIssueAttention(options.page); options.refresh() end,
+        OnAccept = function()
+            local ok,reason=options.quitRaidSession()
+            if ok==false then Raider.Runtime.Print(reason or "The raid session could not be ended.");return end
+            RaidManagement.ResetIssueAttention(options.page);options.refresh()
+        end,
         timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
     local quitDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderQuitRaidDialog", "Quit Raid", "Quit", "quit")

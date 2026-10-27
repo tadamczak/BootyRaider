@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-dev.2 — 2026-10-27
+
+- Add a compact local Raid Log for officer edits, imports, loot allocations/corrections, saved raids and CSR archive decisions; unchanged actions stay silent.
+- Keep session/allocation identities across capture, save and load; show before/after details lazily.
+- Reset pre-journal raid/CSR test data once, retaining preferences. This experimental branch does not enable peer transport or remote recovery.
+
 ## 1.0.0-dev.1 — 2026-10-27
 
 - Add the local causal journal foundation with stable identities, atomic operations, duplicate checks and data-only replay; peer transport remains disabled.

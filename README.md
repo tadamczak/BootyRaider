@@ -94,4 +94,6 @@ Auto Loot Inclusions follows Raid Type: Molten Core includes Lava Core and Fiery
 
 The SR editor retains resolved item names and quality colours across selection, filtering and reopening for the current login. The missing-rights confirmation uses a short, fully visible message.
 
-The experimental Raid/CSR synchronization branch introduces local raid identities and a versioned change journal. Officer-to-officer synchronization is not enabled in this build.
+Raid Log shows dated officer actions, original nicknames and before/after details. Open it from Raid Leader Tools, the log icon beside a saved raid, or `/br log [raid ID]`. Imports appear as one summary; unchanged saves, UI activity and routine loot observations do not spam the log. Only one page of summaries and the selected change are loaded for display. Officer-to-officer synchronization and remote DC recovery are not enabled yet.
+
+**Experimental data reset:** the first load of this branch clears pre-journal active raids, saved raids and CSR history once. Addon preferences are retained. These records were test data; there is no migration or backward data recovery.
