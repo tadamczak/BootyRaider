@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-dev.34 — 2026-10-27
+
+- Preserve resolved SR item names and quality colours across editor refreshes; shorten the missing-rights confirmation and fit all message lines.
+
 ## 0.1.0-dev.33 — 2026-10-27
 
 - Apply MC inclusions with Raid Type; preserve SR exception markers, gate exceptions by rights, confirm ineligible saves and preload/highlight selected SR items.

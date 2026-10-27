@@ -91,3 +91,5 @@ Changing the active Raid Type also selects its auto-loot exclusion preset and up
 LM Config opened from Loot Master Tools can be dragged like Reycoin list. Add SR uses a gold plus, Remove uses a trash bin, and edit actions use the same gold wrench.
 
 Auto Loot Inclusions follows Raid Type: Molten Core includes Lava Core and Fiery Core; other raids currently have empty presets. Changing type retains your custom inclusions. The SR editor automatically requests uncached visible items and highlights the selected catalogue row. Allow to SR without loot rights is available only when that player has no SR rights. Saving without rights and without this exception asks for confirmation. The exception asterisk remains visible when hovering the item.
+
+The SR editor retains resolved item names and quality colours across selection, filtering and reopening for the current login. The missing-rights confirmation uses a short, fully visible message.

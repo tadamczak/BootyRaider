@@ -74,6 +74,12 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     local itemLoader = UI.CreateTooltip("BootyRaiderReserveItemLoader", frame)
     frame.itemLoader=itemLoader
     local requested = {}
+    -- Keep successful lookups for this editor's lifetime, including across
+    -- row reuse and transient client cache misses. Never persist UI labels.
+    local itemNames, itemLabels = {}, {}
+    local function ResolvedName(id)
+        return itemNames[tonumber(id)] or ItemText(id)
+    end
     local function RefreshItemTick()
         frame.itemWait=frame.itemWait+(arg1 or 0);frame.itemElapsed=frame.itemElapsed+(arg1 or 0)
         if frame.itemElapsed>=0.25 then frame.itemElapsed=0;chosen:Refresh();available:Refresh() end
@@ -81,7 +87,7 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     end
     local function LoadItem(id)
         id=tonumber(id)
-        if not id or GetItemInfo(id) or requested[id] then return end
+        if not id or itemLabels[id] or GetItemInfo(id) or requested[id] then return end
         requested[id]=true
         itemLoader:SetOwner(frame,"ANCHOR_NONE");itemLoader:SetHyperlink("item:"..id..":0:0:0");itemLoader:Hide()
         frame.itemWait=0;frame.itemElapsed=0
@@ -90,8 +96,14 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     local function RenderItem(row, id)
         LoadItem(id)
         row.itemId = tonumber(id)
-        row.fullText = ItemText(id) .. (row.itemId and (" (#" .. id .. ")") or "")
-        row:SetText(UI.ShortenText(row.fullText, 38))
+        if row.itemId and GetItemInfo(row.itemId) then
+            itemNames[row.itemId]=Raider.Services.ItemReference.Name(row.itemId)
+            itemLabels[row.itemId]=UI.GetItemLabel(row.itemId)
+        end
+        row.fullText = ResolvedName(id)
+        if row.itemId then
+            row:SetText(itemLabels[row.itemId] or UI.GetItemLabel(row.itemId))
+        else row:SetText(UI.ShortenText(row.fullText, 38)) end
         UI.SetClassicButtonSelected(row, selected[1]==id)
         UI.ApplyDropdownChoiceSurface(row)
     end
@@ -99,7 +111,7 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         local query = string.lower(frame.search:GetText() or "")
         available.values = {}
         for _, id in ipairs(allItems) do
-            if query=="" or string.find(string.lower(ItemText(id)),query,1,true) or string.find(tostring(id),query,1,true) then
+            if query=="" or string.find(string.lower(ResolvedName(id)),query,1,true) or string.find(tostring(id),query,1,true) then
                 table.insert(available.values,id)
             end
         end
@@ -116,7 +128,11 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
             local enter,leave=row:GetScript("OnEnter"),row:GetScript("OnLeave")
             row:SetScript("OnEnter", function()
                 if enter then enter() end
-                if this.itemId then UI.ShowItemTooltip(this)
+                if this.itemId then
+                    UI.ShowItemTooltip(this)
+                    -- Tooltip requests can resolve an item immediately. Both
+                    -- lists must use the same presentation as subsequent clicks.
+                    chosen:Refresh();available:Refresh()
                 else UI.AnchorTooltip(this); GameTooltip:SetText(this.fullText); GameTooltip:Show() end
             end)
             row:SetScript("OnLeave", function() GameTooltip:Hide();if leave then leave() end end)
@@ -153,7 +169,15 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
                 frame.confirm=UI.Window.CreateProjectConfirmation("BootyRaiderReserveRightsConfirm","No loot rights","Save anyway","raids")
                 if UI.WindowStack then UI.WindowStack.SetOwner(frame.confirm,frame) end
             end
-            frame.confirm:Open(frame.memberName.." does not have loot rights, and 'Allow to SR without loot rights' is not selected. Save this SR anyway? It will remain ineligible until loot rights or an exception are granted.",function() Save(true) end)
+            local confirm=frame.confirm
+            confirm.label:SetWidth(confirm:GetWidth()-16);confirm.label:SetHeight(0)
+            confirm:Open(frame.memberName.." has no loot rights.\nNo SR exception selected.\nSave this SR anyway?",function() Save(true) end)
+            -- Some clients report the old constrained FontString height. The
+            -- three explicit lines still need their full line boxes.
+            local _,size=confirm.label:GetFont()
+            local spacing=confirm.label.GetSpacing and confirm.label:GetSpacing() or 0
+            local height=math.max(confirm.label:GetHeight(),3*(size+2)+2*spacing)
+            confirm.label:SetHeight(height);confirm:SetHeight(height+78)
             return
         end
         local changed = table.getn(selected) ~= table.getn(originalIds)
