@@ -638,6 +638,16 @@ function Replica.Create(options)
         local allowed,reason=Authorized();if not allowed then return false,reason end
         id=Canonical(id)
         local active=db.raidAttendance
+        -- Physical receipts cannot be replayed. Preserve their local fallback
+        -- until Save has successfully included them in the journal projection.
+        local localFacts=active and active.syncLocalAuditFailure
+        for _,members in ipairs({active and active.members or {},active and active.departedMembers or {}}) do
+            for _,member in ipairs(members) do
+                if member.entitlementAuditFailure then localFacts=true end
+                for _,loot in ipairs(member.loot or {}) do if loot.auditFailure then localFacts=true end end
+            end
+        end
+        if localFacts then return false,"Save the current raid successfully before recovering a session. Confirmed loot or loot-right changes are still recorded only locally." end
         if active and active.syncRaidId and Canonical(active.syncRaidId)~=id then return false,"Save or end your current session before recovering another raid." end
         local attendance,failure=Build(id);if not attendance then return false,failure end
         if Record(id,"raid:lifecycle")=="ended" then return false,"This raid was explicitly ended. Its history is still available." end

@@ -103,4 +103,6 @@ Open **Sync / Recover** beside New Raid, **Raid Sync / Conflicts** in Raid Leade
 
 **Conflicts** shows the agreed value and each officer's proposal. Choose the intended SR or loot correction; a stale editor draft asks you to reopen it before saving. Asterisks mark provisional CSR while a source is disputed. When two officers record separately, use **Compare raids** and decide whether matching awards are duplicates or separate items before merging.
 
+If recording a confirmed loot receipt fails, use **Save Raid** to retry. Recovery stays blocked until those local loot and entitlement changes are safely recorded.
+
 Peer confirmation means another client has received data in memory. `/reload` or normal logout writes SavedVariables; losing every unsaved copy cannot be repaired. A recording gap cannot reconstruct events nobody observed. Raid Log retains author attribution supplied by trusted guild officers; it is not tamper-proof evidence.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.4 — 2026-10-27
+
+- Preserve confirmed local loot and consumed entitlements after journal errors: recovery requires a successful Save Raid retry before replacing the active session.
+
 ## 1.0.0-dev.3 — 2026-10-27
 
 - Exchange missing raid and CSR source changes between guild officers, including relay without the author and recovery after disconnects.
