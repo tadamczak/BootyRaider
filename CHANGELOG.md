@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.6 — 2026-10-27
+
+- Ignore guild messages echoed to their own sender instead of showing a false synchronization rejection.
+
 ## 1.0.0-dev.5 — 2026-10-27
 
 - Fix officer synchronization rejected by the native chat escape parser. All synchronizing officers must reload this transport update.

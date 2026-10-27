@@ -348,7 +348,9 @@ function Sync.New(options)
     function self:Receive(prefix,text,channel,sender)
         if prefix~=Sync.PREFIX then return false,"other-prefix" end
         if not Ready() then return false,self.reason end
-        if channel~="GUILD" or not Text(sender,96) or sender==self.actor or not Authority(sender) then return Reject("unauthorized-peer") end
+        -- Guild addon messages also return to their sender. This is not peer input.
+        if channel=="GUILD" and sender==self.actor then return false,"self-echo" end
+        if channel~="GUILD" or not Text(sender,96) or not Authority(sender) then return Reject("unauthorized-peer") end
         if type(text)~="string" or string.len(text)>Sync.limits.packet then return Reject("packet-limit") end
         local fields=Fields(text)
         if not fields then return Reject("invalid-packet") end
