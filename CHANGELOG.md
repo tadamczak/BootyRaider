@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-dev.13 — 2026-10-28
+
+- Use measured, matching raid tables and compact synchronization controls. Keep session actions in Raid.
+- Resolve conflicts by selecting Your data or an officer’s synced data, with item tooltips and one Accept button.
+- Rename live tracking to Record raid events and reduce synchronization/dialog minimum sizes.
+
 ## 1.0.0-dev.12 — 2026-10-28
 
 - Open conflicts directly in a sectioned comparison with one Accept action; keep unresolved loot/SR when ending a raid. Color connected-officer captions gold.

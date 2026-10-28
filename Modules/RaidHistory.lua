@@ -16,6 +16,20 @@ function RaidManagement.RefreshSyncStatus(page)
     UI.SetButtonEnabled(controls.scan,controls.canStartRaid and canJoin)
 end
 
+local function FitColumns(page,controls,headers,values,available,actionWidth)
+    if not controls.columnMeasure then controls.columnMeasure=UI.CreateLabel(page,nil,"OVERLAY","GameFontHighlightSmall");controls.columnMeasure:Hide() end
+    local measure=controls.columnMeasure;local columns={};local total=0
+    for index,header in ipairs(headers) do
+        measure:SetText(header:GetText());local desired=measure:GetStringWidth()+12
+        for _,row in ipairs(values) do measure:SetText(tostring(row[index] or ""));desired=math.max(desired,measure:GetStringWidth()+12) end
+        if index==1 then desired=28 elseif index==table.getn(headers) then desired=math.max(actionWidth,desired) end
+        columns[index]={desiredWidth=desired,minimumWidth=index==1 and 28 or math.min(desired,64),growthWeight=0};total=total+desired
+    end
+    UI.Table.AllocateColumnWidths(columns,math.min(available,total))
+    local widths={};for index,column in ipairs(columns) do widths[index]=column.width end
+    return widths
+end
+
 local function ActiveSessions(page,controls,width,y)
     local api=Raider.Runtime and Raider.Runtime.replica
     if not api or not api.ListActiveRaids then return y end
@@ -25,7 +39,7 @@ local function ActiveSessions(page,controls,width,y)
         controls.activeRows={};controls.activeOffset=0;controls.activeHeaders={}
         for index,text in ipairs({"#","Raid ID","Raid Type","Members","Created At","Actions"}) do controls.activeHeaders[index]=UI.CreateColumnLabel(page,text,"gold") end
         for index=1,4 do
-            local row=UI.CreateButton(page,nil,"",width,24);row.name=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
+            local row=UI.CreateButton(page,nil,"",width,26);row.name=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
             row.raidType=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
             row.number=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall");row.members=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall");row.created=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
             row.join=UI.CreateButton(row,nil,"",24,22);UI.SetClassicButtonIcon(row.join,"start",13,6,0)
@@ -52,24 +66,27 @@ local function ActiveSessions(page,controls,width,y)
     controls.activeNext:ClearAllPoints();controls.activeNext:SetPoint("TOPRIGHT",page,"TOPRIGHT",-8,y-30)
     if total>4 then controls.activePrevious:Show();controls.activeNext:Show() else controls.activePrevious:Hide();controls.activeNext:Hide() end
     UI.SetButtonEnabled(controls.activePrevious,controls.activeOffset>0);UI.SetButtonEnabled(controls.activeNext,controls.activeOffset+4<total)
-    local available=math.max(1,width-28-52);local widths={28,available*0.30,available*0.28,available*0.14,available*0.28,52}
+    local values={}
+    for index,entry in ipairs(list) do values[index]={tostring(controls.activeOffset+index),entry.name,entry.raidType,tostring(entry.memberCount or 0).."/"..tostring(entry.memberLimit or "?"),entry.createdAt and date("%Y-%m-%d %H:%M",entry.createdAt) or "Unknown",""} end
+    local widths=FitColumns(page,controls,controls.activeHeaders,values,width,52)
     local x=8
-    for index,label in ipairs(controls.activeHeaders) do label:ClearAllPoints();label:SetPoint("TOPLEFT",page,"TOPLEFT",x,y-58);label:SetWidth(widths[index]-4);label:Show();x=x+widths[index] end
+    for index,label in ipairs(controls.activeHeaders) do label:ClearAllPoints();label:SetPoint("TOPLEFT",page,"TOPLEFT",x,y-58);label:SetWidth(widths[index]-6);label:SetJustifyH("LEFT");label:Show();x=x+widths[index] end
+    local rowY=y-82
     for index,row in ipairs(controls.activeRows) do
         local entry=list[index];row.raidId=entry and entry.id
         if entry then
-            row:ClearAllPoints();row:SetPoint("TOPLEFT",page,"TOPLEFT",8,y-82-(index-1)*26);row:SetWidth(width)
+            row:ClearAllPoints();row:SetPoint("TOPLEFT",page,"TOPLEFT",8,rowY);row:SetWidth(widths[1]+widths[2]+widths[3]+widths[4]+widths[5])
             local labels={row.number,row.name,row.raidType,row.members,row.created}
             local values={tostring(controls.activeOffset+index),entry.name,entry.raidType,tostring(entry.memberCount or 0).."/"..tostring(entry.memberLimit or "?"),entry.createdAt and date("%Y-%m-%d %H:%M",entry.createdAt) or "Unknown"}
-            local cellX=0
-            for column,label in ipairs(labels) do label:ClearAllPoints();label:SetPoint("LEFT",row,"LEFT",cellX,0);label:SetWidth(widths[column]-4);label:SetText(values[column]);cellX=cellX+widths[column] end
+            local cellX=0;local rowHeight=26
+            for column,label in ipairs(labels) do label:ClearAllPoints();label:SetPoint("LEFT",row,"LEFT",cellX,0);label:SetWidth(widths[column]-4);label:SetJustifyH("LEFT");label:SetJustifyV("MIDDLE");label:SetText(values[column]);label:SetHeight(0);rowHeight=math.max(rowHeight,UI.MeasureTextHeight(label,widths[column]-4,true)+10);cellX=cellX+widths[column] end
             row.join:ClearAllPoints();row.join:SetPoint("LEFT",row,"LEFT",cellX,0)
-            UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false);row:Show()
+            UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false);UI.SetAlternatingRowColor(row,nil,index);row:SetHeight(rowHeight);row:Show();rowY=rowY-rowHeight-2
         else row:Hide() end
     end
     controls.activeEmpty:ClearAllPoints();controls.activeEmpty:SetPoint("TOPLEFT",page,"TOPLEFT",8,y-82)
     if total==0 then controls.activeEmpty:Show() else controls.activeEmpty:Hide() end
-    return y-82-math.max(1,table.getn(list))*26
+    return total==0 and y-86 or rowY+22
 end
 
 function RaidManagement.HideRaidHistoryControls(controls)
@@ -97,14 +114,17 @@ end
 local function MeasureHistory(width, controls)
     local page, snapshots, actionY = controls.historyPage, controls.historyPage.raidHistorySnapshots, controls.historyActionY
     local canEdit = Raider.Services.RankPolicy.CanManageHistory()
-    local dataWidth = math.max(60, width - (canEdit and 98 or 76))
-    local numberWidth = 28
-    local remainingWidth = math.max(32, dataWidth - numberWidth)
-    local nameWidth, raidWidth = math.floor(remainingWidth * 0.17), math.floor(remainingWidth * 0.12)
-    local durationWidth, createdWidth = math.floor(remainingWidth * 0.15), math.floor(remainingWidth * 0.16)
-    local modifiedWidth,storageWidth=math.floor(remainingWidth * 0.16),math.floor(remainingWidth * 0.11)
-    local authorWidth=remainingWidth-nameWidth-raidWidth-durationWidth-createdWidth-modifiedWidth-storageWidth
-    local widths = {numberWidth, nameWidth, raidWidth, durationWidth, createdWidth, modifiedWidth,storageWidth,authorWidth}
+    local values={}
+    for index,snapshot in ipairs(snapshots) do
+        local created,modified,duration=Raider.Services.RaidRes.GetSnapshotTimes(snapshot)
+        local api=Raider.Runtime and Raider.Runtime.replica;local info=api and api.GetRaidInfo and api.GetRaidInfo(snapshot.syncRaidId) or {}
+        modified=info.modifiedAt or modified
+        values[index]={index,snapshot.id,snapshot.raidName,Raider.Services.RaidRes.FormatDuration(duration),created and date("%Y-%m-%d %H:%M",created) or "Unknown",modified and date("%Y-%m-%d %H:%M",modified) or "Unknown",info.storage or "In memory",info.lastAuthor or "Unknown",""}
+    end
+    if not controls.historyHeaders[9] then controls.historyHeaders[9]=UI.CreateColumnLabel(page,"Actions","gold") end
+    local widths=FitColumns(page,controls,controls.historyHeaders,values,width,canEdit and 98 or 76)
+    local numberWidth,nameWidth,raidWidth,durationWidth,createdWidth,modifiedWidth,storageWidth,authorWidth=unpack(widths)
+    local dataWidth=0;for index=1,8 do dataWidth=dataWidth+widths[index] end
     local x = 8
     for index = 1, table.getn(controls.historyHeaders) do
         local heading = controls.historyHeaders[index]
@@ -162,10 +182,10 @@ function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
     local rightInset = 8 + fullWidth - width
     local buttonWidth = math.min(110, width)
     if controls.title then
-        controls.title:SetText("Raid")
+        controls.title:SetText("Raid");controls.title:ClearAllPoints();controls.title:SetPoint("TOPLEFT",page,"TOPLEFT",8,-8)
         if BootyRaiderDB.raidHideSectionHeader then controls.title:Hide() else controls.title:Show() end
     end
-    local actionY=BootyRaiderDB.raidHideSectionHeader and -16 or -56
+    local actionY=BootyRaiderDB.raidHideSectionHeader and -8 or -46
     if controls.unavailable then controls.unavailable:Hide() end
     if not controls.historyToolbar then
         controls.historyToolbar=UI.CreateToolbarSurface(page,true,true)

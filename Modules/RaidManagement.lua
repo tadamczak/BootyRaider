@@ -527,7 +527,7 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.SetClassicButtonIcon(controls.resetLoot, "reset")
     controls.resetLoot:SetPoint("TOPRIGHT", page, "TOPRIGHT", -326, -42); controls.resetLoot:Hide()
     controls.resetLoot:SetScript("OnClick", function() RaidManagement.resetLootDialog:Open("Reset all recorded raid loot?", StaticPopupDialogs.BOOTY_RAIDER_RESET_LOOT.OnAccept) end)
-    controls.live = Raider.UI.Components.CreateButton(page, nil, "Start Live Tracking", 118, 22)
+    controls.live = Raider.UI.Components.CreateButton(page, nil, "Record raid events", 118, 22)
     controls.live:SetPoint("TOPRIGHT", page, "TOPRIGHT", -416, -42); controls.live:Hide()
     return controls
 end
@@ -1437,7 +1437,7 @@ function RaidManagement.UpdateActionAvailability(page, testRaid)
     if controls.live then
         local runtime=Raider.Runtime
         local historical=runtime and runtime.historicalLoaded
-        controls.live:SetText(not historical and Raider.raidLiveTracking and "Stop Live Tracking" or "Start Live Tracking")
+        controls.live:SetText(not historical and Raider.raidLiveTracking and "Pause recording" or "Record raid events")
         Raider.UI.Components.SetButtonEnabled(controls.live,not testRaid and runtime and runtime.IsInRaid() and not (runtime.GetAttendance() and runtime.GetAttendance().syncEnded))
     end
 end
@@ -4046,14 +4046,14 @@ function RaidManagement.AttachActionHandlers(options)
         if not options.isInRaid() or (options.getAttendance() and options.getAttendance().syncEnded) then return end
         liveLoadDialog:Open("Refresh members from your current raid? This replaces the member list. Matching members keep their loot and SR. Choose No to keep the current data.", function()
             if options.acceptLoadedRaid and options.acceptLoadedRaid()==false then
-                if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print("The current raid roster is not ready. Try Start Live Tracking again in a moment.") end
+                if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print("The current raid roster is not ready. Try Record raid events again in a moment.") end
                 return
             end
             local updated
             if options.refreshCurrentRaid then updated = options.refreshCurrentRaid()
             else options.saveRaidRoster(); options.setHistoricalLoaded(false); updated = true end
             if updated == false then
-                if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print("The current raid roster is not ready. Try Start Live Tracking again in a moment.") end
+                if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print("The current raid roster is not ready. Try Record raid events again in a moment.") end
                 return
             end
             Raider.Database.SetSetting("raidLiveTrackingEnabled", true); options.setLiveTracking(true); options.refresh()

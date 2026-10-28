@@ -22,8 +22,9 @@ local function Dialog(parent,title,width,height)
     frame.close:SetScript("OnClick",function() frame:Hide() end)
     local sizes=Raider.Database.Ensure().raidDialogSizes or {};Raider.Database.Ensure().raidDialogSizes=sizes
     local saved=sizes[title] or {}
+    if title=="Resolve raid conflict" and saved.layoutVersion~=2 then saved={layoutVersion=2};sizes[title]=saved end
     UI.Window.MakeResizable(frame,{minWidth=width,minHeight=height,width=saved.width,height=saved.height,
-        save=function(w,h) sizes[title]={width=w,height=h} end})
+        save=function(w,h) sizes[title]={width=w,height=h,layoutVersion=2} end})
     frame:Hide();return frame
 end
 local function Button(parent,text,x,y,width,callback)
@@ -54,9 +55,15 @@ function Sync.FormatValue(value,deleted)
     if deleted then return "(deleted)" end
     local lines={};Describe(value,"",lines);return table.concat(lines,"\n")
 end
+local itemLabels={}
 local function Item(value)
     local reference=Raider.Services.ItemReference
-    return reference and reference.Name(value) or (tonumber(value) and ("Item #"..tostring(value)) or tostring(value or "None"))
+    local itemId=reference and reference.Id(value)
+    if itemId then
+        if GetItemInfo(itemId) then itemLabels[itemId]=UI.GetItemLabel(itemId) end
+        return itemLabels[itemId] or "[Loading item…]"
+    end
+    return reference and reference.Name(value) or tostring(value or "None")
 end
 local function Field(text)
     local c=UI.Theme.colors.goldText
@@ -131,7 +138,8 @@ end
 function Sync.Create(parent,api)
     serial=serial+1
     local id=serial
-    local frame=Dialog(parent,"Raid synchronization",840,490)
+    local frame=Dialog(parent,"Raid synchronization",680,300)
+    UI.SetHeadingIcon(frame.title,"refresh")
     local controller={frame=frame,api=api or Raider.Runtime and Raider.Runtime.replica,rows={},offset=0,tab="sessions"}
     controller.status=Label(frame,"",10,-36,820,28)
     controller.message=Label(frame,"",10,-432,820,32)
@@ -153,7 +161,7 @@ function Sync.Create(parent,api)
     end
     for _,button in pairs(controller.tabs) do button.bootyCaptionBottomInset=0;button.bootyLabelInsets={22,4};UI.ApplyButtonCaptionBaseline(button) end
     controller.officers=Label(frame,"",360,-36,470,36)
-    controller.headings={Label(frame,"Raid",16,-112,260,18),Label(frame,"Type",290,-112,190,18),Label(frame,"Status",490,-112,140,18),Label(frame,"Actions",690,-112,130,18)}
+    controller.headings={Label(frame,"Synchronized raid",16,-112,260,18),Label(frame,"Raid Type",290,-112,190,18),Label(frame,"Conflicts",490,-112,140,18),Label(frame,"Actions",690,-112,130,18)}
     for _,heading in ipairs(controller.headings) do heading:SetTextColor(unpack(UI.Theme.colors.goldText)) end
     controller.selection=Label(frame,"",10,-398,820,24)
     controller.recover=Button(frame,"Join session",10,-400,150,function() end);controller.recover:Hide()
@@ -185,7 +193,7 @@ function Sync.Create(parent,api)
             confirm:Show();confirm:LayoutContent(confirm:GetWidth(),confirm:GetHeight())
             if UI.WindowStack then UI.WindowStack.Raise(confirm,frame) end
         elseif kind=="conflicts" then
-            controller.raidId=entry.id;controller:ShowNextConflict()
+            controller.raidId=entry.id;controller.conflictTotal=nil;controller:ShowNextConflict()
         elseif kind=="resolve" then if entry.kind=="merge" then controller:ShowCompare(entry.source) else controller:ShowConflict(entry.conflictId) end
         elseif kind=="compare" then controller.selected=entry;controller:ShowCompare(entry.id) end
         controller:Refresh()
@@ -206,146 +214,101 @@ function Sync.Create(parent,api)
     end
 
     function controller:ShowNextConflict()
-        local entries=self.api.ListConflicts(self.raidId,0,1)
+        local entries,total=self.api.ListConflicts(self.raidId,0,1)
+        if not self.conflictTotal then self.conflictTotal=total;self.conflictPosition=1 end
         local entry=entries and entries[1]
         if entry then if entry.kind=="merge" then self:ShowCompare(entry.source) else self:ShowConflict(entry.id) end else Message(self,"No unresolved conflicts.") end
     end
     local conflict,comparison
-    local function ConflictCount()
-        conflict.chosen=0;for _ in pairs(conflict.choices) do conflict.chosen=conflict.chosen+1 end
-        conflict.progress:SetText("Accepted "..conflict.chosen.." of "..tostring(conflict.data and conflict.data.recordCount or 0).." changes")
-        UI.SetButtonEnabled(conflict.resolve,conflict.data~=nil and conflict.data.recordCount>0)
-    end
     local function ConflictRefresh()
         if not conflict or not conflict:IsShown() then return end
-        local data,reason=controller.api.GetConflict(controller.raidId,conflict.conflictId,conflict.recordIndex,conflict.index)
-        if not data then
-            Message(conflict,reason or "This conflict is no longer pending.");conflict.data=nil
-            UI.SetButtonEnabled(conflict.use,false);UI.SetButtonEnabled(conflict.manual,false);UI.SetButtonEnabled(conflict.resolve,false);return
+        local data,reason=controller.api.GetConflict(controller.raidId,conflict.conflictId,conflict.recordIndex,1)
+        if not data then Message(conflict,reason or "Conflict no longer pending.");UI.SetButtonEnabled(conflict.resolve,false);return end
+        conflict.data=data;conflict.heads=conflict.heads or Copy(data.heads)
+        local player=string.lower(type(UnitName)=="function" and UnitName("player") or "")
+        local own,remote=nil,{}
+        for index=1,data.record.variantCount do
+            local candidate=controller.api.GetConflict(controller.raidId,conflict.conflictId,conflict.recordIndex,index)
+            local variant=candidate and candidate.record.variant
+            if variant then
+                if string.lower(variant.author or "")==player and not own then own=variant else table.insert(remote,variant) end
+            end
         end
-        conflict.data=data
-        if not conflict.heads then conflict.heads=Copy(data.heads) end
-        local record=data.record or {}
-        local variant=record.variant or {}
-        local base=record.base or {}
-        local total=record.variantCount or 0
-        conflict.heading:SetText(RecordName(record).."\n"..tostring(variant.author or "Unknown").."  |  "..Timestamp(variant.timestamp))
-        conflict.basePane:SetText(Sync.FormatRecord(record.key,base.value,base.deleted))
-        conflict.pane:SetText(Sync.FormatRecord(record.key,variant.value,variant.deleted))
-        conflict.count:SetText("Proposal "..conflict.index.." of "..total)
-        UI.SetButtonEnabled(conflict.previous,conflict.index>1);UI.SetButtonEnabled(conflict.next,conflict.index<total)
-        UI.SetButtonEnabled(conflict.use,total>0)
-        UI.SetButtonEnabled(conflict.recordPrevious,conflict.recordIndex>1)
-        UI.SetButtonEnabled(conflict.recordNext,conflict.recordIndex<data.recordCount)
-        for _,button in ipairs({conflict.recordPrevious,conflict.recordNext,conflict.recordCount}) do if data.recordCount>1 then button:Show() else button:Hide() end end
-        conflict.recordCount:SetText("Change "..conflict.recordIndex.." of "..data.recordCount)
-        local kind
-        if record.key then local _,_,prefix=string.find(record.key,"^([^:]+):");kind=prefix end
-        local manual=kind=="sr" or kind=="loot"
-        conflict.manualKind=manual and kind or nil
-        local value=type(variant.value)=="table" and variant.value or {}
-        conflict.item:SetText(tostring(kind=="sr" and (value.items and value.items[1] or "") or value.item or ""))
-        conflict.recipient:SetText(value.recipient or "");conflict.quantity:SetText(tostring(value.count or 1))
-        conflict.exception:SetChecked(value.exception==true)
-        for _,control in ipairs(conflict.manualControls) do if manual then control:Show() else control:Hide() end end
-        for _,control in ipairs(conflict.lootControls) do if manual and kind=="loot" then control:Show() else control:Hide() end end
-        for _,control in ipairs({conflict.exception,conflict.exceptionLabel}) do if manual and kind=="sr" then control:Show() else control:Hide() end end
-        UI.SetButtonEnabled(conflict.manual,manual)
-        conflict.manualHint:SetText(manual and "Final value — edit below if needed" or "Final value — selected proposal")
-        Message(conflict,conflict.choices[record.key] and "A choice is saved for this record. Resolve when every record is chosen." or "Choose this record's value. No changes are applied until you resolve the complete conflict.")
-        conflict.use:Hide();conflict.manual:Hide()
-        conflict.inputItem=conflict.item:GetText();conflict.inputRecipient=conflict.recipient:GetText();conflict.inputQuantity=conflict.quantity:GetText();conflict.inputException=conflict.exception:GetChecked() and true or false
-        ConflictCount()
-        conflict.resolve:SetText(conflict.recordIndex<data.recordCount and "Accept & next" or "Accept")
-        Message(conflict,"Review the proposal or edit the fields below, then accept.")
-    end
-    local function ChooseConflict(choice)
-        if not conflict.data then return end
-        conflict.choices[conflict.data.record.key]=choice
-        ConflictCount();Message(conflict,"Choice saved. Resolve when every record is chosen.")
+        -- Without a local competing edit, our displayed value is the accepted base.
+        conflict.leftIsVariant=own~=nil
+        own=own or data.record.base or {deleted=true}
+        if table.getn(remote)==0 then remote[1]=data.record.variant end
+        conflict.remoteIndex=math.min(conflict.remoteIndex or 1,table.getn(remote))
+        local incoming=remote[conflict.remoteIndex]
+        conflict.leftValue=own;conflict.rightValue=incoming;conflict.remoteCount=table.getn(remote)
+        for _,pair in ipairs({{conflict.basePane,own},{conflict.pane,incoming}}) do
+            local value=pair[2] and pair[2].value;local item=type(value)=="table" and ((value.items and value.items[1]) or value.item)
+            pair[1].host.itemId=Raider.Services.ItemReference.Id(item)
+            local itemId=pair[1].host.itemId
+            if itemId and not GetItemInfo(itemId) and not conflict.requested[itemId] then
+                conflict.requested[itemId]=true;conflict.loader:SetOwner(conflict,"ANCHOR_NONE");conflict.loader:SetHyperlink("item:"..itemId..":0:0:0");conflict.loader:Hide();conflict.itemWait=2
+            end
+        end
+        conflict.heading:SetText(tostring(controller.conflictPosition or 1).." of "..tostring(controller.conflictTotal or 1).." conflicts — "..RecordName(data.record))
+        conflict.left:SetText("Your data");conflict.right:SetText(tostring(incoming and incoming.author or "Officer").." synced data")
+        conflict.basePane:SetText(Sync.FormatRecord(data.record.key,own.value,own.deleted))
+        conflict.pane:SetText(Sync.FormatRecord(data.record.key,incoming and incoming.value,incoming and incoming.deleted))
+        conflict.count:SetText(table.getn(remote)>1 and ("Officer version "..conflict.remoteIndex.." of "..table.getn(remote)) or "")
+        if table.getn(remote)>1 then conflict.previous:Show();conflict.next:Show() else conflict.previous:Hide();conflict.next:Hide() end
+        UI.SetButtonEnabled(conflict.previous,conflict.remoteIndex>1);UI.SetButtonEnabled(conflict.next,conflict.remoteIndex<table.getn(remote))
+        UI.SetClassicButtonSelected(conflict.left,conflict.selection=="left");UI.SetClassicButtonSelected(conflict.right,conflict.selection=="right")
+        UI.SetButtonEnabled(conflict.resolve,conflict.selection~=nil)
+        conflict.progress:SetText(data.recordCount>1 and ("Change "..conflict.recordIndex.." of "..data.recordCount) or "")
+        Message(conflict,"")
+        if conflict.itemWait then conflict:SetScript("OnUpdate",function() conflict.itemWait=conflict.itemWait-(arg1 or 0);if conflict.itemWait<=0 then conflict.itemWait=nil;conflict:SetScript("OnUpdate",nil);ConflictRefresh() end end) end
     end
     function controller:ShowConflict(conflictId)
         if not self:IsVisible() then return end
         if not conflict then
-            conflict=Dialog(frame,"Resolve raid conflict",780,580);self.conflict=conflict
-            conflict.heading=Label(conflict,"",10,-36,760,36)
-            conflict.heading:SetTextColor(unpack(UI.Theme.colors.goldText))
-            conflict.baseHeading=Label(conflict,"Previous agreed value",10,-78,370,22)
-            conflict.proposalHeading=Label(conflict,"Selected proposal",400,-78,370,22)
-            for _,label in ipairs({conflict.baseHeading,conflict.proposalHeading}) do label:SetTextColor(unpack(UI.Theme.colors.goldText)) end
-            conflict.basePane=TextPane(conflict,10,-104,370,174,"BootyRaidSyncBase"..id)
-            conflict.pane=TextPane(conflict,400,-104,370,174,"BootyRaidSyncConflict"..id)
-            conflict.previous=Button(conflict,"<",10,-284,26,function() conflict.index=conflict.index-1;ConflictRefresh() end)
-            conflict.next=Button(conflict,">",42,-284,26,function() conflict.index=conflict.index+1;ConflictRefresh() end)
-            conflict.count=Label(conflict,"",80,-288,240,18)
-            conflict.use=Button(conflict,"Choose this variant",590,-284,180,function()
-                local variant=conflict.data and conflict.data.record.variant
-                if variant then ChooseConflict({revision=variant.revision}) end
-            end)
-            conflict.recordPrevious=Button(conflict,"< Record",10,-316,92,function() conflict.recordIndex=conflict.recordIndex-1;conflict.index=1;ConflictRefresh() end)
-            conflict.recordNext=Button(conflict,"Record >",110,-316,92,function() conflict.recordIndex=conflict.recordIndex+1;conflict.index=1;ConflictRefresh() end)
-            conflict.recordCount=Label(conflict,"",212,-320,300,18)
-            conflict.manualHint=Label(conflict,"",10,-350,760,20)
-            conflict.manualHint:SetTextColor(unpack(UI.Theme.colors.goldText))
-            conflict.sectionDivider=UI.CreateToolbarSurface(conflict,true,false)
-            conflict.sectionDivider:SetPoint("TOPLEFT",conflict,"TOPLEFT",10,-340);conflict.sectionDivider:SetPoint("TOPRIGHT",conflict,"TOPRIGHT",-10,-340);conflict.sectionDivider:SetHeight(1)
-            conflict.itemLabel=Label(conflict,"Item name or ID",10,-376,300,18)
-            conflict.item=UI.CreateFramedEditBox(conflict,nil,300)
-            conflict.item:SetPoint("TOPLEFT",conflict,"TOPLEFT",10,-396);conflict.item:SetAutoFocus(false);conflict.item:SetMaxLetters(255)
-            conflict.recipientLabel=Label(conflict,"Recipient",324,-376,200,18)
-            conflict.recipient=UI.CreateFramedEditBox(conflict,nil,200)
-            conflict.recipient:SetPoint("TOPLEFT",conflict,"TOPLEFT",324,-396);conflict.recipient:SetAutoFocus(false);conflict.recipient:SetMaxLetters(64)
-            conflict.quantityLabel=Label(conflict,"Quantity",538,-376,90,18)
-            conflict.quantity=UI.CreateFramedEditBox(conflict,nil,90)
-            conflict.quantity:SetPoint("TOPLEFT",conflict,"TOPLEFT",538,-396);conflict.quantity:SetAutoFocus(false);conflict.quantity:SetMaxLetters(6)
-            conflict.exception=UI.CreateCheckButton(nil,conflict,"UICheckButtonTemplate")
-            conflict.exception:SetWidth(22);conflict.exception:SetHeight(22)
-            conflict.exception:SetPoint("TOPLEFT",conflict,"TOPLEFT",324,-396)
-            conflict.exceptionLabel=Label(conflict,"Allow to SR without loot rights",350,-400,400,22)
-            conflict.manual=Button(conflict,"Choose correction",590,-430,180,function()
-                local data=conflict.data
-                if not data or not conflict.manualKind then return end
-                local original=data.record.variant.value or (data.record.base and data.record.base.value)
-                local value,reason=Sync.ManualValue(conflict.manualKind,original,{item=conflict.item:GetText(),
-                    recipient=conflict.recipient:GetText(),count=conflict.quantity:GetText(),exception=conflict.exception:GetChecked() and true or false})
-                if not value then Message(conflict,reason);return end
-                if conflict.manualKind=="sr" and not value.name then value.name=string.sub(data.record.key,4) end
-                ChooseConflict({value=value})
-            end)
-            conflict.manualControls={conflict.itemLabel,conflict.item,conflict.manual}
-            conflict.lootControls={conflict.recipientLabel,conflict.recipient,conflict.quantityLabel,conflict.quantity}
-            conflict.progress=Label(conflict,"",10,-482,400,22)
-            conflict.resolve=Button(conflict,"Accept",660,-478,110,function()
-                if not conflict.data then return end
-                local edited=conflict.manualKind and (conflict.item:GetText()~=conflict.inputItem or conflict.recipient:GetText()~=conflict.inputRecipient or conflict.quantity:GetText()~=conflict.inputQuantity or (conflict.exception:GetChecked() and true or false)~=conflict.inputException)
-                conflict.choices[conflict.data.record.key]=nil
-                if edited then conflict.manual:GetScript("OnClick")() else conflict.use:GetScript("OnClick")() end
-                if not conflict.choices[conflict.data.record.key] then return end
-                if conflict.chosen~=conflict.data.recordCount then for index=1,conflict.data.recordCount do local candidate=controller.api.GetConflict(controller.raidId,conflict.conflictId,index,1);if candidate and not conflict.choices[candidate.record.key] then conflict.recordIndex=index;break end end;conflict.index=1;ConflictRefresh();return end
-                local ok,reason=controller.api.ResolveConflict(controller.raidId,conflict.conflictId,conflict.choices,conflict.heads)
-                if not ok then Message(conflict,reason or "The conflict changed. Reopen it before deciding.");return end
-                conflict:Hide();controller.selected=nil;Message(controller,"Conflict resolved.");controller:Refresh();controller:ShowNextConflict()
-            end)
-            conflict.message=Label(conflict,"",10,-510,760,58)
-            local moving={"previous","next","count","use","recordPrevious","recordNext","recordCount","manualHint","itemLabel","item","recipientLabel","recipient","quantityLabel","quantity","exception","exceptionLabel","manual","resolve","progress","message"}
-            local points={}
-            for _,key in ipairs(moving) do local control=conflict[key];if control then local p,r,rp,x,y=control:GetPoint(1);points[key]={p,r,rp,x,y} end end
-            function conflict:LayoutContent(w,h)
-                local dy=h-580;self.heading:SetWidth(w-20);self.basePane:Resize((w-30)/2,174+dy);self.pane:Resize((w-30)/2,174+dy)
-                self.pane.host:ClearAllPoints();self.pane.host:SetPoint("TOPLEFT",self,"TOPLEFT",(w+10)/2,-104)
-                self.proposalHeading:ClearAllPoints();self.proposalHeading:SetPoint("TOPLEFT",self,"TOPLEFT",(w+10)/2,-78)
-                self.baseHeading:SetWidth((w-30)/2);self.proposalHeading:SetWidth((w-30)/2)
-                self.sectionDivider:ClearAllPoints();self.sectionDivider:SetPoint("TOPLEFT",self,"TOPLEFT",10,-340-dy);self.sectionDivider:SetPoint("TOPRIGHT",self,"TOPRIGHT",-10,-340-dy)
-                for key,point in pairs(points) do local control=self[key];control:ClearAllPoints();control:SetPoint(point[1],point[2],point[3],point[4],point[5]-dy) end
-                self.message:SetWidth(w-20);self.manualHint:SetWidth(w-20)
+            conflict=Dialog(frame,"Resolve raid conflict",620,300);self.conflict=conflict
+            conflict.heading=Label(conflict,"",12,-36,596,26);conflict.heading:SetTextColor(unpack(UI.Theme.colors.goldText))
+            conflict.left=Button(conflict,"Your data",12,-70,286,function() conflict.selection="left";ConflictRefresh() end)
+            conflict.right=Button(conflict,"Synced data",310,-70,298,function() conflict.selection="right";ConflictRefresh() end)
+            conflict.basePane=TextPane(conflict,12,-102,286,120,"BootyRaidSyncOwn"..id)
+            conflict.pane=TextPane(conflict,310,-102,298,120,"BootyRaidSyncIncoming"..id)
+            conflict.requested={};conflict.loader=UI.CreateTooltip("BootyRaidSyncItemLoader"..id,conflict)
+            for _,pane in ipairs({conflict.basePane,conflict.pane}) do
+                pane.host:EnableMouse(true)
+                pane.host:SetScript("OnEnter",function() UI.ShowItemTooltip(this);ConflictRefresh() end)
+                pane.host:SetScript("OnLeave",function() GameTooltip:Hide() end)
+                pane.host:SetScript("OnMouseUp",function() UI.HandleItemClick(this) end)
             end
-            conflict:SetScript("OnHide",function()
-                conflict.data=nil;conflict.conflictId=nil;conflict.pane.text:SetText("");conflict.heading:SetText("")
-                conflict.choices=nil;conflict.heads=nil
-                conflict.item:SetText("");conflict.recipient:SetText("");conflict.quantity:SetText("")
+            conflict.previous=Button(conflict,"<",310,-228,24,function() conflict.remoteIndex=conflict.remoteIndex-1;conflict.selection=nil;ConflictRefresh() end)
+            conflict.next=Button(conflict,">",338,-228,24,function() conflict.remoteIndex=conflict.remoteIndex+1;conflict.selection=nil;ConflictRefresh() end)
+            conflict.count=Label(conflict,"",370,-231,236,20)
+            conflict.progress=Label(conflict,"",12,-264,300,20)
+            conflict.message=Label(conflict,"",12,-288,596,32)
+            conflict.resolve=Button(conflict,"Accept",510,-264,98,function()
+                if not conflict.data or not conflict.selection then return end
+                local value=conflict.selection=="left" and conflict.leftValue or conflict.rightValue
+                if not value then return end
+                conflict.choices[conflict.data.record.key]=(conflict.selection=="right" or conflict.leftIsVariant) and value.revision and {revision=value.revision} or {value=Copy(value.value),deleted=value.deleted}
+                if conflict.recordIndex<conflict.data.recordCount then conflict.recordIndex=conflict.recordIndex+1;conflict.selection=nil;conflict.remoteIndex=1;ConflictRefresh();return end
+                local ok,reason=controller.api.ResolveConflict(controller.raidId,conflict.conflictId,conflict.choices,conflict.heads)
+                if not ok then Message(conflict,reason or "Data changed. Reopen the conflict.");return end
+                conflict:Hide();controller.conflictPosition=(controller.conflictPosition or 1)+1;controller:Refresh();controller:ShowNextConflict()
             end)
+            function conflict:LayoutContent(w,h)
+                local half=(w-36)/2
+                self.heading:SetWidth(w-24)
+                self.left:SetWidth(half);self.right:SetWidth(half);self.right:ClearAllPoints();self.right:SetPoint("TOPLEFT",self,"TOPLEFT",half+24,-70)
+                self.basePane:Resize(half,h-180);self.pane:Resize(half,h-180)
+                self.pane.host:ClearAllPoints();self.pane.host:SetPoint("TOPLEFT",self,"TOPLEFT",half+24,-102)
+                self.resolve:ClearAllPoints();self.resolve:SetPoint("BOTTOMRIGHT",self,"BOTTOMRIGHT",-12,12)
+                self.previous:ClearAllPoints();self.previous:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",half+24,44)
+                self.next:ClearAllPoints();self.next:SetPoint("LEFT",self.previous,"RIGHT",4,0)
+                self.count:ClearAllPoints();self.count:SetPoint("LEFT",self.next,"RIGHT",6,0);self.count:SetWidth(half-64)
+                self.progress:ClearAllPoints();self.progress:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",12,16)
+                self.message:ClearAllPoints();self.message:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",12,44);self.message:SetWidth(half)
+            end
+            conflict:SetScript("OnHide",function() conflict.data=nil;conflict.choices=nil;conflict.heads=nil;conflict.selection=nil;conflict.itemWait=nil;conflict:SetScript("OnUpdate",nil) end)
         end
-        conflict.conflictId=conflictId;conflict.index=1;conflict.recordIndex=1;conflict.choices={};conflict.heads=nil
+        conflict.conflictId=conflictId;conflict.recordIndex=1;conflict.remoteIndex=1;conflict.choices={};conflict.heads=nil;conflict.selection=nil
         conflict:Show();conflict:LayoutContent(conflict:GetWidth(),conflict:GetHeight());ConflictRefresh()
         if UI.WindowStack then UI.WindowStack.Raise(conflict,frame) end
     end
@@ -499,9 +462,9 @@ function Sync.Create(parent,api)
             row.fullText=entry and (entry.name..(not entry.log and not entry.conflict and ("  |  "..tostring(entry.raidType).."  |  "..(entry.state=="ended" and "Ended" or "Active").."  |  "..tostring(entry.conflicts or 0).." conflicts") or "")) or ""
             row.label:SetText(entry and entry.name or "")
             row.typeLabel:SetText(entry and not entry.log and not entry.conflict and entry.raidType or "")
-            row.stateLabel:SetText(entry and not entry.log and not entry.conflict and ((entry.state=="ended" and "Ended" or "Active")..((entry.conflicts or 0)>0 and (" / "..entry.conflicts.." conflicts") or "")) or "")
+            row.stateLabel:SetText(entry and not entry.log and not entry.conflict and ((entry.conflicts or 0)>0 and tostring(entry.conflicts) or "None") or "")
             for kind,button in pairs(row.actions) do
-                local show=entry and not entry.log and ((entry.conflict and kind=="resolve") or (not entry.conflict and (kind=="join" and entry.state~="ended" and (not self.api.GetJoinedRaidId or self.api.GetJoinedRaidId()~=entry.id) or kind=="reopen" and entry.state=="ended" or kind=="conflicts" and (entry.conflicts or 0)>0 or kind=="compare" and self.raidId and self.raidId~=entry.id)))
+                local show=entry and not entry.log and ((entry.conflict and kind=="resolve") or (not entry.conflict and (kind=="conflicts" and (entry.conflicts or 0)>0 or kind=="compare" and self.raidId and self.raidId~=entry.id)))
                 if show then button:Show() else button:Hide() end
             end
             if entry then row:Show() else row:Hide() end
@@ -514,16 +477,18 @@ function Sync.Create(parent,api)
         self:UpdateSelection();frame:LayoutContent(frame:GetWidth(),frame:GetHeight());self.refreshing=false
     end
     function frame:LayoutContent(w,h)
-        controller.status:SetWidth(340);controller.officers:SetWidth(w-380)
-        controller.officers:SetHeight(0)
-        local headerHeight=math.max(36,UI.MeasureTextHeight(controller.officers,w-380,true))
-        controller.officers:SetHeight(headerHeight)
-        local shift=headerHeight-36
+        local statusWidth=math.min(260,math.max(180,(w-220)*0.48));local officerWidth=math.max(120,w-224-statusWidth)
+        controller.tabs.sessions:ClearAllPoints();controller.tabs.sessions:SetPoint("TOPLEFT",self,"TOPLEFT",10,-36)
+        controller.tabs.log:ClearAllPoints();controller.tabs.log:SetPoint("LEFT",controller.tabs.sessions,"RIGHT",6,0)
+        controller.status:ClearAllPoints();controller.status:SetPoint("TOPLEFT",self,"TOPLEFT",208,-39);controller.status:SetWidth(statusWidth);controller.status:SetHeight(0)
+        controller.officers:ClearAllPoints();controller.officers:SetPoint("TOPLEFT",self,"TOPLEFT",216+statusWidth,-39);controller.officers:SetWidth(officerWidth);controller.officers:SetHeight(0)
+        local headerHeight=math.max(22,UI.MeasureTextHeight(controller.status,statusWidth,true),UI.MeasureTextHeight(controller.officers,officerWidth,true))
+        controller.officers:SetHeight(headerHeight);controller.status:SetHeight(headerHeight)
+        if not controller.toolbar then controller.toolbar=UI.CreateToolbarSurface(self,false,true);controller.toolbar:SetFrameLevel(self:GetFrameLevel());controller.toolbar.bootyBorderOutsetLeft=4;controller.toolbar.bootyBorderOutsetRight=4;UI.SetSurfaceHorizontalBorders(controller.toolbar,false,true) end
+        controller.toolbar:ClearAllPoints();controller.toolbar:SetPoint("TOPLEFT",self,"TOPLEFT",0,-30);controller.toolbar:SetPoint("TOPRIGHT",self,"TOPRIGHT",0,-30);controller.toolbar:SetHeight(headerHeight+18)
+        local shift=headerHeight-64
         local previousSize=controller.visiblePageSize
         controller.visiblePageSize=math.max(1,math.min(pageSize,math.floor((h-230-shift)/32)))
-        controller.tabs.sessions:ClearAllPoints();controller.tabs.sessions:SetPoint("TOPLEFT",self,"TOPLEFT",10,-82-shift)
-        controller.tabs.log:ClearAllPoints();controller.tabs.log:SetPoint("TOPLEFT",self,"TOPLEFT",108,-82-shift)
-        controller.inspect:ClearAllPoints();controller.inspect:SetPoint("TOPLEFT",self,"TOPLEFT",206,-82-shift)
         controller.headings[1]:ClearAllPoints();controller.headings[1]:SetPoint("TOPLEFT",self,"TOPLEFT",16,-112-shift)
         controller.message:ClearAllPoints();controller.message:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,40);controller.message:SetWidth(w-20)
         controller.previous:ClearAllPoints();controller.previous:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,10)
@@ -554,7 +519,7 @@ function Sync.Create(parent,api)
     function controller:Open(raidId,tab)
         if conflict then conflict:Hide() end
         if comparison then comparison:Hide() end
-        self.raidId=raidId;self.raidName=nil;self.offset=0;self.selected=nil;self.tab=tab=="log" and "log" or "sessions";self.expanded=nil
+        self.raidId=raidId;self.conflictTotal=nil;self.raidName=nil;self.offset=0;self.selected=nil;self.tab=tab=="log" and "log" or "sessions";self.expanded=nil
         Message(self,"");frame:Show();self:Refresh()
         if tab=="conflicts" then self:ShowNextConflict() end
         if UI.WindowStack then UI.WindowStack.Raise(frame,parent) end
