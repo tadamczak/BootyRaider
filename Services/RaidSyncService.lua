@@ -73,8 +73,15 @@ function Sync.New(options)
     local function Authority(name)
         return type(options.authorize)=="function" and options.authorize(name,self.scope)==true
     end
+    local function Allowed(raidId)
+        return not raidId or (not options.isRaidEnabled or options.isRaidEnabled(raidId)) and not (self.db.raidSyncDisabled and self.db.raidSyncDisabled[raidId])
+    end
+    local function ActiveRaid() local id=Value(options.activeRaidId);return Allowed(id) and id or nil end
+    local function Summary(offset,limit,priority)
+        return self.journal.GetSyncSummary(self.db,offset,limit,priority,Allowed,self.db.raidSyncPolicyRevision or 0)
+    end
     local function Priority(raidId)
-        if raidId and raidId==Value(options.activeRaidId) then return 1 end
+        if raidId and raidId==ActiveRaid() then return 1 end
         local priority=options.priority and options.priority(raidId) or 3
         return priority==1 and 1 or priority==2 and 2 or 3
     end
@@ -198,15 +205,16 @@ function Sync.New(options)
         end
         if kind=="summary-request" then
             if not Integer(payload.offset,9007199254740991) then return Reject("invalid-summary-offset") end
-            local summary,failure=self.journal.GetSyncSummary(self.db,payload.offset,Sync.limits.summary,Value(options.activeRaidId))
+            local summary,failure=Summary(payload.offset,Sync.limits.summary,ActiveRaid())
             if not summary then return Reject(failure) end
-            local queued=Queue(peer.name,{type="summary",request=payload.request,summary=summary,activeRaidId=Value(options.activeRaidId)},1)
+            local queued=Queue(peer.name,{type="summary",request=payload.request,summary=summary,activeRaidId=ActiveRaid()},1)
             if not queued then return Busy() end
             return true
         elseif kind=="range-request" then
             if not Text(payload.raidId,300) or not Text(payload.origin,256) or not Integer(payload.first,9007199254740991)
                 or payload.first<1 or not Integer(payload.last,9007199254740991) or payload.last<payload.first
                 or payload.last-payload.first>=Sync.limits.range then return Reject("invalid-range") end
+            if not Allowed(payload.raidId) then Queue(peer.name,{type="done",request=payload.request,missing=true},1);return true,"raid-sync-disabled" end
             if Count(self.exports)>=8 then return Busy() end
             table.insert(self.exports,{peer=peer.name,request=payload.request,raidId=payload.raidId,origin=payload.origin,
                 cursor=payload.first,last=payload.last,priority=Priority(payload.raidId)})
@@ -214,7 +222,7 @@ function Sync.New(options)
         elseif kind=="operation-request" then
             if not Text(payload.id,300) then return Reject("invalid-operation-request") end
             local operation=self.journal.GetOperation(self.db,payload.id)
-            if operation then
+            if operation and Allowed(operation.raidId) then
                 if Count(self.exports)>=8 then return Busy() end
                 table.insert(self.exports,{peer=peer.name,request=payload.request,operation=operation,priority=Priority(operation.raidId)})
             else if not Queue(peer.name,{type="done",request=payload.request,missing=true},1) then return Busy() end end
@@ -228,7 +236,8 @@ function Sync.New(options)
             if payload.summary.nextOffset and (payload.summary.nextOffset<=request.payload.offset
                 or payload.summary.nextOffset>payload.summary.total or Count(payload.summary.entries)==0) then return Reject("invalid-summary-cursor") end
             if payload.activeRaidId~=nil and not Text(payload.activeRaidId,300) then return Reject("invalid-active-raid") end
-            peer.activeRaidId=payload.activeRaidId
+            for index=Count(payload.summary.entries),1,-1 do if not Allowed(payload.summary.entries[index].raidId) then table.remove(payload.summary.entries,index) end end
+            peer.activeRaidId=Allowed(payload.activeRaidId) and payload.activeRaidId or nil
             peer.summary=payload.summary;peer.needsSummary=false;self.request=nil
             return true
         elseif kind=="operation" then
@@ -241,6 +250,7 @@ function Sync.New(options)
                 if operation.raidId~=wanted.raidId or operation.origin~=wanted.origin or not Integer(operation.sequence,9007199254740991)
                     or operation.sequence<wanted.first or operation.sequence>wanted.last then return Reject("operation-outside-range") end
             else return Reject("unexpected-operation") end
+            if not Allowed(operation.raidId) then return true,"raid-sync-disabled" end
             local validator=payload.checkpoint and options.validateCheckpoint or options.validateOperation
             if validator then
                 local valid,failure=validator(operation,self.scope,peer.name)
@@ -316,6 +326,17 @@ function Sync.New(options)
         table.sort(peers,function(left,right) return left.name<right.name end)
         local pending=Count(self.outbox)+Count(self.exports)+Count(self.decodes)+Count(self.controls)+CountMap(self.incoming)
             +(self.request and 1 or 0)+(self.outgoing and 1 or 0)+(self.encoding and 1 or 0)+(self.announce and 1 or 0)
+        if raidId then
+            -- Incoming envelopes do not reveal their raid until decoding. Keep
+            -- the status pending rather than claiming a completed exchange.
+            pending=Count(self.decodes)+CountMap(self.incoming)+(self.announce and 1 or 0)
+            for _,message in ipairs(self.outbox) do local p=message.payload;if p.raidId==raidId or p.operation and p.operation.raidId==raidId then pending=pending+1 end end
+            for _,task in ipairs(self.exports) do if task.raidId==raidId or task.operation and task.operation.raidId==raidId then pending=pending+1 end end
+            if self.encoding and self.encoding.receipt and self.encoding.receipt.raidId==raidId then pending=pending+1 end
+            local sent=self.outgoing and self.sentOperations[self.outgoing.id];if sent and sent.raidId==raidId then pending=pending+1 end
+            if self.request and (self.request.payload.raidId==raidId or self.request.payload.type=="summary-request") then pending=pending+1 end
+            for _,peer in pairs(self.peers) do if peer.needsSummary then pending=pending+1 end end
+        end
         local message
         if not self.enabled then message=messages[self.reason] or "Synchronization is stopped."
         elseif self.lastError and messages[self.lastError] then message=messages[self.lastError]
@@ -342,6 +363,7 @@ function Sync.New(options)
         if not state then Status(failure);return false,failure end
         self.db.raidSyncScope=self.scope
         self.session=tostring(Value(options.session) or (math.floor(Now()*1000).."-"..math.random(1,999999)))
+        if self.policyEpoch then self.session=string.sub(self.session,1,20).."-p"..tostring(self.policyEpoch) end
         if not Text(self.session,32) then Status("invalid-session");return false,self.reason end
         self.enabled=true;self.lastTick=Now();self.tokens=Sync.limits.burst;self.discoveryRemaining=2;self.discoveryAt=Now()+3
         local queued,reason=Hello()
@@ -352,6 +374,14 @@ function Sync.New(options)
         self.enabled=false;self.peers={};self.incompatiblePeers={};self.outbox={};self.controls={};self.incoming={};self.completed={};self.decodes={};self.exports={}
         self.dependencies={};self.sentOperations={};self.receipts={};self.receiptRanges=0;self.outgoing=nil;self.encoding=nil;self.request=nil;self.bufferBytes=0;self.discoveryAt=nil;self.combatPauseAt=nil
         Status(reason or "disabled")
+    end
+    function self:RefreshRaidPolicy()
+        if not self.enabled then return true end
+        -- A fresh transport session invalidates already encoded chunks on both
+        -- sides. No private payload can escape an in-flight encoder after Stop.
+        self.policyEpoch=(self.policyEpoch or 0)+1
+        self:Stop("raid-policy-changed")
+        return self:Start()
     end
     function self:NotifyChanged()
         if not Ready() then return false end
@@ -556,6 +586,7 @@ function Sync.New(options)
         for candidate,task in ipairs(self.exports) do if not Combat() or task.priority==1 then index=candidate;break end end
         if not index then return end
         local task=self.exports[index]
+        if not Allowed(task.raidId or task.operation and task.operation.raidId) then task.operation=nil;task.done=true end
         if task.done then
             Queue(task.peer,{type="done",request=task.request},task.priority);table.remove(self.exports,index);return
         end
@@ -585,6 +616,7 @@ function Sync.New(options)
             if not index then return end
             local message=table.remove(self.outbox,index)
             local operation=message.payload.type=="operation" and message.payload.operation
+            if operation and not Allowed(operation.raidId) then return end
             self.encoding={target=message.target,priority=message.priority,job=self.codec.BeginEncode(message.payload),
                 receipt=operation and {peer=message.target,peerSession=self.peers[message.target] and self.peers[message.target].session,
                     raidId=operation.raidId,origin=operation.origin,sequence=operation.sequence,operationId=operation.id} or nil}
@@ -713,7 +745,7 @@ function Sync.New(options)
         if not Ready() or not Text(raidId,300) then return {} end
         local localRanges,offset,seen={},0,0
         while true do
-            local summary=self.journal.GetSyncSummary(self.db,offset,8,raidId)
+            local summary=Summary(offset,8,raidId)
             if not summary then return {} end
             local complete=false
             for _,entry in ipairs(summary.entries) do

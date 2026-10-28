@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-dev.17 — 2026-10-28
+
+- Choose Raid sync when creating a session; toggle sharing for active and saved raids.
+- Put Save Raid, Raid Sync, Leave Session and End & Save in the Session menu.
+- Show individual raid status and sync status in the compact Sync table; fix separator bounds.
+- Block disabled raids in inventory, queued transfers and incoming updates; resume missing changes on opt in.
+
 ## 1.0.0-dev.16 — 2026-10-28
 
 - Fix the leftover Convert to Raid control over the history toolbar.

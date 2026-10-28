@@ -146,10 +146,10 @@ function Session:CapturePendingRaid(getPendingId, getPendingName)
     return count
 end
 
-function Session:BeginPendingRaid()
+function Session:BeginPendingRaid(syncEnabled)
     -- This reference is transient, never another durable copy of attendance.
     local database = self.dependencies.database
-    local pending = {attendance = database.GetRaidAttendance(), presets = {},
+    local pending = {attendance = database.GetRaidAttendance(), presets = {}, syncEnabled=syncEnabled~=false,
         offline = type(GetNumRaidMembers) == "function" and GetNumRaidMembers() == 0}
     self.pendingRaid = pending
     local index
@@ -170,6 +170,11 @@ end
 function Session:CommitPendingRaid()
     local attendance=self.dependencies.database.GetRaidAttendance()
     if self.pendingRaid and attendance and Raider.Services.RaidAudit then
+        if self.pendingRaid.syncEnabled==false then
+            local id=Raider.Services.RaidAudit.EnsureIdentity(attendance)
+            local db=Raider.Database.Ensure();db.raidSyncDisabled=db.raidSyncDisabled or {};db.raidSyncDisabled[id]=true
+            db.raidSyncPolicyRevision=(db.raidSyncPolicyRevision or 0)+1
+        end
         local ok,reason=Raider.Services.RaidAudit.Start(attendance)
         if not ok then return false,reason end
     end

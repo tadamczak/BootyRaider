@@ -176,6 +176,7 @@ function SyncRuntime.RefreshAuthority()
             presenceRevision=BootyLib.GuildDirectory.GetGeneration,
             send=function(prefix,text,channel) return SendAddonMessage(prefix,text,channel) end,
             activeRaidId=function() return runtime.replica.GetJoinedRaidId() end,
+            isRaidEnabled=function(id) return runtime.replica.IsRaidSyncEnabled(id) end,
             priority=function(id)
                 local current=Raider.Database.GetRaidAttendance();if current and current.syncRaidId==id then return 1 end
                 local record=Raider.Services.RaidJournal.GetRecord(BootyRaiderDB,id,"saved:flags")

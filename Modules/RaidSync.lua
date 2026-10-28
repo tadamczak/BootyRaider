@@ -181,14 +181,23 @@ function Sync.Create(parent,api)
     end
     for _,button in pairs(controller.tabs) do button.bootyCaptionBottomInset=0;button.bootyLabelInsets={22,4};UI.ApplyButtonCaptionBaseline(button) end
     controller.officers=Label(frame,"",360,-36,470,36)
-    controller.headings={Label(frame,"Synchronized raid",16,-112,260,18),Label(frame,"Raid",290,-112,190,18),Label(frame,"Conflicts",490,-112,140,18),Label(frame,"Actions",690,-112,130,18)}
+    controller.headings={}
+    for _,title in ipairs({"#","Raid ID","Raid","Status","Sync status","Conflicts","Actions"}) do table.insert(controller.headings,Label(frame,title,10,-112,100,18)) end
     for _,heading in ipairs(controller.headings) do heading:SetTextColor(unpack(UI.Theme.colors.goldText)) end
     controller.selection=Label(frame,"",10,-398,820,24)
     controller.recover=Button(frame,"Join session",10,-400,150,function() end);controller.recover:Hide()
     controller.inspect=Button(frame,"All raids",310,-82,110,function() controller.expanded=nil;controller.offset=0;controller:Refresh() end);controller.inspect:Hide()
+    controller.startSync=Button(frame,"Start raid synchronization",0,0,210,function()
+        local ok,reason=controller.api.SetRaidSyncEnabled(controller.raidId,true)
+        if not ok then Raider.Runtime.Print(reason) end
+        controller:Refresh()
+    end)
+    UI.SetClassicButtonIcon(controller.startSync,"refresh",13,7,0);controller.startSync:Hide()
     local function RowAction(row,kind)
         local entry=row.entry;if not entry then return end
-        if kind=="join" then
+        if kind=="stop" then
+            local ok,reason=controller.api.SetRaidSyncEnabled(entry.id,false);if not ok then Message(controller,reason) end
+        elseif kind=="join" then
             local ok,reason=controller.api.Recover(entry.id)
             Message(controller,ok and "Joined raid session. Updates synchronize automatically." or reason)
             if ok then controller.raidId=entry.id end
@@ -222,9 +231,11 @@ function Sync.Create(parent,api)
         local row=UI.CreateControl(nil,frame)
         row:SetPoint("TOPLEFT",frame,"TOPLEFT",10,-130-(index-1)*32);row:SetWidth(820);row:SetHeight(30)
         row.label=Label(row,"",6,-7,260,20);row.typeLabel=Label(row,"",280,-7,190,20);row.stateLabel=Label(row,"",480,-7,120,20);row.actions={}
+        row.number=Label(row,"",0,-7,28,20);row.lifecycle=Label(row,"",0,-7,72,20);row.syncState=Label(row,"",0,-7,160,20)
+        row.cells={row.number,row.label,row.typeLabel,row.lifecycle,row.syncState,row.stateLabel}
         if row.typeLabel.SetWordWrap then row.typeLabel:SetWordWrap(false);row.stateLabel:SetWordWrap(false) end
         if row.label.SetWordWrap then row.label:SetWordWrap(false) end
-        for actionIndex,spec in ipairs({{"join","start","Join active raid"},{"reopen","refresh","Reopen and join raid"},{"conflicts","warning","Review conflicting changes"},{"compare","raids","Compare with the open raid"},{"resolve","fix","Resolve this conflict"}}) do
+        for actionIndex,spec in ipairs({{"stop","refresh","Stop Sync on this character"},{"join","start","Join active raid"},{"reopen","refresh","Reopen and join raid"},{"conflicts","warning","Review conflicting changes"},{"compare","raids","Compare with the open raid"},{"resolve","fix","Resolve this conflict"}}) do
             local kind=spec[1];local button=Button(row,"",600+(actionIndex-1)*32,-3,26,function() RowAction(row,kind) end)
             UI.SetClassicButtonIcon(button,spec[2],14,6,0);UI.AttachTooltip(button,spec[3],spec[3]);row.actions[kind]=button
         end
@@ -478,7 +489,7 @@ function Sync.Create(parent,api)
     end
 
     function controller:UpdateSelection()
-        for index,row in ipairs(self.rows) do UI.StyleSelectableTableRow(row,math.mod(index,2)==0,row.entry~=nil and row.entry==self.selected) end
+        for index,row in ipairs(self.rows) do UI.StyleSelectableTableRow(row,math.mod(index,2)==0,row.entry~=nil and row.entry==self.selected);UI.SetAlternatingRowColor(row,nil,index) end
     end
     function controller:SelectTab(tab)
         self.tab=tab;self.expanded=nil;self.offset=0;self.selected=nil;Message(self,"")
@@ -488,6 +499,18 @@ function Sync.Create(parent,api)
     function controller:Refresh(status)
         if not self:IsVisible() then return end
         self.refreshing=true
+        self.private=self.raidId and self.api.IsRaidSyncEnabled and not self.api.IsRaidSyncEnabled(self.raidId)
+        for _,widget in ipairs({self.officers,self.tabs.sessions,self.tabs.log,self.previous,self.next,self.count}) do if self.private then widget:Hide() else widget:Show() end end
+        self.status:Hide()
+        if self.private then
+            for _,widget in ipairs({self.message,self.empty,self.retry,self.selection,self.inspect,self.recover}) do widget:Hide() end
+            for _,row in ipairs(self.rows) do row:Hide() end
+            for _,heading in ipairs(self.headings) do heading:Hide() end
+            if self.toolbar then self.toolbar:Hide() end
+            self.startSync:ClearAllPoints();self.startSync:SetPoint("CENTER",frame,"CENTER",0,0);self.startSync:Show()
+            self.revision=self.api.GetStatus(self.raidId).revision;self.refreshing=false;return
+        end
+        self.startSync:Hide();self.message:Show()
         status=status or self.api.GetStatus(self.raidId);self.revision=status.revision;self.raidName=status.raidName or self.raidName
         if status.retryAvailable then self.retry:Show() else self.retry:Hide() end
         local gold=UI.Theme.colors.goldText
@@ -515,9 +538,12 @@ function Sync.Create(parent,api)
             row.fullText=entry and (entry.name..(not entry.log and not entry.conflict and ("  |  "..tostring(entry.raidType).."  |  "..(entry.state=="ended" and "Ended" or "Active").."  |  "..tostring(entry.conflicts or 0).." conflicts") or "")) or ""
             row.label:SetText(entry and entry.name or "")
             row.typeLabel:SetText(entry and not entry.log and not entry.conflict and Raider.Services.RaidRes.ShortRaidName(entry.raidType) or "")
+            row.number:SetText(entry and tostring(self.offset+index) or "")
+            row.lifecycle:SetText(entry and (entry.state=="ended" and "Ended" or "Active") or "")
+            row.syncState:SetText(entry and not entry.log and not entry.conflict and self.api.GetStatus(entry.id).syncStatus or "")
             row.stateLabel:SetText(entry and not entry.log and not entry.conflict and ((entry.conflicts or 0)>0 and tostring(entry.conflicts) or "None") or "")
             for kind,button in pairs(row.actions) do
-                local show=entry and not entry.log and ((entry.conflict and kind=="resolve") or (not entry.conflict and (kind=="conflicts" and (entry.conflicts or 0)>0 or kind=="compare" and self.raidId and self.raidId~=entry.id)))
+                local show=entry and not entry.log and ((entry.conflict and kind=="resolve") or (not entry.conflict and (kind=="stop" and self.raidId==entry.id and (not self.api.IsRaidSyncEnabled or self.api.IsRaidSyncEnabled(entry.id)) or kind=="conflicts" and (entry.conflicts or 0)>0 or kind=="compare" and self.raidId and self.raidId~=entry.id)))
                 if show then button:Show() else button:Hide() end
             end
             if entry then row:Show() else row:Hide() end
@@ -528,46 +554,53 @@ function Sync.Create(parent,api)
         UI.SetButtonEnabled(self.previous,self.offset>0);UI.SetButtonEnabled(self.next,self.offset+visiblePageSize<total)
         for key,button in pairs(self.tabs) do UI.SetClassicButtonSelected(button,key==self.tab) end
         self:UpdateSelection();frame:LayoutContent(frame:GetWidth(),frame:GetHeight());self.refreshing=false
+        if self.visiblePageSize<visiblePageSize then return self:Refresh(status) end
     end
     function frame:LayoutContent(w,h)
-        local statusWidth=math.min(260,math.max(180,(w-220)*0.48));local officerWidth=math.max(120,w-224-statusWidth)
+        if controller.private then return end
+        controller.status:Hide()
         controller.tabs.sessions:ClearAllPoints();controller.tabs.sessions:SetPoint("TOPLEFT",self,"TOPLEFT",10,-36)
         controller.tabs.log:ClearAllPoints();controller.tabs.log:SetPoint("LEFT",controller.tabs.sessions,"RIGHT",6,0)
-        controller.status:ClearAllPoints();controller.status:SetPoint("TOPLEFT",self,"TOPLEFT",208,-39);controller.status:SetWidth(statusWidth);controller.status:SetHeight(0)
-        controller.officers:ClearAllPoints();controller.officers:SetPoint("TOPLEFT",self,"TOPLEFT",216+statusWidth,-39);controller.officers:SetWidth(officerWidth);controller.officers:SetHeight(0)
-        local headerHeight=math.max(22,UI.MeasureTextHeight(controller.status,statusWidth,true),UI.MeasureTextHeight(controller.officers,officerWidth,true))
-        controller.officers:SetHeight(headerHeight);controller.status:SetHeight(headerHeight)
-        if not controller.toolbar then controller.toolbar=UI.CreateToolbarSurface(self,false,true);controller.toolbar:SetFrameLevel(self:GetFrameLevel());controller.toolbar.bootyBorderOutsetLeft=4;controller.toolbar.bootyBorderOutsetRight=4;UI.SetSurfaceHorizontalBorders(controller.toolbar,false,true) end
-        controller.toolbar:ClearAllPoints();controller.toolbar:SetPoint("TOPLEFT",self,"TOPLEFT",0,-30);controller.toolbar:SetPoint("TOPRIGHT",self,"TOPRIGHT",0,-30);controller.toolbar:SetHeight(headerHeight+18)
-        local shift=headerHeight-64
-        local previousSize=controller.visiblePageSize
-        controller.visiblePageSize=math.max(1,math.min(pageSize,math.floor((h-230-shift)/32)))
-        controller.headings[1]:ClearAllPoints();controller.headings[1]:SetPoint("TOPLEFT",self,"TOPLEFT",16,-112-shift)
+        local officerWidth=math.max(1,w-222)
+        controller.officers:ClearAllPoints();controller.officers:SetPoint("TOPLEFT",self,"TOPLEFT",208,-39);controller.officers:SetWidth(officerWidth);controller.officers:SetHeight(0)
+        local headerHeight=math.max(22,UI.MeasureTextHeight(controller.officers,officerWidth,true));controller.officers:SetHeight(headerHeight)
+        if not controller.toolbar then controller.toolbar=UI.CreateToolbarSurface(self,false,true);controller.toolbar:SetFrameLevel(self:GetFrameLevel());UI.SetSurfaceHorizontalBorders(controller.toolbar,false,true) end
+        controller.toolbar.bootyBorderOutsetLeft=0;controller.toolbar.bootyBorderOutsetRight=0
+        controller.toolbar:ClearAllPoints();controller.toolbar:SetPoint("TOPLEFT",self,"TOPLEFT",0,-30);controller.toolbar:SetPoint("TOPRIGHT",self,"TOPRIGHT",0,-30);controller.toolbar:SetHeight(headerHeight+18);controller.toolbar:Show()
+        local tableY=30+headerHeight+18+10
         controller.message:ClearAllPoints();controller.message:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,40);controller.message:SetWidth(w-20)
         controller.previous:ClearAllPoints();controller.previous:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,10)
         controller.next:ClearAllPoints();controller.next:SetPoint("LEFT",controller.previous,"RIGHT",6,0)
         controller.retry:ClearAllPoints();controller.retry:SetPoint("BOTTOMRIGHT",self,"BOTTOMRIGHT",-30,10)
         controller.count:ClearAllPoints();controller.count:SetPoint("LEFT",controller.next,"RIGHT",10,0)
-        for _,heading in ipairs(controller.headings) do if controller.tab=="log" or controller.expanded then heading:Hide() else heading:Show() end end
-        local titleSpace=w-38-134;local first=math.floor(titleSpace*0.44);local second=math.floor(titleSpace*0.32)
-        controller.headings[4]:ClearAllPoints();controller.headings[4]:SetPoint("TOPLEFT",self,"TOPLEFT",w-144,-112-shift)
-        controller.headings[2]:ClearAllPoints();controller.headings[2]:SetPoint("TOPLEFT",self,"TOPLEFT",first+22,-112-shift)
-        controller.headings[3]:ClearAllPoints();controller.headings[3]:SetPoint("TOPLEFT",self,"TOPLEFT",first+second+28,-112-shift)
-        for index,row in ipairs(controller.rows) do
-            row:ClearAllPoints();row:SetPoint("TOPLEFT",self,"TOPLEFT",10,-130-shift-(index-1)*32)
-            row:SetWidth(w-20);local right=-134
-            for _,key in ipairs({"join","reopen","conflicts","compare","resolve"}) do
-                local button=row.actions[key]
-                if button:IsShown() then button:ClearAllPoints();button:SetPoint("LEFT",row,"RIGHT",right,0);right=right+28 end
-            end
-            if row.entry and (row.entry.log or row.entry.conflict) then row.label:SetWidth(w-172)
-            else
-                local available=w-38-134;local nameWidth=math.floor(available*0.44);local typeWidth=math.floor(available*0.32)
-                row.label:SetWidth(nameWidth);row.typeLabel:ClearAllPoints();row.typeLabel:SetPoint("TOPLEFT",row,"TOPLEFT",nameWidth+12,-7);row.typeLabel:SetWidth(typeWidth)
-                row.stateLabel:ClearAllPoints();row.stateLabel:SetPoint("TOPLEFT",row,"TOPLEFT",nameWidth+typeWidth+18,-7);row.stateLabel:SetWidth(available-nameWidth-typeWidth-12)
-            end
+        local tableMode=controller.tab~="log" and not controller.expanded
+        local values={}
+        for i,row in ipairs(controller.rows) do values[i]={};for c,cell in ipairs(row.cells) do values[i][c]=cell:GetText() end end
+        local widths=Raider.Modules.RaidManagement.FitRaidColumns(self,controller,controller.headings,values,w-20,88)
+        local x=10
+        for c,heading in ipairs(controller.headings) do
+            heading:ClearAllPoints();heading:SetPoint("TOPLEFT",self,"TOPLEFT",x,-tableY);heading:SetWidth(widths[c]-6);x=x+widths[c]
+            if tableMode then heading:Show() else heading:Hide() end
         end
-        if previousSize~=controller.visiblePageSize and not controller.refreshing and controller:IsVisible() then controller:Refresh() end
+        local rowY=tableY+(tableMode and 24 or 0);local maxHeight=26
+        for index,row in ipairs(controller.rows) do
+            local height=26;local cellX=4
+            row:ClearAllPoints();row:SetPoint("TOPLEFT",self,"TOPLEFT",10,-rowY);row:SetWidth(w-20)
+            for c,cell in ipairs(row.cells) do
+                if tableMode then
+                    cell:ClearAllPoints();cell:SetPoint("LEFT",row,"LEFT",cellX,0);cell:SetWidth(math.max(1,widths[c]-6));cell:SetJustifyV("MIDDLE");cell:SetHeight(0);cell:Show()
+                    if cell.SetWordWrap then cell:SetWordWrap(true) end
+                    height=math.max(height,UI.MeasureTextHeight(cell,widths[c]-6,true)+10);cellX=cellX+widths[c]
+                elseif cell~=row.label then cell:Hide() end
+            end
+            if not tableMode then row.label:ClearAllPoints();row.label:SetPoint("LEFT",row,"LEFT",4,0);row.label:SetWidth(w-28);row.label:SetHeight(0);height=math.max(26,UI.MeasureTextHeight(row.label,w-28,true)+10) end
+            for _,key in ipairs({"stop","join","reopen","conflicts","compare","resolve"}) do local button=row.actions[key];if button:IsShown() then button:ClearAllPoints();button:SetPoint("LEFT",row,"LEFT",cellX,0);cellX=cellX+28 end end
+            row:SetHeight(height);rowY=rowY+height+2;maxHeight=math.max(maxHeight,height)
+        end
+        local previous=controller.visiblePageSize
+        controller.visiblePageSize=math.max(1,math.min(pageSize,math.floor((h-tableY-24-72)/(maxHeight+2))))
+        controller.empty:ClearAllPoints();controller.empty:SetPoint("TOPLEFT",self,"TOPLEFT",14,-tableY-24);controller.empty:SetWidth(w-28)
+        if previous~=controller.visiblePageSize and not controller.refreshing and controller:IsVisible() then controller:Refresh() end
     end
     function controller:Open(raidId,tab)
         if conflict then conflict:Hide() end

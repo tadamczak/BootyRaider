@@ -319,16 +319,16 @@ end
 function Journal.IndexOperation(state,operation)
     local index=syncIndexes[state];if index then InsertIndex(index,operation) end
 end
-function Journal.GetSyncSummary(db,offset,limit,priorityRaidId)
+function Journal.GetSyncSummary(db,offset,limit,priorityRaidId,includeRaid,policyRevision)
     local state,reason=Journal.Ensure(db);if not state then return nil,reason end
     local index=SyncIndex(state)
     offset=PageNumber(offset,0,0);limit=PageNumber(limit,8,1,32)
-    if not index.summary or index.summary.priorityRaidId~=priorityRaidId then
-        local summary={priorityRaidId=priorityRaidId,entries={}}
+    if not index.summary or index.summary.priorityRaidId~=priorityRaidId or index.summary.includeRaid~=includeRaid or index.summary.policyRevision~=policyRevision then
+        local summary={priorityRaidId=priorityRaidId,includeRaid=includeRaid,policyRevision=policyRevision,entries={}}
         for pass=1,2 do
             for _,key in ipairs(index.order) do
                 local group=index.groups[key]
-                if (pass==1 and group.raidId==priorityRaidId) or (pass==2 and group.raidId~=priorityRaidId) then
+                if (not includeRaid or includeRaid(group.raidId)) and ((pass==1 and group.raidId==priorityRaidId) or (pass==2 and group.raidId~=priorityRaidId)) then
                     for _,range in ipairs(group.ranges) do
                         table.insert(summary.entries,{raidId=group.raidId,origin=group.origin,first=range[1],last=range[2],high=group.high})
                     end

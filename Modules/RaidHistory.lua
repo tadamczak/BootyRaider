@@ -18,6 +18,13 @@ function RaidManagement.RefreshSyncStatus(page)
     UI.SetButtonEnabled(controls.scan,controls.canStartRaid and canJoin)
 end
 
+function RaidManagement.ToggleRaidSync(id)
+    local api=Raider.Runtime.replica
+    local ok,reason=api.SetRaidSyncEnabled(id,not api.IsRaidSyncEnabled(id))
+    if not ok then Raider.Runtime.Print(reason) end
+    Raider.Runtime.RefreshViews()
+    if Raider.Modules.RaidSync then Raider.Modules.RaidSync.RefreshVisible() end
+end
 local function FitColumns(page,controls,headers,values,available,actionWidth)
     if not controls.columnMeasure then controls.columnMeasure=UI.CreateLabel(page,nil,"OVERLAY","GameFontHighlightSmall");controls.columnMeasure:Hide() end
     local measure=controls.columnMeasure;local columns={};local total=0
@@ -31,6 +38,8 @@ local function FitColumns(page,controls,headers,values,available,actionWidth)
     local widths={};for index,column in ipairs(columns) do widths[index]=column.width end
     return widths
 end
+
+RaidManagement.FitRaidColumns=FitColumns
 
 local function ActiveSessions(page,controls,width,y)
     local api=Raider.Runtime and Raider.Runtime.replica
@@ -53,6 +62,9 @@ local function ActiveSessions(page,controls,width,y)
                 if not allowed then Raider.Runtime.Print(reason) end
                 Raider.Runtime.RefreshViews()
             end)
+            row.sync=UI.CreateButton(row,nil,"",24,22);UI.SetClassicButtonIcon(row.sync,"refresh",13,6,0)
+            UI.AttachTooltip(row.sync,"Raid sync","Toggle synchronization on this character. Stopping does not remove copies already shared with other officers.")
+            row.sync:SetScript("OnClick",function() RaidManagement.ToggleRaidSync(row.raidId) end)
             controls.activeRows[index]=row
         end
         controls.activeEmpty=UI.CreateLabel(page,nil,"OVERLAY","GameFontHighlightSmall");controls.activeEmpty:SetText("No active raid sessions")
@@ -71,7 +83,7 @@ local function ActiveSessions(page,controls,width,y)
     UI.SetButtonEnabled(controls.activePrevious,controls.activeOffset>0);UI.SetButtonEnabled(controls.activeNext,controls.activeOffset+4<total)
     local values={}
     for index,entry in ipairs(list) do local info=api.GetRaidInfo(entry.id);values[index]={tostring(controls.activeOffset+index),entry.name,ShortRaid(entry.raidType),tostring(entry.memberCount or 0).."/"..tostring(entry.memberLimit or "?"),entry.createdAt and date("%Y-%m-%d %H:%M",entry.createdAt) or "Unknown",info.storage,Stamp(info.lastSave),""} end
-    local widths=FitColumns(page,controls,controls.activeHeaders,values,width,52)
+    local widths=FitColumns(page,controls,controls.activeHeaders,values,width,58)
     local x=8
     for index,label in ipairs(controls.activeHeaders) do label:ClearAllPoints();label:SetPoint("TOPLEFT",page,"TOPLEFT",x,y-58);label:SetWidth(widths[index]-6);label:SetJustifyH("LEFT");label:Show();x=x+widths[index] end
     local rowY=y-82
@@ -85,6 +97,7 @@ local function ActiveSessions(page,controls,width,y)
             local cellX=0;local rowHeight=26
             for column,label in ipairs(labels) do label:ClearAllPoints();label:SetPoint("LEFT",row,"LEFT",cellX,0);label:SetWidth(widths[column]-4);label:SetJustifyH("LEFT");label:SetJustifyV("MIDDLE");label:SetText(values[column]);label:SetHeight(0);rowHeight=math.max(rowHeight,UI.MeasureTextHeight(label,widths[column]-4,true)+10);cellX=cellX+widths[column] end
             row.join:ClearAllPoints();row.join:SetPoint("LEFT",row,"LEFT",cellX,0)
+            row.sync:ClearAllPoints();row.sync:SetPoint("LEFT",row.join,"RIGHT",2,0);UI.SetClassicButtonSelected(row.sync,api.IsRaidSyncEnabled(entry.id))
             UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false);UI.SetAlternatingRowColor(row,nil,index);row:SetHeight(rowHeight);row:Show();rowY=rowY-rowHeight-2
         else row:Hide() end
     end
@@ -97,6 +110,7 @@ function RaidManagement.HideRaidHistoryControls(controls)
     for _,key in ipairs({"activeTitle","activeEmpty","activePrevious","activeNext","syncStatus","historyToolbar"}) do if controls[key] then controls[key]:Hide() end end
     for _,row in ipairs(controls.activeRows or {}) do row:Hide() end
     for _,label in ipairs(controls.activeHeaders or {}) do label:Hide() end
+    for _,button in ipairs(controls.historyButtons or {}) do if button.sync then button.sync:Hide() end end
     controls.historyScroll:Hide()
     UI.SetScrollBarVisible(getglobal("BootyRaiderRaidHistoryScrollScrollBar"),false)
     controls.loadRaid:Hide(); controls.testRaid:Hide(); controls.historyTitle:Hide(); controls.historyEmpty:Hide()
@@ -126,7 +140,7 @@ local function MeasureHistory(width, controls)
         values[index]={index,snapshot.id,ShortRaid(snapshot.raidName),Raider.Services.RaidRes.FormatDuration(duration),created and date("%Y-%m-%d %H:%M",created) or "Unknown",modified and date("%Y-%m-%d %H:%M",modified) or "Unknown",info.storage or "In memory",info.lastAuthor or "Unknown",info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended",""}
     end
     if not controls.historyHeaders[10] then controls.historyHeaders[10]=UI.CreateColumnLabel(page,"Actions","gold") end
-    local widths=FitColumns(page,controls,controls.historyHeaders,values,width,canEdit and 98 or 76)
+    local widths=FitColumns(page,controls,controls.historyHeaders,values,width,canEdit and 124 or 102)
     local numberWidth,nameWidth,raidWidth,durationWidth,createdWidth,modifiedWidth,storageWidth,authorWidth,statusWidth=unpack(widths)
     local dataWidth=0;for index=1,9 do dataWidth=dataWidth+widths[index] end
     local x = 8
@@ -145,6 +159,12 @@ local function MeasureHistory(width, controls)
         button:ClearAllPoints(); button:SetPoint("TOPLEFT", controls.historyCanvas, "TOPLEFT", 0, y); button:SetWidth(dataWidth)
         if snapshot then
             if not button.storage then button.storage=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall");button.author=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall");button.status=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall") end
+            if not button.sync then
+                button.sync=UI.CreateButton(controls.historyCanvas,nil,"",22,22);UI.SetClassicButtonIcon(button.sync,"refresh",13,5,0)
+                UI.AttachTooltip(button.sync,"Raid sync","Toggle synchronization on this character. Stopping does not remove previously shared copies.")
+                button.sync:SetScript("OnClick",function() RaidManagement.ToggleRaidSync(button.syncRaidId) end)
+            end
+            button.syncRaidId=snapshot.syncRaidId
             local api=Raider.Runtime and Raider.Runtime.replica
             local info=api and api.GetRaidInfo and api.GetRaidInfo(snapshot.syncRaidId) or {storage="In memory",lastAuthor="Unknown"}
             local createdAt, modifiedAt, duration = Raider.Services.RaidRes.GetSnapshotTimes(snapshot)
@@ -173,9 +193,11 @@ local function MeasureHistory(width, controls)
                 log:SetWidth(18); log:SetHeight(18); log:ClearAllPoints(); log:SetPoint("LEFT", canEdit and edit or load, "RIGHT", 2, 0)
                 Raider.UI.Components.SetButtonEnabled(log,snapshot.syncRaidId~=nil);log:Show()
             end
-            deleteButton:ClearAllPoints(); deleteButton:SetPoint("LEFT", log or canEdit and edit or load, "RIGHT", 2, 0); deleteButton:Show()
+            button.sync:ClearAllPoints();button.sync:SetPoint("LEFT",log or canEdit and edit or load,"RIGHT",2,0);button.sync:Show()
+            UI.SetButtonEnabled(button.sync,snapshot.syncRaidId~=nil and canEdit);UI.SetClassicButtonSelected(button.sync,api and api.IsRaidSyncEnabled(snapshot.syncRaidId) and snapshot.syncRaidId~=nil)
+            deleteButton:ClearAllPoints(); deleteButton:SetPoint("LEFT", button.sync, "RIGHT", 2, 0); deleteButton:Show()
             y = y - height - 2
-        else button.number:Hide(); button:Hide(); load:Hide(); deleteButton:Hide(); if edit then edit:Hide() end; if log then log:Hide() end end
+        else if button.sync then button.sync:Hide() end;button.number:Hide(); button:Hide(); load:Hide(); deleteButton:Hide(); if edit then edit:Hide() end; if log then log:Hide() end end
     end
     return math.max(1, -y - 2)
 end

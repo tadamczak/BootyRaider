@@ -61,7 +61,7 @@ function RaidSessionController.Create(dependencies)
         session:BeginDraft()
     end
 
-    function controller:StartNew(raidId, raidName)
+    function controller:StartNew(raidId, raidName, syncEnabled)
         if dependencies.canStartNewRaid then
             local allowed,reason=dependencies.canStartNewRaid()
             if not allowed then return false,reason end
@@ -72,7 +72,7 @@ function RaidSessionController.Create(dependencies)
         state.pendingRaidSessionId = raidId; state.pendingRaidName = raidName
         local previousThis, previousEvent, previousArg = this, event, arg1
         local ok, reason = pcall(function()
-            if session.BeginPendingRaid then session:BeginPendingRaid() else session:ClearAttendance() end
+            if session.BeginPendingRaid then session:BeginPendingRaid(syncEnabled) else session:ClearAttendance() end
             dependencies.setHistoricalLoaded(false)
             state.raidSessionPaused = false; state.raidSessionDraft = true
             state.raidScanReady = false; state.raidLiveTracking = false

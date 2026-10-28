@@ -328,7 +328,7 @@ function Replica.Create(options)
         local latestId=state.latestOperations[operation.raidId]
         local latest=latestId and J.GetOperation(db,latestId)
         if latestId~=nil and operation.kind~="raid.observe" and LaterChange(operation,latest) then state.latestOperations[operation.raidId]=operation.id end
-        if not localChange then state.receivedSinceLoad=true end
+        if not localChange then state.receivedSinceLoad=true;state.receivedRaids=state.receivedRaids or {};state.receivedRaids[operation.raidId]=true end
         if localChange and (operation.kind=="raid.start" or operation.kind=="raid.reopen" or operation.kind=="raid.save") then db.syncJoinedRaidId=operation.raidId end
         if not localChange and operation.kind~="raid.observe" then
             local action=Raider.Modules and Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
@@ -370,6 +370,23 @@ function Replica.Create(options)
         return ok,operation
     end
     function api.SetTransport(transport) state.transport=transport end
+    function api.IsRaidSyncEnabled(id)
+        return not id or not (db.raidSyncDisabled and (db.raidSyncDisabled[id] or db.raidSyncDisabled[Canonical(id)]))
+    end
+    function api.SetRaidSyncEnabled(id,enabled)
+        if not id or not Raid(Canonical(id)) then return false,"Raid not found." end
+        if options.authorize and not options.authorize() then return false,"Officer access required." end
+        id=Canonical(id);db.raidSyncDisabled=db.raidSyncDisabled or {}
+        if api.IsRaidSyncEnabled(id)==(enabled==true) then return true end
+        db.raidSyncDisabled[id]=not enabled or nil;db.raidSyncPolicyRevision=(db.raidSyncPolicyRevision or 0)+1
+        state.revision=state.revision+1
+        local restarted,failure=true,nil
+        if state.transport and state.transport.RefreshRaidPolicy then restarted,failure=state.transport:RefreshRaidPolicy() end
+        api.LogSync((enabled and "Started" or "Stopped").." synchronization for "..tostring((Record(id,"raid:metadata") or {}).id or id).." on this character.")
+        if options.wake then options.wake() end
+        if restarted==false then return false,failure or "The raid setting was saved, but synchronization could not restart." end
+        return true
+    end
     function api.Discover()
         local allowed,reason=Authorized();if not allowed then return false,reason end
         if not state.transport then return false,"Synchronization is unavailable until the guild directory and client messaging are ready." end
@@ -752,8 +769,9 @@ function Replica.Create(options)
             message=tostring(operation and operation.author or "An officer").." ended this raid. Updates still synchronize. Reopen it to continue recording."
         end
         if localFailure then message="Needs attention: a confirmed loot change is stored only locally. Save the raid to retry synchronization. "..tostring(localFailure) end
-        local syncStatus=transport.lastError and "Sync error! Send log" or state.receivedSinceLoad and "New data received. Please reload!"
+        local syncStatus=transport.lastError and "Sync error! Send log" or (id and state.receivedRaids and state.receivedRaids[Canonical(id)] or not id and state.receivedSinceLoad) and "New data received. Please reload!"
             or (transport.pending or 0)>0 and "Syncing…" or "Up to date"
+        if id and not api.IsRaidSyncEnabled(id) then syncStatus="Sync off" end
         return {syncStatus=syncStatus,revision=state.revision+(transport.revision or 0),localOnly=transport.localOnly~=false,pending=transport.pending or 0,
             conflicts=conflicts,compatible=transport.compatible~=false,peers=type(transport.peers)=="table" and transport.peers or {},
             raidName=metadata and metadata.id,retryAvailable=transport.lastError~=nil,lifecycle=lifecycle,recordingGap=recordingGap,csrWithheld=blocked and true or false,needsAttention=localFailure and true or false,message=message}
@@ -867,6 +885,7 @@ function Replica.Create(options)
         return J.Fingerprint(selected)
     end
     function api.MergeRaids(target,source,decisions)
+        if api.IsRaidSyncEnabled(target)~=api.IsRaidSyncEnabled(source) then return false,"Both raids must use the same synchronization setting before merging." end
         local allowed,reason=Authorized();if not allowed then return false,reason end
         local plan,failure=MergePlan(target,source);if not plan then return false,failure end
         if type(decisions)~="table" or not J.Equal(decisions.token,plan.token) then return false,"The recordings changed. Compare them again before merging." end

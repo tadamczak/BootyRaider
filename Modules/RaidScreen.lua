@@ -179,7 +179,7 @@ function Screen.Create(parent, host)
         isInRaid=Runtime.IsInRaid,isSessionActive=function() return Raider.raidSessionDraft or Raider.raidScanReady or Runtime.IsTestRaid() end,
         requestRosterScan=Runtime.RequestRaidScan,saveRaidRoster=Runtime.CaptureActiveRoster,
         beginRaidSession=function() Runtime.sessionController:Begin();Runtime.worldContext.Update() end,
-        startNewRaid=function(id,name) return Runtime.sessionController:StartNew(id,name) end,
+        startNewRaid=function(id,name,syncEnabled) return Runtime.sessionController:StartNew(id,name,syncEnabled) end,
         saveRaidSession=Runtime.SaveSession,quitRaidSession=Runtime.QuitSession,
         continueRaidSession=function(context) Runtime.sessionController:Continue(context) end,
         dismissRaidSessionTransition=function(context) Runtime.sessionController:DismissTransition(context) end,
