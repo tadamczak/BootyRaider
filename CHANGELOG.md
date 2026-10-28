@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.11 — 2026-10-28
+
+- Keep the saved-raid scrollbar tied to measured overflow; add full active-session columns.
+- Compact sync tabs and actions, color status captions gold and offer one join action appropriate to the session state.
+
 ## 1.0.0-dev.10 — 2026-10-28
 
 - Align raid history actions in one full-width bordered toolbar, with unique icons and matching active/saved section headings.

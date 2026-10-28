@@ -766,7 +766,10 @@ function Replica.Create(options)
                 if metadata then
                     local operation=record.revision and J.GetOperation(db,record.revision)
                     local lifecycle,lifecycleRecord=Record(id,"raid:lifecycle");lifecycle=lifecycle or "active"
-                    table.insert(list,{id=id,name=metadata.id,raidType=metadata.raidName,state=lifecycle,author=operation and operation.author,
+                    local memberCount=0
+                    for key,value in pairs(Raid(id).records or {}) do if string.find(key,"^member:") and not value.deleted then memberCount=memberCount+1 end end
+                    local limits={["Molten Core"]=40,["Blackwing Lair"]=40,["Onyxia's Lair"]=40,["Zul'Gurub"]=20,["Karazhan10"]=10,["Lower Karazhan Halls"]=10}
+                    table.insert(list,{createdAt=metadata.startedAt,memberCount=memberCount,memberLimit=limits[metadata.raidName],id=id,name=metadata.id,raidType=metadata.raidName,state=lifecycle,author=operation and operation.author,
                         updatedAt=operation and operation.timestamp or metadata.startedAt or 0,conflicts=table.getn(Conflicts(id)),lifecycleRevision=lifecycleRecord and lifecycleRecord.revision,recoverable=true})
                 end
             end

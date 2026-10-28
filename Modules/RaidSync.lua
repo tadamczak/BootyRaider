@@ -144,9 +144,10 @@ function Sync.Create(parent,api)
     controller.tabs={}
     for index,value in ipairs({{"sessions","Raids"},{"log","Sync log"}}) do
         local key=value[1]
-        controller.tabs[key]=Button(frame,value[2],10+(index-1)*145,-82,138,function() controller:SelectTab(key) end)
-        UI.SetClassicButtonIcon(controller.tabs[key],key=="log" and "rules" or "refresh",13,14,2)
+        controller.tabs[key]=Button(frame,value[2],10+(index-1)*98,-82,92,function() controller:SelectTab(key) end)
+        UI.SetClassicButtonIcon(controller.tabs[key],key=="log" and "rules" or "refresh",13,7,0)
     end
+    for _,button in pairs(controller.tabs) do button.bootyCaptionBottomInset=0;button.bootyLabelInsets={22,4};UI.ApplyButtonCaptionBaseline(button) end
     controller.officers=Label(frame,"",360,-36,470,36)
     controller.headings={Label(frame,"Raid",16,-112,260,18),Label(frame,"Type",290,-112,190,18),Label(frame,"Status",490,-112,140,18),Label(frame,"Actions",690,-112,130,18)}
     for _,heading in ipairs(controller.headings) do heading:SetTextColor(unpack(UI.Theme.colors.goldText)) end
@@ -156,8 +157,8 @@ function Sync.Create(parent,api)
     local function RowAction(row,kind)
         local entry=row.entry;if not entry then return end
         if kind=="join" then
-            local ok,reason=controller.api.Recover(entry.id,entry.state=="ended")
-            Message(controller,ok and (entry.state=="ended" and "Opened ended raid. Its updates still synchronize." or "Joined raid session. Updates synchronize automatically.") or reason)
+            local ok,reason=controller.api.Recover(entry.id)
+            Message(controller,ok and "Joined raid session. Updates synchronize automatically." or reason)
             if ok then controller.raidId=entry.id end
         elseif kind=="reopen" then
             if not controller.reopenDialog then
@@ -165,8 +166,8 @@ function Sync.Create(parent,api)
                 confirm.label=Label(confirm,"",12,-40,396,52)
                 confirm.yes=Button(confirm,"Reopen",292,-116,108,function()
                     local ok,reason=controller.api.Reopen(confirm.raidId,confirm.revision)
-                    if ok then confirm:Hide() end
-                    Message(controller,ok and "Raid reopened for all officers. Join it to continue." or reason);controller:Refresh()
+                    if ok then ok,reason=controller.api.Recover(confirm.raidId);if ok then controller.raidId=confirm.raidId;confirm:Hide() end end
+                    Message(controller,ok and "Raid reopened and joined. Updates synchronize automatically." or reason);controller:Refresh()
                 end)
                 confirm.no=Button(confirm,"Cancel",176,-116,108,function() confirm:Hide() end)
                 function confirm:LayoutContent(w,h)
@@ -191,7 +192,7 @@ function Sync.Create(parent,api)
         row.label=Label(row,"",6,-7,260,20);row.typeLabel=Label(row,"",280,-7,190,20);row.stateLabel=Label(row,"",480,-7,120,20);row.actions={}
         if row.typeLabel.SetWordWrap then row.typeLabel:SetWordWrap(false);row.stateLabel:SetWordWrap(false) end
         if row.label.SetWordWrap then row.label:SetWordWrap(false) end
-        for actionIndex,spec in ipairs({{"join","start","Open / join raid"},{"reopen","refresh","Reopen ended raid for all officers"},{"conflicts","warning","Review conflicting changes"},{"compare","raids","Compare with the open raid"},{"resolve","fix","Resolve this conflict"}}) do
+        for actionIndex,spec in ipairs({{"join","start","Join active raid"},{"reopen","refresh","Reopen and join raid"},{"conflicts","warning","Review conflicting changes"},{"compare","raids","Compare with the open raid"},{"resolve","fix","Resolve this conflict"}}) do
             local kind=spec[1];local button=Button(row,"",600+(actionIndex-1)*32,-3,26,function() RowAction(row,kind) end)
             UI.SetClassicButtonIcon(button,spec[2],14,6,0);UI.AttachTooltip(button,spec[3],spec[3]);row.actions[kind]=button
         end
@@ -441,7 +442,9 @@ function Sync.Create(parent,api)
         self.refreshing=true
         status=status or self.api.GetStatus(self.raidId);self.revision=status.revision;self.raidName=status.raidName or self.raidName
         if status.retryAvailable then self.retry:Show() else self.retry:Hide() end
-        self.status:SetText("Sync status: "..(status.syncStatus or "Up to date"))
+        local gold=UI.Theme.colors.goldText
+        local prefix=string.format("|cff%02x%02x%02xSync status:|r |cffffffff",math.floor(gold[1]*255),math.floor(gold[2]*255),math.floor(gold[3]*255))
+        self.status:SetText(prefix..(status.syncStatus or "Up to date").."|r")
         local names={}
         for _,peer in ipairs(status.peers or {}) do if peer.available or peer.syncState=="error" then table.insert(names,peer.name.." - "..(peer.syncState or "pending")) end end
         self.officers:SetText(table.getn(names)>0 and ("Connected officers: "..table.concat(names,", ")) or "No other officer connected.")
@@ -466,7 +469,7 @@ function Sync.Create(parent,api)
             row.typeLabel:SetText(entry and not entry.log and not entry.conflict and entry.raidType or "")
             row.stateLabel:SetText(entry and not entry.log and not entry.conflict and ((entry.state=="ended" and "Ended" or "Active")..((entry.conflicts or 0)>0 and (" / "..entry.conflicts.." conflicts") or "")) or "")
             for kind,button in pairs(row.actions) do
-                local show=entry and not entry.log and ((entry.conflict and kind=="resolve") or (not entry.conflict and (kind=="join" or kind=="reopen" and entry.state=="ended" or kind=="conflicts" and (entry.conflicts or 0)>0 or kind=="compare" and self.raidId and self.raidId~=entry.id)))
+                local show=entry and not entry.log and ((entry.conflict and kind=="resolve") or (not entry.conflict and (kind=="join" and entry.state~="ended" and (not self.api.GetJoinedRaidId or self.api.GetJoinedRaidId()~=entry.id) or kind=="reopen" and entry.state=="ended" or kind=="conflicts" and (entry.conflicts or 0)>0 or kind=="compare" and self.raidId and self.raidId~=entry.id)))
                 if show then button:Show() else button:Hide() end
             end
             if entry then row:Show() else row:Hide() end
@@ -487,8 +490,8 @@ function Sync.Create(parent,api)
         local previousSize=controller.visiblePageSize
         controller.visiblePageSize=math.max(1,math.min(pageSize,math.floor((h-230-shift)/32)))
         controller.tabs.sessions:ClearAllPoints();controller.tabs.sessions:SetPoint("TOPLEFT",self,"TOPLEFT",10,-82-shift)
-        controller.tabs.log:ClearAllPoints();controller.tabs.log:SetPoint("TOPLEFT",self,"TOPLEFT",155,-82-shift)
-        controller.inspect:ClearAllPoints();controller.inspect:SetPoint("TOPLEFT",self,"TOPLEFT",310,-82-shift)
+        controller.tabs.log:ClearAllPoints();controller.tabs.log:SetPoint("TOPLEFT",self,"TOPLEFT",108,-82-shift)
+        controller.inspect:ClearAllPoints();controller.inspect:SetPoint("TOPLEFT",self,"TOPLEFT",206,-82-shift)
         controller.headings[1]:ClearAllPoints();controller.headings[1]:SetPoint("TOPLEFT",self,"TOPLEFT",16,-112-shift)
         controller.message:ClearAllPoints();controller.message:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,40);controller.message:SetWidth(w-20)
         controller.previous:ClearAllPoints();controller.previous:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,10)
@@ -497,17 +500,17 @@ function Sync.Create(parent,api)
         controller.count:ClearAllPoints();controller.count:SetPoint("LEFT",controller.next,"RIGHT",10,0)
         for _,heading in ipairs(controller.headings) do if controller.tab=="log" or controller.expanded then heading:Hide() else heading:Show() end end
         local titleSpace=w-38-134;local first=math.floor(titleSpace*0.44);local second=math.floor(titleSpace*0.32)
-        controller.headings[4]:ClearAllPoints();controller.headings[4]:SetPoint("TOPRIGHT",self,"TOPRIGHT",-16,-112-shift)
+        controller.headings[4]:ClearAllPoints();controller.headings[4]:SetPoint("TOPLEFT",self,"TOPLEFT",w-144,-112-shift)
         controller.headings[2]:ClearAllPoints();controller.headings[2]:SetPoint("TOPLEFT",self,"TOPLEFT",first+22,-112-shift)
         controller.headings[3]:ClearAllPoints();controller.headings[3]:SetPoint("TOPLEFT",self,"TOPLEFT",first+second+28,-112-shift)
         for index,row in ipairs(controller.rows) do
             row:ClearAllPoints();row:SetPoint("TOPLEFT",self,"TOPLEFT",10,-130-shift-(index-1)*32)
-            row:SetWidth(w-20);local right=-6
-            for _,key in ipairs({"compare","conflicts","reopen","join","resolve"}) do
+            row:SetWidth(w-20);local right=-134
+            for _,key in ipairs({"join","reopen","conflicts","compare","resolve"}) do
                 local button=row.actions[key]
-                if button:IsShown() then button:ClearAllPoints();button:SetPoint("RIGHT",row,"RIGHT",right,0);right=right-32 end
+                if button:IsShown() then button:ClearAllPoints();button:SetPoint("LEFT",row,"RIGHT",right,0);right=right+28 end
             end
-            if row.entry and (row.entry.log or row.entry.conflict) then row.label:SetWidth(w-38+right)
+            if row.entry and (row.entry.log or row.entry.conflict) then row.label:SetWidth(w-172)
             else
                 local available=w-38-134;local nameWidth=math.floor(available*0.44);local typeWidth=math.floor(available*0.32)
                 row.label:SetWidth(nameWidth);row.typeLabel:ClearAllPoints();row.typeLabel:SetPoint("TOPLEFT",row,"TOPLEFT",nameWidth+12,-7);row.typeLabel:SetWidth(typeWidth)

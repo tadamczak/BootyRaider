@@ -418,6 +418,12 @@ function RaidManagement.CreateActionControls(page)
     controls.historyCanvas = Raider.UI.Components.CreateContainer(nil, controls.historyScroll)
     controls.historyCanvas:SetWidth(300); controls.historyCanvas:SetHeight(1)
     controls.historyScroll:SetScrollChild(controls.historyCanvas); controls.historyScroll:Hide()
+    -- Native range callbacks can arrive after layout; the measured range owns visibility.
+    controls.historyScroll:SetScript("OnScrollRangeChanged",function()
+        local bar=getglobal("BootyRaiderRaidHistoryScrollScrollBar")
+        Raider.UI.Components.ApplyScrollRange(this,bar,this.bootyHistoryMaximum or 0)
+        if not this:IsShown() then Raider.UI.Components.SetScrollBarVisible(bar,false) end
+    end)
     controls.historyScroll:EnableMouseWheel(true)
     controls.historyScroll:SetScript("OnMouseWheel", function()
         local maximum = math.max(0, controls.historyCanvas:GetHeight() - this:GetHeight())
