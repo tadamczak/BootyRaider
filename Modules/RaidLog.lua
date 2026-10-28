@@ -32,6 +32,12 @@ end
 
 function Log.FormatAction(entry)
     local detail=entry.detail or {}
+    if entry.kind=="conflict.resolve" and detail.conflictKind=="sr" then
+        local item=detail.item and (tonumber(detail.item) and UI.GetItemLabel and UI.GetItemLabel(tonumber(detail.item)) or Item(detail.item)) or "None"
+        if tonumber(detail.item) and type(GetItemInfo)=="function" then local _,link=GetItemInfo(tonumber(detail.item));if link then item=link end end
+        return "SR conflict for "..tostring(detail.raidName or entry.raidId or "raid")..": "..tostring(detail.player or "Unknown").." SR resolved to "..item
+    end
+    if entry.kind=="conflict.resolve" and detail.raidName then return "Resolved "..tostring(detail.count or 1).." conflicts for "..detail.raidName end
     local text=entry.kind=="raid.save" and detail.endSession and "Saved and ended raid" or captions[entry.kind] or "Changed raid data"
     if entry.kind=="sr.import" or entry.kind=="sr.reapply" then
         local count=tonumber(detail.count)

@@ -3,6 +3,8 @@ local Raider = BootyRaider
 Raider.Modules.RaidManagement = Raider.Modules.RaidManagement or {}
 local RaidManagement = Raider.Modules.RaidManagement
 local UI=Raider.UI.Components
+local function ShortRaid(name) return Raider.Services.RaidRes.ShortRaidName(name) end
+local function Stamp(value) return value and date("%Y-%m-%d %H:%M",value) or "Not saved yet" end
 
 function RaidManagement.RefreshSyncStatus(page)
     local controls=page.syncHistoryControls
@@ -37,11 +39,12 @@ local function ActiveSessions(page,controls,width,y)
         controls.activeTitle=UI.CreateLabel(page,nil,"OVERLAY","GameFontNormal")
         controls.activeTitle:SetText("Active raid sessions");UI.SetHeadingIcon(controls.activeTitle,"ping")
         controls.activeRows={};controls.activeOffset=0;controls.activeHeaders={}
-        for index,text in ipairs({"#","Raid ID","Raid Type","Members","Created At","Actions"}) do controls.activeHeaders[index]=UI.CreateColumnLabel(page,text,"gold") end
+        for index,text in ipairs({"#","Raid ID","Raid","Members","Created At","Storage","Last Saved","Actions"}) do controls.activeHeaders[index]=UI.CreateColumnLabel(page,text,"gold") end
         for index=1,4 do
             local row=UI.CreateButton(page,nil,"",width,26);row.name=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
             row.raidType=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
             row.number=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall");row.members=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall");row.created=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
+            row.storage=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall");row.lastSaved=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
             row.join=UI.CreateButton(row,nil,"",24,22);UI.SetClassicButtonIcon(row.join,"start",13,6,0)
             UI.AttachTooltip(row.join,"Join session","Continue this shared raid session.")
             row.join:SetScript("OnClick",function()
@@ -67,7 +70,7 @@ local function ActiveSessions(page,controls,width,y)
     if total>4 then controls.activePrevious:Show();controls.activeNext:Show() else controls.activePrevious:Hide();controls.activeNext:Hide() end
     UI.SetButtonEnabled(controls.activePrevious,controls.activeOffset>0);UI.SetButtonEnabled(controls.activeNext,controls.activeOffset+4<total)
     local values={}
-    for index,entry in ipairs(list) do values[index]={tostring(controls.activeOffset+index),entry.name,entry.raidType,tostring(entry.memberCount or 0).."/"..tostring(entry.memberLimit or "?"),entry.createdAt and date("%Y-%m-%d %H:%M",entry.createdAt) or "Unknown",""} end
+    for index,entry in ipairs(list) do local info=api.GetRaidInfo(entry.id);values[index]={tostring(controls.activeOffset+index),entry.name,ShortRaid(entry.raidType),tostring(entry.memberCount or 0).."/"..tostring(entry.memberLimit or "?"),entry.createdAt and date("%Y-%m-%d %H:%M",entry.createdAt) or "Unknown",info.storage,Stamp(info.lastSave),""} end
     local widths=FitColumns(page,controls,controls.activeHeaders,values,width,52)
     local x=8
     for index,label in ipairs(controls.activeHeaders) do label:ClearAllPoints();label:SetPoint("TOPLEFT",page,"TOPLEFT",x,y-58);label:SetWidth(widths[index]-6);label:SetJustifyH("LEFT");label:Show();x=x+widths[index] end
@@ -75,9 +78,10 @@ local function ActiveSessions(page,controls,width,y)
     for index,row in ipairs(controls.activeRows) do
         local entry=list[index];row.raidId=entry and entry.id
         if entry then
-            row:ClearAllPoints();row:SetPoint("TOPLEFT",page,"TOPLEFT",8,rowY);row:SetWidth(widths[1]+widths[2]+widths[3]+widths[4]+widths[5])
-            local labels={row.number,row.name,row.raidType,row.members,row.created}
-            local values={tostring(controls.activeOffset+index),entry.name,entry.raidType,tostring(entry.memberCount or 0).."/"..tostring(entry.memberLimit or "?"),entry.createdAt and date("%Y-%m-%d %H:%M",entry.createdAt) or "Unknown"}
+            row:ClearAllPoints();row:SetPoint("TOPLEFT",page,"TOPLEFT",8,rowY);row:SetWidth(widths[1]+widths[2]+widths[3]+widths[4]+widths[5]+widths[6]+widths[7])
+            local labels={row.number,row.name,row.raidType,row.members,row.created,row.storage,row.lastSaved}
+            local info=api.GetRaidInfo(entry.id)
+            local values={tostring(controls.activeOffset+index),entry.name,ShortRaid(entry.raidType),tostring(entry.memberCount or 0).."/"..tostring(entry.memberLimit or "?"),entry.createdAt and date("%Y-%m-%d %H:%M",entry.createdAt) or "Unknown",info.storage,Stamp(info.lastSave)}
             local cellX=0;local rowHeight=26
             for column,label in ipairs(labels) do label:ClearAllPoints();label:SetPoint("LEFT",row,"LEFT",cellX,0);label:SetWidth(widths[column]-4);label:SetJustifyH("LEFT");label:SetJustifyV("MIDDLE");label:SetText(values[column]);label:SetHeight(0);rowHeight=math.max(rowHeight,UI.MeasureTextHeight(label,widths[column]-4,true)+10);cellX=cellX+widths[column] end
             row.join:ClearAllPoints();row.join:SetPoint("LEFT",row,"LEFT",cellX,0)
@@ -119,12 +123,12 @@ local function MeasureHistory(width, controls)
         local created,modified,duration=Raider.Services.RaidRes.GetSnapshotTimes(snapshot)
         local api=Raider.Runtime and Raider.Runtime.replica;local info=api and api.GetRaidInfo and api.GetRaidInfo(snapshot.syncRaidId) or {}
         modified=info.modifiedAt or modified
-        values[index]={index,snapshot.id,snapshot.raidName,Raider.Services.RaidRes.FormatDuration(duration),created and date("%Y-%m-%d %H:%M",created) or "Unknown",modified and date("%Y-%m-%d %H:%M",modified) or "Unknown",info.storage or "In memory",info.lastAuthor or "Unknown",""}
+        values[index]={index,snapshot.id,ShortRaid(snapshot.raidName),Raider.Services.RaidRes.FormatDuration(duration),created and date("%Y-%m-%d %H:%M",created) or "Unknown",modified and date("%Y-%m-%d %H:%M",modified) or "Unknown",info.storage or "In memory",info.lastAuthor or "Unknown",info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended",""}
     end
-    if not controls.historyHeaders[9] then controls.historyHeaders[9]=UI.CreateColumnLabel(page,"Actions","gold") end
+    if not controls.historyHeaders[10] then controls.historyHeaders[10]=UI.CreateColumnLabel(page,"Actions","gold") end
     local widths=FitColumns(page,controls,controls.historyHeaders,values,width,canEdit and 98 or 76)
-    local numberWidth,nameWidth,raidWidth,durationWidth,createdWidth,modifiedWidth,storageWidth,authorWidth=unpack(widths)
-    local dataWidth=0;for index=1,8 do dataWidth=dataWidth+widths[index] end
+    local numberWidth,nameWidth,raidWidth,durationWidth,createdWidth,modifiedWidth,storageWidth,authorWidth,statusWidth=unpack(widths)
+    local dataWidth=0;for index=1,9 do dataWidth=dataWidth+widths[index] end
     local x = 8
     for index = 1, table.getn(controls.historyHeaders) do
         local heading = controls.historyHeaders[index]
@@ -140,7 +144,7 @@ local function MeasureHistory(width, controls)
         local log = controls.historyLogButtons and controls.historyLogButtons[index]
         button:ClearAllPoints(); button:SetPoint("TOPLEFT", controls.historyCanvas, "TOPLEFT", 0, y); button:SetWidth(dataWidth)
         if snapshot then
-            if not button.storage then button.storage=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall");button.author=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall") end
+            if not button.storage then button.storage=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall");button.author=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall");button.status=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall") end
             local api=Raider.Runtime and Raider.Runtime.replica
             local info=api and api.GetRaidInfo and api.GetRaidInfo(snapshot.syncRaidId) or {storage="In memory",lastAuthor="Unknown"}
             local createdAt, modifiedAt, duration = Raider.Services.RaidRes.GetSnapshotTimes(snapshot)
@@ -150,12 +154,13 @@ local function MeasureHistory(width, controls)
             local height = math.max(26,
                 Cell(button.number, button, 4, numberWidth - 6, tostring(index)),
                 Cell(button.label, button, numberWidth, nameWidth, tostring(snapshot.id or "Unknown")),
-                Cell(button.raidName, button, numberWidth + nameWidth, raidWidth, snapshot.raidName or "Unknown zone"),
+                Cell(button.raidName, button, numberWidth + nameWidth, raidWidth, ShortRaid(snapshot.raidName)),
                 Cell(button.duration, button, durationX, durationWidth, durationText),
                 Cell(button.createdAt, button, durationX + durationWidth, createdWidth, createdAt and date("%Y-%m-%d %H:%M", createdAt) or "Unknown"),
                 Cell(button.savedAt, button, durationX + durationWidth + createdWidth, modifiedWidth, modifiedAt and date("%Y-%m-%d %H:%M", modifiedAt) or "Unknown"),
-                Cell(button.storage,button,dataWidth-storageWidth-authorWidth,storageWidth,info.storage),
-                Cell(button.author,button,dataWidth-authorWidth,authorWidth,info.lastAuthor or "Unknown"))
+                Cell(button.storage,button,dataWidth-storageWidth-authorWidth-statusWidth,storageWidth,info.storage),
+                Cell(button.author,button,dataWidth-authorWidth-statusWidth,authorWidth,info.lastAuthor or "Unknown"),
+                Cell(button.status,button,dataWidth-statusWidth,statusWidth,info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended"))
             button:SetHeight(height); button:Show()
             Raider.UI.Components.StyleSelectableTableRow(button, math.mod(index, 2) == 0, page.selectedRaidHistoryId == snapshot.id)
             load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(16); deleteButton:SetHeight(16)
@@ -176,6 +181,7 @@ local function MeasureHistory(width, controls)
 end
 
 function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
+    if page.convertRaidButton then page.convertRaidButton:Hide() end
     page.syncHistoryControls=controls;controls.canStartRaid=canStartRaid
     local fullWidth = math.max(1, Raider.UI.Components.GetFrameSpan(page) - 16)
     local width = fullWidth

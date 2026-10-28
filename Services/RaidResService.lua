@@ -830,11 +830,13 @@ function RaidResService.GetSnapshotTimes(snapshot)
     return createdAt, modifiedAt, duration
 end
 
+local raidAbbreviations={["Molten Core"]="MC",["Blackwing Lair"]="BWL",["Zul'Gurub"]="ZG",["Zul Gurub"]="ZG",["Onyxia's Lair"]="Ony",["Karazhan10"]="K10",["Karazhan 10"]="K10",["Lower Karazhan Halls"]="K10"}
+function RaidResService.ShortRaidName(name) return raidAbbreviations[name] or name or "Unknown" end
 function RaidResService.FormatDuration(duration)
     duration = tonumber(duration)
     if not duration then return "Unknown" end
     duration = math.max(0, math.floor(duration))
-    return string.format("%dh %02dmin %02ds", math.floor(duration / 3600), math.floor(math.mod(duration,3600) / 60), math.mod(duration,60))
+    return string.format("%02d:%02d:%02d", math.floor(duration / 3600), math.floor(math.mod(duration,3600) / 60), math.mod(duration,60))
 end
 
 function RaidResService.FormatRaidEndTime(endedAt)

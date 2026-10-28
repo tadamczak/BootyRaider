@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-dev.16 — 2026-10-28
+
+- Fix the leftover Convert to Raid control over the history toolbar.
+- Add saved status, active storage/last save, short raid names and HH:MM:SS duration.
+- Clarify conflict outcomes and raid comparisons with per-row Details and named value panes.
+- Exclude ended, unsaved journal-only sessions from the raid catalog; preserve recovery and deletion history.
+
 ## 1.0.0-dev.15 — 2026-10-28
 
 - Separate Leave Session from End & Save; ending now saves a snapshot before closing the shared session.

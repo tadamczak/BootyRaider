@@ -76,15 +76,35 @@ function Sync.FormatRecord(key,value,deleted)
     elseif string.sub(key or "",1,5)=="loot:" then
         return Field("Recipient:")..tostring(value.recipient or "Unknown").."\n\n"..Field("Item:")..Item(value.item).."\n\n"..Field("Quantity:")..tostring(value.count or 1)..(value.historyKey and ("\nAward reference: "..tostring(value.historyKey)) or "")
     end
-    return Sync.FormatValue(value,deleted)
+    local labels={name="Player",raidName="Raid",id="Raid ID",startedAt="Started",savedAt="Last saved",endedAt="Ended",exception="Loot rights exception",online="Online",subgroup="Group",raidRank="Raid role",level="Level",class="Class",guildRank="Guild rank"}
+    local lines={}
+    local function Fields(values,prefix,depth)
+        local keys={};for name in pairs(values) do table.insert(keys,name) end;table.sort(keys,function(a,b)return tostring(a)<tostring(b) end)
+        for _,name in ipairs(keys) do
+            local v=values[name];local label=labels[name] or string.gsub(tostring(name),"(%l)(%u)","%1 %2")
+            local path=prefix=="" and label or prefix.." / "..label
+            if type(v)=="table" then
+                if next(v)==nil then table.insert(lines,Field(path..":").."None")
+                elseif depth<8 then Fields(v,path,depth+1) end
+            else
+                if type(v)=="boolean" then v=v and "Yes" or "No" elseif name=="startedAt" or name=="savedAt" or name=="endedAt" then v=Timestamp(v) end
+                table.insert(lines,Field(path..":")..tostring(v))
+            end
+        end
+    end
+    Fields(value,"",0)
+    return table.getn(lines)>0 and table.concat(lines,"\n\n") or "No values."
+
 end
 local function RecordName(record)
     local key=record.key or "Raid data"
-    local value=record.variant and record.variant.value or record.base and record.base.value
+    local value=record.variant and record.variant.value or record.base and record.base.value or record.targetValue or record.sourceValue
     if string.sub(key,1,3)=="sr:" then return "Soft Reserve: "..tostring(type(value)=="table" and value.name or string.sub(key,4)) end
     if string.sub(key,1,5)=="loot:" then return "Loot: "..Item(type(value)=="table" and value.item).." - "..tostring(type(value)=="table" and value.recipient or "Unknown") end
     local names={["raid:metadata"]="Raid details",["raid:lifecycle"]="Raid session status",["raid:rules"]="Loot rules",["import:sr"]="SR import"}
-    return names[key] or key
+    if string.find(key,"^member:") then return "Raid member: "..tostring(type(value)=="table" and value.name or string.sub(key,8)) end
+    if string.find(key,"^entitlement:") then return "Loot eligibility: "..string.sub(key,13) end
+    return names[key] or "Raid record: "..key
 end
 local function Message(controller,text)
     controller.message:SetText(tostring(text or ""))
@@ -161,7 +181,7 @@ function Sync.Create(parent,api)
     end
     for _,button in pairs(controller.tabs) do button.bootyCaptionBottomInset=0;button.bootyLabelInsets={22,4};UI.ApplyButtonCaptionBaseline(button) end
     controller.officers=Label(frame,"",360,-36,470,36)
-    controller.headings={Label(frame,"Synchronized raid",16,-112,260,18),Label(frame,"Raid Type",290,-112,190,18),Label(frame,"Conflicts",490,-112,140,18),Label(frame,"Actions",690,-112,130,18)}
+    controller.headings={Label(frame,"Synchronized raid",16,-112,260,18),Label(frame,"Raid",290,-112,190,18),Label(frame,"Conflicts",490,-112,140,18),Label(frame,"Actions",690,-112,130,18)}
     for _,heading in ipairs(controller.headings) do heading:SetTextColor(unpack(UI.Theme.colors.goldText)) end
     controller.selection=Label(frame,"",10,-398,820,24)
     controller.recover=Button(frame,"Join session",10,-400,150,function() end);controller.recover:Hide()
@@ -330,7 +350,7 @@ function Sync.Create(parent,api)
         for index,row in ipairs(comparison.rows) do
             local entry=data.rows[index];row.entry=entry
             if entry then
-                row.label:SetText(entry.label or entry.key or entry.id)
+                row.label:SetText(RecordName(entry))
                 row:Show()
                 for choiceIndex,button in ipairs(row.buttons) do
                     local choice=entry.choices[choiceIndex]
@@ -342,7 +362,7 @@ function Sync.Create(parent,api)
         end
         comparison.empty:SetText("No conflicting values. Merge preserves both histories and their original authors.")
         if data.total==0 then comparison.empty:Show() else comparison.empty:Hide() end
-        comparison.count:SetText(data.total==0 and "0 decisions" or (comparison.offset+1).."-"..math.min(comparison.offset+pageSize,data.total).." / "..data.total)
+        comparison.count:SetText(data.total==0 and "No differences" or "Differences "..(comparison.offset+1).."–"..math.min(comparison.offset+pageSize,data.total).." of "..data.total)
         UI.SetButtonEnabled(comparison.previous,comparison.offset>0)
         UI.SetButtonEnabled(comparison.next,comparison.offset+pageSize<data.total)
         CompareProgress()
@@ -352,6 +372,8 @@ function Sync.Create(parent,api)
         if not comparison then
             comparison=Dialog(frame,"Compare independent raids",840,478);self.comparison=comparison
             comparison.heading=Label(comparison,"",10,-36,820,34)
+            comparison.recordHeading=Label(comparison,Field("Compared record"),16,-78,400,18)
+            comparison.choiceHeading=Label(comparison,Field("Choose what to keep"),440,-78,380,18)
             comparison.empty=Label(comparison,"",10,-84,820,48)
             comparison.rows={}
             comparison.message=Label(comparison,"",10,-384,820,42)
@@ -368,7 +390,7 @@ function Sync.Create(parent,api)
             end)
             for index=1,pageSize do
                 local row=UI.CreateControl(nil,comparison)
-                row:SetPoint("TOPLEFT",comparison,"TOPLEFT",10,-78-(index-1)*34)
+                row:SetPoint("TOPLEFT",comparison,"TOPLEFT",10,-100-(index-1)*34)
                 row:SetWidth(820);row:SetHeight(32)
                 row.label=Label(row,"",6,-4,504,26);row.buttons={}
                 if row.label.SetWordWrap then row.label:SetWordWrap(false) end
@@ -381,25 +403,54 @@ function Sync.Create(parent,api)
                     end)
                     row.buttons[choiceIndex]=button
                 end
-                row:SetScript("OnClick",function()
+                local function OpenDetails()
                     if not row.entry then return end
                     if not comparison.details then
-                        local details=Dialog(comparison,"Compared values",700,350)
-                        details.pane=TextPane(details,10,-40,680,298,"BootyRaidSyncMergeDetails"..id)
-                        function details:LayoutContent(w,h) self.pane:Resize(w-20,h-52) end
-                        details:SetScript("OnHide",function() details.pane.text:SetText("") end)
+                        local details=Dialog(comparison,"Compared values details",700,350)
+                        details.heading=Label(details,"",10,-36,680,28)
+                        details.leftHeading=Label(details,"",10,-72,330,34)
+                        details.rightHeading=Label(details,"",360,-72,330,34)
+                        details.leftPane=TextPane(details,10,-110,330,228,"BootyRaidCompareLeft"..id)
+                        details.rightPane=TextPane(details,360,-110,330,228,"BootyRaidCompareRight"..id)
+                        for _,pane in ipairs({details.leftPane,details.rightPane}) do
+                            pane.host:EnableMouse(true)
+                            pane.host:SetScript("OnEnter",function() UI.ShowItemTooltip(this);pane:SetText(Sync.FormatRecord(pane.key,pane.value,pane.deleted)) end)
+                            pane.host:SetScript("OnLeave",function() GameTooltip:Hide() end)
+                            pane.host:SetScript("OnMouseUp",function() UI.HandleItemClick(this) end)
+                        end
+                        function details:LayoutContent(w,h)
+                            self.heading:SetWidth(w-20);local half=(w-30)/2
+                            self.leftHeading:SetWidth(half);self.rightHeading:SetWidth(half)
+                            self.rightHeading:ClearAllPoints();self.rightHeading:SetPoint("TOPLEFT",self,"TOPLEFT",20+half,-72)
+                            self.rightPane.host:ClearAllPoints();self.rightPane.host:SetPoint("TOPLEFT",self,"TOPLEFT",20+half,-110)
+                            self.leftPane:Resize(half,h-122);self.rightPane:Resize(half,h-122)
+                        end
+                        details:SetScript("OnHide",function() details.leftPane:SetText("");details.rightPane:SetText("");details.leftPane.value=nil;details.rightPane.value=nil;details.leftPane.host.itemId=nil;details.rightPane.host.itemId=nil end)
                         comparison.details=details
                     end
-                    comparison.details.pane:SetText(tostring(row.entry.label or row.entry.key).."\n\nCurrent raid\n"..Sync.FormatRecord(row.entry.key,row.entry.targetValue,row.entry.targetDeleted).."\n\nIncoming raid\n"..Sync.FormatRecord(row.entry.key,row.entry.sourceValue,row.entry.sourceDeleted))
-                    comparison.details:Show();comparison.details:LayoutContent(comparison.details:GetWidth(),comparison.details:GetHeight())
-                    if UI.WindowStack then UI.WindowStack.Raise(comparison.details,comparison) end
-                end)
-                UI.AttachTooltip(row,"Compare raid records",function() return row.entry and ((row.entry.label or row.entry.key or "").."\nClick for complete values. Same award counts once; separate awards both remain.") or "" end)
+                    local details=comparison.details
+                    details.heading:SetText(Field(RecordName(row.entry)))
+                    details.leftHeading:SetText(Field("Current raid:")..tostring(controller.raidName or controller.raidId))
+                    details.rightHeading:SetText(Field("Compared raid:")..tostring(comparison.sourceName or comparison.sourceId))
+                    for _,pair in ipairs({{details.leftPane,row.entry.targetValue,row.entry.targetDeleted},{details.rightPane,row.entry.sourceValue,row.entry.sourceDeleted}}) do
+                        local pane,value=pair[1],pair[2];pane.key=row.entry.key;pane.value=value;pane.deleted=pair[3]
+                        pane.host.itemId=Raider.Services.ItemReference.Id(type(value)=="table" and (value.item or value.items and value.items[1]))
+                    end
+                    details.leftPane:SetText(Sync.FormatRecord(row.entry.key,row.entry.targetValue,row.entry.targetDeleted))
+                    details.rightPane:SetText(Sync.FormatRecord(row.entry.key,row.entry.sourceValue,row.entry.sourceDeleted))
+                    details:Show();details:LayoutContent(details:GetWidth(),details:GetHeight())
+                    if UI.WindowStack then UI.WindowStack.Raise(details,comparison) end
+                end
+                row:SetScript("OnClick",OpenDetails)
+                row.details=Button(row,"Details",0,-4,76,OpenDetails)
+                UI.SetClassicButtonIcon(row.details,"info",12,5,0)
+                UI.AttachTooltip(row,"Compare raid records",function() return row.entry and (RecordName(row.entry).."\nDetails shows both values. Same award counts once; separate awards both remain.") or "" end)
                 UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false)
                 comparison.rows[index]=row
             end
             function comparison:LayoutContent(w,h)
                 self.heading:SetWidth(w-20);self.message:SetWidth(w-20)
+                self.choiceHeading:ClearAllPoints();self.choiceHeading:SetPoint("TOPLEFT",self,"TOPLEFT",w-406,-78)
                 self.merge:ClearAllPoints();self.merge:SetPoint("BOTTOMRIGHT",self,"BOTTOMRIGHT",-30,26)
                 self.message:ClearAllPoints();self.message:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,52)
                 self.progress:ClearAllPoints();self.progress:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,26)
@@ -407,8 +458,9 @@ function Sync.Create(parent,api)
                 self.next:ClearAllPoints();self.next:SetPoint("LEFT",self.previous,"RIGHT",6,0)
                 self.count:ClearAllPoints();self.count:SetPoint("LEFT",self.next,"RIGHT",12,0)
                 for _,row in ipairs(self.rows) do
-                    row:SetWidth(w-20);row.label:SetWidth(w-336)
-                    for index,button in ipairs(row.buttons) do button:ClearAllPoints();button:SetPoint("RIGHT",row,"RIGHT",-6-(2-index)*154,0) end
+                    row:SetWidth(w-20);row.label:SetWidth(w-422)
+                    row.details:ClearAllPoints();row.details:SetPoint("RIGHT",row,"RIGHT",-6,0)
+                    for index,button in ipairs(row.buttons) do button:ClearAllPoints();button:SetPoint("RIGHT",row,"RIGHT",-88-(2-index)*154,0) end
                 end
             end
             comparison:SetScript("OnHide",function()
@@ -418,8 +470,9 @@ function Sync.Create(parent,api)
             end)
         end
         comparison.sourceId=sourceId;comparison.offset=0;comparison.choices={};comparison.token=nil
-        comparison.heading:SetText("Current raid: "..tostring(self.raidName or self.raidId).."\nIncoming raid: "..tostring(self.selected and self.selected.name or sourceId))
-        Message(comparison,"Choose each difference explicitly. Click a record to inspect both values.")
+        comparison.sourceName=self.selected and self.selected.name or sourceId
+        comparison.heading:SetText(Field("Current raid:")..tostring(self.raidName or self.raidId).."\n"..Field("Compared raid:")..tostring(comparison.sourceName))
+        Message(comparison,"Choose which value to keep. Details shows both recordings.")
         comparison:Show();comparison:LayoutContent(comparison:GetWidth(),comparison:GetHeight());CompareRefresh()
         if UI.WindowStack then UI.WindowStack.Raise(comparison,frame) end
     end
@@ -461,7 +514,7 @@ function Sync.Create(parent,api)
             local entry=all[index];row.entry=entry
             row.fullText=entry and (entry.name..(not entry.log and not entry.conflict and ("  |  "..tostring(entry.raidType).."  |  "..(entry.state=="ended" and "Ended" or "Active").."  |  "..tostring(entry.conflicts or 0).." conflicts") or "")) or ""
             row.label:SetText(entry and entry.name or "")
-            row.typeLabel:SetText(entry and not entry.log and not entry.conflict and entry.raidType or "")
+            row.typeLabel:SetText(entry and not entry.log and not entry.conflict and Raider.Services.RaidRes.ShortRaidName(entry.raidType) or "")
             row.stateLabel:SetText(entry and not entry.log and not entry.conflict and ((entry.conflicts or 0)>0 and tostring(entry.conflicts) or "None") or "")
             for kind,button in pairs(row.actions) do
                 local show=entry and not entry.log and ((entry.conflict and kind=="resolve") or (not entry.conflict and (kind=="conflicts" and (entry.conflicts or 0)>0 or kind=="compare" and self.raidId and self.raidId~=entry.id)))

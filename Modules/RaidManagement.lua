@@ -437,7 +437,7 @@ function RaidManagement.CreateActionControls(page)
     controls.historyEditButtons = {}
     controls.historyLogButtons = {}
     controls.historyHeaders = {}
-    for index, text in ipairs({"#", "Raid ID", "Raid Type", "Duration", "Created At", "Modified At", "Storage", "Last changed by"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
+    for index, text in ipairs({"#", "Raid ID", "Raid", "Duration", "Created At", "Modified At", "Storage", "Last changed by", "Status"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
     local historyIndex
     for historyIndex = 1, 10 do
         local button = Raider.UI.Components.CreateSelectionButton(controls.historyCanvas, nil, "", 380, 26); button.historyIndex = historyIndex; button:Hide()
@@ -2131,7 +2131,7 @@ end
 function RaidManagement.UpdateConvertRaidButton(page, lootMasterMode)
     local button = page.convertRaidButton
     if not button then return end
-    if lootMasterMode or Raider.Services.Raid.IsInRaid() then button:Hide(); return end
+    if lootMasterMode or Raider.Services.Raid.IsInRaid() or page.syncHistoryControls and page.syncHistoryControls.historyToolbar and page.syncHistoryControls.historyToolbar:IsShown() then button:Hide(); return end
     button:ClearAllPoints();button:SetPoint("RIGHT",page.raidSyncButton and page.raidSyncButton:IsShown() and page.raidSyncButton or page.raidInfoButton,"LEFT",-6,0)
     button:Show()
     Raider.UI.Components.SetButtonEnabled(button, Raider.Services.Raid.CanConvertPartyToRaid())

@@ -565,7 +565,7 @@ function Replica.Create(options)
             state.latestOperations[id]=latest and latest.id or false
         end
         local info={storage=state.loadedRaids[id] and not state.changedRaids[id] and "On disk" or "In memory",
-            lastAuthor=latest and latest.author or "Unknown",lastSave=metadata.savedAt,modifiedAt=latest and latest.timestamp}
+            lifecycle=Record(id,"raid:lifecycle") or "active",lastAuthor=latest and latest.author or "Unknown",lastSave=metadata.savedAt,modifiedAt=latest and latest.timestamp}
         state.raidInfo[id]=info;return info
     end
 
@@ -764,7 +764,9 @@ function Replica.Create(options)
         for id in pairs(journal.raids) do
             if Canonical(id)==id then
                 local metadata,record=Record(id,"raid:metadata")
-                if metadata then
+                local lifecycle=Record(id,"raid:lifecycle")
+                local saved=Record(id,"saved:snapshot")
+                if metadata and (lifecycle=="active" or lifecycle=="saved" or saved==true) then
                     local operation=record.revision and J.GetOperation(db,record.revision)
                     local lifecycle,lifecycleRecord=Record(id,"raid:lifecycle");lifecycle=lifecycle or "active"
                     local memberCount=0
@@ -1081,7 +1083,15 @@ function Replica.Create(options)
             if change.key=="raid:alias-decision" and change.value then change.value.selectionFingerprint=SelectionFingerprint(id,changes) end
         end
         local valid,failure=Replica.ValidateOperation({changes=changes});if not valid then return false,failure end
-        local ok,operation=J.Resolve(db,id,conflictId,changes,{subject="Officer conflict decision"},expectedHeads)
+        local metadata=Record(id,"raid:metadata") or {}
+        local detail={subject=metadata.id or id,raidName=metadata.id or id,count=table.getn(changes)}
+        if table.getn(changes)==1 and string.find(changes[1].key,"^sr:") then
+            local change=changes[1];local value=change.value or {}
+            detail.conflictKind="sr";detail.player=value.name or string.sub(change.key,4)
+            detail.item=not change.deleted and value.items and value.items[1] or nil
+            detail.exception=not change.deleted and value.exception or false
+        end
+        local ok,operation=J.Resolve(db,id,conflictId,changes,detail,expectedHeads)
         if ok and operation then api.OnOperation(operation,"applied",true) end
         return ok,not ok and operation or nil
     end
