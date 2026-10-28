@@ -116,3 +116,5 @@ Peer confirmation means another client has received data in memory. `/reload` or
 Officer synchronization requires the same transport build on all participating clients. After updating to 1.0.0-dev.5, reload every client to enable the native chat-compatible transport. Existing raid data is retained.
 
 Conflict review opens directly from the raid row. Select Your data or the named officer’s synced data, then Accept. The counter shows progress through conflicts. For a conflict containing several changes, each choice is collected before saving the complete decision. Item values support tooltips and item-link clicks. End Raid keeps unresolved loot and SR conflicts available for later review.
+
+During an active session, concurrent edits use the newest recorded change automatically. A causal later edit supersedes its ancestors; concurrent timestamps are compared, with an immutable change ID breaking ties. Both versions remain in history. Ending the raid makes unresolved differences available for manual review; reopening restores automatic latest-change selection. Saving a snapshot while the session remains active does not switch this policy.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.14 — 2026-10-28
+
+- Active raid edits automatically use the latest concurrent change; ended raids retain manual conflict review. Timestamp ties resolve consistently across officers.
+
 ## 1.0.0-dev.13 — 2026-10-28
 
 - Use measured, matching raid tables and compact synchronization controls. Keep session actions in Raid.

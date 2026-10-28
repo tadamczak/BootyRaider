@@ -140,7 +140,30 @@ local function EndsSessionOnly(operation)
     end
     return ends
 end
+-- Causal descendants already replace their parents in heads. Concurrent
+-- heads use timestamp then immutable operation ID, never arrival order.
+local function Latest(state,heads)
+    local best
+    for id in pairs(heads or {}) do
+        local op=state.operations[id];local previous=best and state.operations[best]
+        if op and (not previous or op.timestamp>previous.timestamp or op.timestamp==previous.timestamp and id>best) then best=id end
+    end
+    return best
+end
+local function LiveRaid(state,raid)
+    local id=Latest(state,raid.heads and raid.heads["raid:lifecycle"])
+    local value=id and Record(state,"raid:lifecycle",id)
+    return value and value.value=="active" and not value.deleted
+end
 local function Rebuild(state,raid)
+    if LiveRaid(state,raid) then
+        raid.conflicts={};raid.records={}
+        for key,heads in pairs(raid.heads) do
+            local id=Latest(state,heads);local value=id and Record(state,key,id)
+            if value then raid.records[key]={revision=value.revision,value=value.value,deleted=value.deleted,pendingCheckpoint=value.pendingCheckpoint,heads=Sorted(heads)} end
+        end
+        RefreshAuditIndex(state,raid);return
+    end
     if not auditIndexes[raid] then auditIndexes[raid]=AuditIndex(state,raid) end
     local blocked,links,disputed={},{},{}
     for key,heads in pairs(raid.heads) do
@@ -254,7 +277,8 @@ function C.Ensure(state)
             end
         end
     end
-    if state.causalModel~=1 then for _,raid in pairs(state.raids) do Rebuild(state,raid) end end
+    if state.causalModel~=1 or state.liveConflictPolicy~=1 then for _,raid in pairs(state.raids) do Rebuild(state,raid) end end
+    state.liveConflictPolicy=1
     state.causalModel=1
     initialized[state]=true
 end
@@ -267,6 +291,7 @@ function C.Publish(state,operation)
     local raid=state.raids[operation.raidId]
     local needsRebuild=raid.conflicts and next(raid.conflicts)~=nil
     for _,change in ipairs(operation.changes) do
+        if change.key=="raid:lifecycle" then needsRebuild=true end
         local heads=raid.heads and raid.heads[change.key]
         local parents={};for _,id in ipairs(Parents(change)) do parents[id]=true end
         for id in pairs(heads or {}) do if not parents[id] then needsRebuild=true end end
