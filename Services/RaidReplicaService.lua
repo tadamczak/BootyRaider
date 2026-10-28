@@ -334,6 +334,7 @@ function Replica.Create(options)
             local action=Raider.Modules and Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
             api.LogSync("Received update by "..tostring(operation.author)..": "..tostring(action))
         end
+        if localChange and operation.kind=="raid.leave" and db.syncJoinedRaidId==operation.raidId then db.syncJoinedRaidId=nil end
         local reindex=operation.kind=="raid.merge"
         for _,change in ipairs(operation.changes or {}) do if change.key=="raid:alias-decision" or string.find(change.key,"^merge:") then reindex=true end end
         local previousTargets={}

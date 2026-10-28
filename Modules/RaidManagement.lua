@@ -480,11 +480,15 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.SetClassicButtonGold(controls.export, true)
     controls.export:SetPoint("TOPRIGHT", page, "TOPRIGHT", -110, -42); controls.export:Hide()
     Raider.UI.Components.AttachTooltip(controls.export, "Save Raid", "Save this raid snapshot.")
-    controls.quit = Raider.UI.Components.CreateButton(page, nil, "End Raid", 90, 22); controls.quit:Hide()
+    controls.quit = Raider.UI.Components.CreateButton(page, nil, "End & Save", 110, 22); controls.quit:Hide()
     Raider.UI.Components.SetClassicButtonVariant(controls.quit, "red")
     Raider.UI.Components.SetClassicButtonIcon(controls.quit, "quit")
     Raider.UI.Components.SetClassicButtonGold(controls.quit, true)
-    Raider.UI.Components.AttachTooltip(controls.quit, "End Raid", "End this shared raid session for all officers. Saved raid data will continue to synchronize.")
+    Raider.UI.Components.AttachTooltip(controls.quit, "End & Save", "Save a snapshot and end the shared session for all officers.")
+    controls.leave = Raider.UI.Components.CreateButton(page, nil, "Leave Session", 120, 22); controls.leave:Hide()
+    Raider.UI.Components.SetClassicButtonIcon(controls.leave, "quit")
+    Raider.UI.Components.AttachTooltip(controls.leave, "Leave Session", "Leave on this character. Other officers can continue the raid.")
+    page.leaveButton = controls.leave
     controls.raidLeaderTools = Raider.UI.Components.CreateButton(page, nil, "Raid Leader Tools", 118, 22); controls.raidLeaderTools:Hide()
     controls.raidLeaderTools.bootyClassicKeepNormalSurface = true
     controls.raidLeaderTools.bootyHoverTextColor = {1, 0.82, 0.28}
@@ -1158,7 +1162,7 @@ function RaidManagement.MountChrome(page, chrome, actions)
         historyEmpty = actions.historyEmpty,
         export = actions.export,
         addStatistics = actions.addStatistics,
-        quit = actions.quit,
+        quit = actions.quit, leave = actions.leave,
         lootRules = actions.lootRules,
         sendLootRules = actions.sendLootRules,
         reycoin = actions.reycoin,
@@ -1372,7 +1376,7 @@ function RaidManagement.ShowMinimizedLootMasterState(page, rows)
     if page.toolDropdowns then for _, panel in pairs(page.toolDropdowns) do panel:Hide() end end
     local controls = page.refreshControls
     controls.leaderMode:Hide(); controls.resetFilters:Hide()
-    controls.unavailable:Hide(); controls.status:Hide(); controls.scan:Hide(); controls.testRaid:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.live:Hide()
+    controls.unavailable:Hide(); controls.status:Hide(); controls.scan:Hide(); controls.testRaid:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.live:Hide()
     controls.searchLabel:Hide(); controls.searchBox:Hide(); controls.refreshButton:Hide(); controls.filterLabel:Hide(); controls.classButton:Hide(); controls.rankButton:Hide(); controls.classPanel:Hide(); controls.rankPanel:Hide()
     RaidManagement.HideRaidHistoryControls(controls)
     RaidManagement.HideListTable(page, rows)
@@ -1388,7 +1392,7 @@ function RaidManagement.ShowNoRaidState(page, rows)
     local controls = page.refreshControls
     controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.mode:Hide(); controls.unavailable:Show()
     controls.unavailable:ClearAllPoints(); controls.unavailable:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -48); controls.unavailable:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, -48); controls.unavailable:SetHeight(0); if controls.unavailable.SetWordWrap then controls.unavailable:SetWordWrap(true) end
-    controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
+    controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
     controls.searchLabel:Hide(); controls.searchBox:Hide(); controls.refreshButton:Hide(); controls.filterLabel:Hide(); controls.classButton:Hide(); controls.rankButton:Hide(); controls.classPanel:Hide(); controls.rankPanel:Hide()
     RaidManagement.HideListTable(page, rows); controls.status:SetText(""); controls.unavailable:SetText("Start a new session, or load a saved raid. You can prepare a session before joining a raid.")
     RaidManagement.ShowRaidHistoryControls(page, controls, true)
@@ -1398,7 +1402,7 @@ function RaidManagement.ShowScanRequiredState(page, rows)
     if page.toolDropdowns then for _, panel in pairs(page.toolDropdowns) do panel:Hide() end end
     local controls = page.refreshControls
     controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.mode:Hide()
-    controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
+    controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
     controls.searchLabel:Hide(); controls.searchBox:Hide(); controls.refreshButton:Hide(); controls.filterLabel:Hide(); controls.classButton:Hide(); controls.rankButton:Hide()
     RaidManagement.HideListTable(page, rows); controls.status:SetText("")
     RaidManagement.ShowRaidHistoryControls(page, controls, true)
@@ -1408,7 +1412,7 @@ function RaidManagement.ShowScanningState(page, rows)
     local controls = page.refreshControls
     page.groupFrame:Hide(); page.viewButton:Hide()
     controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.mode:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.unavailable:Hide(); controls.status:Hide(); controls.scan:Hide()
-    controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
+    controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
     controls.searchLabel:Hide(); controls.searchBox:Hide(); controls.refreshButton:Hide(); controls.filterLabel:Hide(); controls.classButton:Hide(); controls.rankButton:Hide(); controls.classPanel:Hide(); controls.rankPanel:Hide()
     RaidManagement.HideRaidHistoryControls(controls); RaidManagement.HideListTable(page, rows)
     page.softReserveWarning:Hide(); page.missingSoftReserveWarning:Hide(); page.invalidSoftReserveWarning:Hide()
@@ -1454,12 +1458,12 @@ function RaidManagement.ShowReadyState(page, lootMasterMode)
     if lootMasterMode then
         page.lmConfigToggle:Show()
         if page.lmConfigOpen then page.lmConfigPanel:Show() end
-        controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.scan:Hide(); controls.resetLoot:Hide(); controls.live:Hide()
+        controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.scan:Hide(); controls.resetLoot:Hide(); controls.live:Hide()
         controls.mode:ClearAllPoints(); controls.mode:SetPoint("TOPRIGHT", page, "TOPRIGHT", -6, -8); controls.mode:SetWidth(18); controls.mode:SetHeight(18); Raider.UI.Components.SetWindowButtonAction(controls.mode, "close"); controls.mode:Show()
         controls.minimize:ClearAllPoints(); controls.minimize:SetPoint("RIGHT", controls.mode, "LEFT", -4, 0); controls.minimize:SetWidth(18); controls.minimize:SetHeight(18); controls.minimize:Show(); Raider.UI.Components.SetWindowButtonAction(controls.minimize, "minimize")
         controls.classButton:Hide(); controls.rankButton:Hide(); controls.classPanel:Hide(); controls.rankPanel:Hide()
     else
-        controls.resetFilters:Show(); controls.raidLeaderTools:Show(); controls.lootMasterTools:Show(); controls.addStatistics:Hide(); controls.export:Show(); controls.quit:Show()
+        controls.resetFilters:Show(); controls.raidLeaderTools:Show(); controls.lootMasterTools:Show(); controls.addStatistics:Hide(); controls.export:Show(); controls.quit:Show(); controls.leave:Show()
         controls.leaderMode:Hide(); controls.mode:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide()
         RaidManagement.UpdateActionAvailability(page, page.isTestRaid and page.isTestRaid())
         controls.live:Hide(); controls.scan:Hide(); controls.minimize:Hide()
@@ -2139,7 +2143,7 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
         Raider.UI.Components.SetProjectButtonOutline(row, row.bootyRaidHovered and settings.raidListShowHoverBorder, settings.raidListHoverBorderSize, settings.raidListHoverBorderColor)
     end
     row.name:SetText(shorten(member.name, 22))
-    local memberRank = tonumber(member.raidRank) or 0
+    local memberRank = page.currentRaidRoles and (page.currentRaidRoles[string.lower(member.name or "")] or 0) or tonumber(member.raidRank) or 0
     local showRole = not lootMasterMode and BootyRaiderDB.raidListShowRoleIcon and memberRank > 0
     if showRole then
         row.crown:SetTexture(memberRank == 2 and "Interface\\GroupFrame\\UI-Group-LeaderIcon" or "Interface\\GroupFrame\\UI-Group-AssistantIcon")
@@ -2284,6 +2288,13 @@ function RaidManagement.KeepSelectionVisible(scrollFrame, members, selectedName,
 end
 
 function RaidManagement.RenderListRows(page, rows, members, offset, visibleCount, rowStep, rowStartY, lootMasterMode, tableLeft, tableWidth, lootMethod, raidLootMasterIndex, selectedName, shorten, expandedHeight)
+    page.currentRaidRoles = nil
+    local runtime = Raider.Runtime
+    local attendance = runtime and runtime.GetAttendance and runtime.GetAttendance()
+    if attendance and not attendance.syncEnded and not (page.isTestRaid and page.isTestRaid()) then
+        page.raidRoleBuffer = page.raidRoleBuffer or {}
+        if Raider.Services.Raid.GetCurrentRoles(page.raidRoleBuffer) then page.currentRaidRoles = page.raidRoleBuffer end
+    end
     local rowY = rowStartY
     local rowIndex
     for rowIndex = 1, table.getn(rows) do
@@ -2846,7 +2857,8 @@ function RaidManagement.SetActions(page, viewButton, raidLeaderToolsButton, loot
         { button = raidLeaderToolsButton, width = 118 },
         { button = lootMasterToolsButton, width = 118 },
         { button = exportButton, width = 88 },
-        { button = quitButton, width = 64 },
+        { button = quitButton, width = 110 },
+        { button = page.leaveButton, width = 120 },
     }
 end
 
@@ -2973,6 +2985,9 @@ function RaidManagement.CreateQuickActions(options, loadSelectedRaid)
         elseif key == "save" then
             if not state.canSave then return false end
             OpenRaid(); return InvokeActionSource(controls.export)
+        elseif key == "leave" then
+            if not state.canQuit then return false end
+            OpenRaid(); return InvokeActionSource(controls.leave)
         elseif key == "quit" then
             if not state.canQuit then return false end
             OpenRaid(); return InvokeActionSource(controls.quit)
@@ -3121,11 +3136,11 @@ function RaidManagement.LayoutActions(page)
             page.classicIssues.bootyRaidIssuesText = page.classicIssues.bootyRaidIssuesText or page.classicIssues:GetText()
             page.classicIssues:SetText(page.classicIssues.bootyRaidIssuesText)
         end
-        page.exportButton.label:Show(); page.quitButton.label:Show()
+        page.exportButton.label:Show(); page.quitButton.label:Show(); page.leaveButton.label:Show()
         local nameWidth = math.max(48, nameLabel:GetStringWidth() + 4)
         local metaWidth = math.max(42, metaLabel:GetStringWidth() + 4)
         local savedWidth = math.min(pageWidth-24, math.max(108, page.classicSaved.label:GetStringWidth()+20))
-        local total = nameWidth + metaWidth + savedWidth + (showIssues and 96 or 0) + 108 + 90 + (showIssues and 40 or 32)
+        local total = nameWidth + metaWidth + savedWidth + (showIssues and 96 or 0) + 108 + 110 + 120 + (showIssues and 48 or 40)
         local compact = total > available
         page.classicActionOffset = compact and math.max(30, nameLabel:GetHeight()+4, metaLabel:GetHeight()+4) or 0
         local actionOffset = page.classicActionOffset
@@ -3141,8 +3156,8 @@ function RaidManagement.LayoutActions(page)
             left = PlaceRaidHeaderLabel(page, page.classicRaidName, math.min(nameWidth, math.max(1, pageWidth - savedWidth - metaWidth - 36)), top, left)
             left = PlaceRaidHeaderButton(page, page.classicSaved, savedWidth, top, left, scale)
             left = 6
-            local actionsWidth = 108 + 90 + (showIssues and 96 or 0)
-            local gaps = showIssues and 16 or 8
+            local actionsWidth = 108 + 110 + 120 + (showIssues and 96 or 0)
+            local gaps = showIssues and 24 or 16
             if iconOnly then
                 if showIssues then
                     page.classicIssues:SetText(string.gsub(page.classicIssues.bootyRaidIssuesText, "[^%d].*$", ""))
@@ -3150,12 +3165,14 @@ function RaidManagement.LayoutActions(page)
                 end
                 left = PlaceRaidHeaderButton(page, page.exportButton, 26, top - actionOffset, left, 1)
                 left = PlaceRaidHeaderButton(page, page.quitButton, 26, top - actionOffset, left, 1)
-                page.exportButton.label:Hide(); page.quitButton.label:Hide()
+                left = PlaceRaidHeaderButton(page, page.leaveButton, 26, top - actionOffset, left, 1)
+                page.exportButton.label:Hide(); page.quitButton.label:Hide(); page.leaveButton.label:Hide()
             else
                 scale = math.min(1, math.max(1, available - gaps) / actionsWidth)
                 if showIssues then left = PlaceRaidHeaderButton(page, page.classicIssues, math.floor(96 * scale), top - actionOffset, left, scale) end
                 left = PlaceRaidHeaderButton(page, page.exportButton, math.floor(108 * scale), top - actionOffset, left, scale)
-                left = PlaceRaidHeaderButton(page, page.quitButton, math.floor(90 * scale), top - actionOffset, left, scale)
+                left = PlaceRaidHeaderButton(page, page.quitButton, math.floor(110 * scale), top - actionOffset, left, scale)
+                left = PlaceRaidHeaderButton(page, page.leaveButton, math.floor(120 * scale), top - actionOffset, left, scale)
             end
         else
             page.classicRaidName:Show()
@@ -3163,7 +3180,7 @@ function RaidManagement.LayoutActions(page)
             left = PlaceRaidHeaderLabel(page, page.classicRaidName, nameWidth, top, left)
             left = PlaceRaidHeaderButton(page, page.classicSaved, savedWidth, top, left, scale)
             if showIssues then left = PlaceRaidHeaderButton(page, page.classicIssues, 96, top, left, scale) end
-            left = PlaceRaidHeaderButton(page, page.exportButton, 108, top, left, scale); left = PlaceRaidHeaderButton(page, page.quitButton, 90, top, left, scale)
+            left = PlaceRaidHeaderButton(page, page.exportButton, 108, top, left, scale); left = PlaceRaidHeaderButton(page, page.quitButton, 110, top, left, scale); left = PlaceRaidHeaderButton(page, page.leaveButton, 120, top, left, scale)
         end
         page.classicActionScale = scale
         UI.SetButtonLabelInsets(page.classicSaved, 8, 4)
@@ -4210,7 +4227,7 @@ function RaidManagement.AttachActionHandlers(options)
         CancelPreparedSave()
         local request, exists = options.prepareRaidSave({raidId=raidId,saveRaidStatistics=saveStatistics,saveAttendance=saveAttendance,saveCSR=saveCSR,
             saveRaidEndTime=not saveDialog.hasEndTime and saveDialog.endTimeCheck:GetChecked() and true or false,
-            modifyRaidEndTime=modifyEnd,endedAt=endedAt})
+            modifyRaidEndTime=modifyEnd,endedAt=endedAt,endSession=saveDialog.endSession})
         if not request then SaveFailure(exists); return end
         pendingSaveRequest = request
         if exists then
@@ -4222,17 +4239,20 @@ function RaidManagement.AttachActionHandlers(options)
         else SubmitSave(request) end
     end)
     saveDialog.Open = function(self)
+        self.save:SetText(self.endSession and "End & Save" or "Save")
+        self.title:SetText(self.endSession and "End & Save" or "Save Raid")
         CancelPreparedSave(); overwriteDialog:Hide()
         local attendance=options.getAttendance and options.getAttendance()
         self.attendanceOwner=attendance
         local flags=attendance and attendance.saveOptions
         self.originalEndTime=attendance and tonumber(attendance.endedAt)
-        self.hasEndTime=self.originalEndTime~=nil
+        self.hasEndTime=not self.endSession and self.originalEndTime~=nil
         local offset=self.hasEndTime and 28 or 0
         self:SetHeight(250+offset)
         self.endTimeCheck:ClearAllPoints();self.endTimeCheck:SetPoint("TOPLEFT",self,"TOPLEFT",18,-70-offset)
-        self.endTimeCheck.label:SetText(self.hasEndTime and "Modify raid end time" or "Save raid end time")
-        self.endTimeCheck:SetChecked(not self.hasEndTime and attendance and not attendance._loadedSnapshotId)
+        self.endTimeCheck.label:SetText(self.endSession and "End session for all officers" or self.hasEndTime and "Modify raid end time" or "Save raid end time")
+        self.endTimeCheck:SetChecked(self.endSession or not self.hasEndTime and attendance and not attendance._loadedSnapshotId)
+        Raider.UI.Components.SetButtonEnabled(self.endTimeCheck,not self.endSession)
         if self.hasEndTime then self.endTimeLabel:Show();self.raidEndTime:Show() else self.endTimeLabel:Hide();self.raidEndTime:Hide() end
         self.error:ClearAllPoints();self.error:SetPoint("TOPLEFT",self,"TOPLEFT",18,-98-offset);self.error:SetWidth(304);self.error:SetHeight(22)
         self.statistics:ClearAllPoints();self.statistics:SetPoint("TOPLEFT",self,"TOPLEFT",18,-126-offset)
@@ -4243,29 +4263,31 @@ function RaidManagement.AttachActionHandlers(options)
         self.raidId:SetText(attendance and (attendance.snapshotId or (attendance.softReserveImport and attendance.softReserveImport.id)) or "")
         self.error:Hide();SyncAttendanceOption(); self:Show();self.raidId:SetFocus();self.raidId:HighlightText()
     end
-    options.page.OpenSaveDialog = function(contextKey) saveDialog.transitionContext=contextKey;saveDialog:Open() end
+    options.page.OpenSaveDialog = function(contextKey) saveDialog.transitionContext=contextKey;saveDialog.endSession=false;saveDialog:Open() end
     saveDialog:Hide()
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(saveDialog, {owner = options.page}) end
     options.page.saveSessionDialog = saveDialog
     controls.export:SetScript("OnClick", function()
         if options.isTestRaid and options.isTestRaid() then return end
         saveDialog.transitionContext = nil
+        saveDialog.endSession = false
         saveDialog:Open()
     end)
     controls.addStatistics:Hide()
-    StaticPopupDialogs["BOOTY_RAIDER_QUIT_RAID_SESSION"] = {
-        text = "End this shared raid session for ALL officers? Saved data will keep synchronizing. Unsaved changes are not saved as a snapshot.", button1 = "Quit", button2 = "Cancel",
-        OnAccept = function()
-            local ok,reason=options.quitRaidSession()
-            if ok==false then Raider.Runtime.Print(reason or "The raid session could not be ended.");return end
+    local leaveDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderLeaveSessionDialog", "Leave Session", "Leave", "quit")
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(leaveDialog, options.page) end
+    options.page.quitDialog = leaveDialog
+    controls.leave:SetScript("OnClick", function()
+        leaveDialog:Open("Leave this session on your character? Other officers can continue. No new snapshot will be created.", function()
+            local ok,reason=options.quitRaidSession(true)
+            if ok==false then Raider.Runtime.Print(reason or "Could not leave the session.");return end
             RaidManagement.ResetIssueAttention(options.page);options.refresh()
-        end,
-        timeout = 0, whileDead = 1, hideOnEscape = 1,
-    }
-    local quitDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderQuitRaidDialog", "Quit Raid", "Quit", "quit")
-    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(quitDialog, options.page) end
-    options.page.quitDialog = quitDialog
-    controls.quit:SetScript("OnClick", function() quitDialog:Open("End this shared raid session for ALL officers? Saved data will keep synchronizing. Unsaved changes are not saved as a snapshot.", StaticPopupDialogs.BOOTY_RAIDER_QUIT_RAID_SESSION.OnAccept) end)
+        end)
+    end)
+    controls.quit:SetScript("OnClick", function()
+        if options.isTestRaid and options.isTestRaid() then options.quitRaidSession(true);options.refresh();return end
+        saveDialog.transitionContext=nil;saveDialog.endSession=true;saveDialog:Open()
+    end)
 
     sessionPrompt = Raider.UI.Components.CreateContainer("BootyRaiderRaidSessionPrompt", UIParent)
     sessionPrompt:SetWidth(390); sessionPrompt:SetHeight(150); sessionPrompt:SetPoint("CENTER", UIParent, "CENTER", 0, 80)

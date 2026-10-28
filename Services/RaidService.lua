@@ -1570,6 +1570,18 @@ function RaidService.IsPlayerLootMaster()
     return UnitName(unit) == UnitName("player")
 end
 
+function RaidService.GetCurrentRoles(target)
+    for name in pairs(target) do target[name]=nil end
+    local count=type(GetNumRaidMembers)=="function" and GetNumRaidMembers() or 0
+    if count<=0 or type(GetRaidRosterInfo)~="function" then return false end
+    for index=1,count do
+        local name,rank=GetRaidRosterInfo(index)
+        if not name then return false end
+        target[string.lower(name)]=tonumber(rank) or 0
+    end
+    return true
+end
+
 function RaidService.GetRaidMemberCount()
     return GetNumRaidMembers() or 0
 end

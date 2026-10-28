@@ -86,7 +86,7 @@ local function SaveRequest(options, attendance)
     return {raidId = raidId, saveRaidStatistics = options.saveRaidStatistics and true or false,
         saveAttendance = options.saveAttendance and true or false, saveCSR = options.saveCSR and true or false,
         saveRaidEndTime = not previousEnd and options.saveRaidEndTime == true or false,
-        modifyRaidEndTime = modifyEnd, endedAt = endedAt}
+        modifyRaidEndTime = modifyEnd, endedAt = endedAt, endSession = options.endSession == true}
 end
 
 function Session:PrepareSave(options)
@@ -98,7 +98,7 @@ function Session:PrepareSave(options)
     request.raidId = canonical or request.raidId
     local confirmation = {attendance = attendance, raidId = request.raidId, snapshot = snapshot, statistic = statistic,
         saveRaidStatistics = request.saveRaidStatistics, saveAttendance = request.saveAttendance, saveCSR = request.saveCSR,
-        saveRaidEndTime = request.saveRaidEndTime, modifyRaidEndTime = request.modifyRaidEndTime, endedAt = request.endedAt}
+        saveRaidEndTime = request.saveRaidEndTime, modifyRaidEndTime = request.modifyRaidEndTime, endedAt = request.endedAt, endSession = request.endSession}
     self.preparedSave = confirmation
     request.confirmation = confirmation
     return request, canonical ~= nil
@@ -229,7 +229,7 @@ function Session:Complete(saveOptions)
                 or confirmation.raidId ~= request.raidId or confirmation.snapshot ~= snapshot or confirmation.statistic ~= statistic
                 or confirmation.saveRaidStatistics ~= request.saveRaidStatistics or confirmation.saveAttendance ~= request.saveAttendance
                 or confirmation.saveCSR ~= request.saveCSR or confirmation.saveRaidEndTime ~= request.saveRaidEndTime
-                or confirmation.modifyRaidEndTime ~= request.modifyRaidEndTime or confirmation.endedAt ~= request.endedAt then
+                or confirmation.endSession ~= request.endSession or confirmation.modifyRaidEndTime ~= request.modifyRaidEndTime or confirmation.endedAt ~= request.endedAt then
                 self:CancelPreparedSave(confirmation)
                 return false, "The raid or save destination changed. Review the save options and try again."
             end
@@ -241,7 +241,7 @@ function Session:Complete(saveOptions)
         for key, value in pairs(attendance) do staged[key] = value end
         staged.snapshotId, staged._loadedSnapshotId = request.raidId, nil
         local savedAt = dependencies.now()
-        local endedAt = request.saveRaidEndTime and savedAt or request.endedAt
+        local endedAt = (request.endSession or request.saveRaidEndTime) and savedAt or request.endedAt
         local startedAt = tonumber(attendance.sessionStartedAt or attendance.createdAt)
         if endedAt and (not startedAt or endedAt < startedAt or endedAt > savedAt) then
             return false,"Raid end time must be between the raid start and the current time."
@@ -261,7 +261,7 @@ function Session:Complete(saveOptions)
         if Raider.Services.RaidAudit then
             preparedSnapshot=dependencies.raidRes.BuildSnapshot(staged)
             if not preparedSnapshot then return false,"The raid snapshot could not be prepared." end
-            local ok,reason=Raider.Services.RaidAudit.Save(staged,entry,preparedSnapshot)
+            local ok,reason=Raider.Services.RaidAudit.Save(staged,entry,preparedSnapshot,request.endSession)
             if not ok then return false,reason end
             if entry then entry.syncRaidId=staged.syncRaidId end
             preparedSnapshot.syncRaidId=staged.syncRaidId
@@ -332,13 +332,15 @@ function Session:ClearAttendance()
     self.dependencies.database.StoreRaidAttendance(nil)
 end
 
-function Session:Quit()
+function Session:Quit(leaveOnly)
     local dependencies = self.dependencies
     local wasTestRaid = dependencies.testRaid.IsActive()
     if not wasTestRaid and Raider.Services.RaidAudit then
         local attendance=dependencies.database.GetRaidAttendance()
         if attendance then
-            local ok,reason=Raider.Services.RaidAudit.End(attendance)
+            local audit=Raider.Services.RaidAudit
+            local ok,reason
+            if leaveOnly then ok,reason=audit.Leave(attendance) else ok,reason=audit.End(attendance) end
             if not ok then return false,reason end
         end
     end

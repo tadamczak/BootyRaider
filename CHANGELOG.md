@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-dev.15 — 2026-10-28
+
+- Separate Leave Session from End & Save; ending now saves a snapshot before closing the shared session.
+- Show live raid roles from the game roster instead of stale synchronized crowns.
+- Compact Raid Log with gold timestamps, smaller minimum size and concise before/after details.
+
 ## 1.0.0-dev.14 — 2026-10-28
 
 - Active raid edits automatically use the latest concurrent change; ended raids retain manual conflict review. Timestamp ties resolve consistently across officers.

@@ -118,9 +118,9 @@ function RaidSessionController.Create(dependencies)
         return true
     end
 
-    function controller:Quit()
+    function controller:Quit(leaveOnly)
         if dependencies.cancelRaidScan then dependencies.cancelRaidScan() end
-        local ok,reason=session:Quit()
+        local ok,reason=session:Quit(leaveOnly)
         if ok==false then return false,reason end
         if session.CommitPendingRaid then session:CommitPendingRaid() end
         pendingState = nil

@@ -96,7 +96,8 @@ local function QuickMenu(host)
         Entry("Test Raid","groups",function() return Run("test") end,state.canTest),
         Entry("Load Raid","archive",nil,state.canLoad and table.getn(snapshots)>0,snapshots),
         Entry("Save Raid","save",function() return Run("save") end,state.canSave),
-        Entry("End Raid","quit",function() return Run("quit") end,state.canQuit),
+        Entry("End & Save","save",function() return Run("quit") end,state.canQuit),
+        Entry("Leave Session","quit",function() return Run("leave") end,state.canQuit),
     }
     local stats=Entry("Raid Stats","raid_stats",function() return Runtime.OpenView("raidStatistics") end)
     local entries={Entry("Raid","raids",function() return Runtime.OpenView("raid") end,true,raid)}

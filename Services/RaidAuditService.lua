@@ -361,14 +361,15 @@ function Audit.Trade(attendance,sender,remainder,recipient,loot)
     table.insert(changes,{key="entitlement:"..string.lower(recipient.name),value=Audit.EntitlementValue(recipient)})
     return Audit.Commit(attendance,"loot.correct",changes,{subject=recipient.name,item=loot.name or loot.itemId})
 end
-function Audit.Save(attendance,entry,snapshot)
+function Audit.Save(attendance,entry,snapshot,endSession)
     local changes=Audit.MemberChanges(attendance.members,attendance)
     if attendance.softReserveImport then table.insert(changes,{key="import:sr",value=Audit.ImportValue(attendance.softReserveImport)}) end
     local prepared,reason=PrepareLiveLoot(attendance,changes)
     if not prepared then return false,reason end
     AppendEntitlements(changes,attendance)
     table.insert(changes,{key="raid:metadata",value=Audit.Metadata(attendance)})
-    table.insert(changes,Recorder("saved"))
+    table.insert(changes,Recorder(endSession and "ended" or "saved"))
+    if endSession then table.insert(changes,{key="raid:lifecycle",value="ended"}) end
     table.insert(changes,{key="raid:save",value=attendance.saveOptions or {}})
     table.insert(changes,{key="saved:snapshot",value=true})
     table.insert(changes,{key="saved:statistic",value=attendance.saveOptions and (attendance.saveOptions.saveRaidStatistics or attendance.saveOptions.saveCSR) or false})
@@ -382,7 +383,7 @@ function Audit.Save(attendance,entry,snapshot)
                 lootRank=member.lootRank,attendance=member.attendance,srItems=member.srItems,lootItems=lootItems}})
         end
     end
-    local ok,operation=Audit.Commit(attendance,"raid.save",changes,{subject=attendance.snapshotId or ""})
+    local ok,operation=Audit.Commit(attendance,"raid.save",changes,{subject=attendance.snapshotId or "",endSession=endSession and true or nil})
     if ok then
         PublishLootIds(prepared,entry,snapshot)
         attendance.syncLocalAuditFailure=nil
@@ -391,6 +392,9 @@ function Audit.Save(attendance,entry,snapshot)
         end
     end
     return ok,operation
+end
+function Audit.Leave(attendance)
+    return Audit.Commit(attendance,"raid.leave",{Recorder("ended")},{subject=attendance.snapshotId or ""})
 end
 function Audit.End(attendance)
     if not attendance or IsTest() then return true end

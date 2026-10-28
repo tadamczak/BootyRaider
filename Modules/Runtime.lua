@@ -71,8 +71,8 @@ function Runtime.SaveSession(options)
     if saved then Runtime.CloseSessionPrompts(); Runtime.RefreshViews() end
     return saved,failure
 end
-function Runtime.QuitSession()
-    local ok,reason=Runtime.sessionController:Quit()
+function Runtime.QuitSession(leaveOnly)
+    local ok,reason=Runtime.sessionController:Quit(leaveOnly)
     if ok==false then return false,reason end
     Runtime.CloseSessionPrompts()
     return true
