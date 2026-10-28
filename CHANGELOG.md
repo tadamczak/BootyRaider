@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.12 — 2026-10-28
+
+- Open conflicts directly in a sectioned comparison with one Accept action; keep unresolved loot/SR when ending a raid. Color connected-officer captions gold.
+
 ## 1.0.0-dev.11 — 2026-10-28
 
 - Keep the saved-raid scrollbar tied to measured overflow; add full active-session columns.

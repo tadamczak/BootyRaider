@@ -393,7 +393,13 @@ function Audit.Save(attendance,entry,snapshot)
     return ok,operation
 end
 function Audit.End(attendance)
-    return Audit.Commit(attendance,"raid.end",{{key="raid:lifecycle",value="ended"},Recorder("ended")},{subject=attendance.snapshotId or ""})
+    if not attendance or IsTest() then return true end
+    -- Ending explicitly chooses lifecycle only; disputed SR/loot remains unresolved.
+    local ok,operation=Raider.Services.RaidJournal.Commit(Store(),Audit.EnsureIdentity(attendance),"raid.end",
+        {{key="raid:lifecycle",value="ended"},Recorder("ended")},{subject=attendance.snapshotId or ""},true,true)
+    local replica=Raider.Runtime and Raider.Runtime.replica
+    if ok and operation and replica then replica.OnOperation(operation,"applied",true) end
+    return ok,operation
 end
 function Audit.GetLog(record,offset,limit)
     local id=type(record)=="table" and record.syncRaidId or record

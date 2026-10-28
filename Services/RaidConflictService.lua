@@ -131,6 +131,15 @@ local function AddHeads(raid,operation)
         heads[operation.id]=true
     end
 end
+local function EndsSessionOnly(operation)
+    if operation.kind~="raid.end" or not operation.resolution then return false end
+    local ends=false
+    for _,change in ipairs(operation.changes) do
+        if change.key=="raid:lifecycle" and change.value=="ended" and not change.deleted then ends=true
+        elseif not (string.find(change.key,"^recorder:") and type(change.value)=="table" and change.value.state=="ended" and not change.deleted) then return false end
+    end
+    return ends
+end
 local function Rebuild(state,raid)
     if not auditIndexes[raid] then auditIndexes[raid]=AuditIndex(state,raid) end
     local blocked,links,disputed={},{},{}
@@ -163,9 +172,11 @@ local function Rebuild(state,raid)
     end
     for _,id in ipairs(raid.operationIds) do
         local operation=state.operations[id]
+        local endsSession=EndsSessionOnly(operation)
         for _,change in ipairs(operation.changes) do
             for _,parent in ipairs(Parents(change)) do
-                if blocked[parent] then
+                -- An explicit session stop does not decide disputed loot/SR values.
+                if blocked[parent] and not endsSession then
                     blocked[id]=true;links[id]=links[id] or {};links[parent]=links[parent] or {}
                     links[id][parent]=true;links[parent][id]=true
                 end

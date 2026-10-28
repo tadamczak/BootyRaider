@@ -114,3 +114,5 @@ If recording a confirmed loot receipt fails, use **Save Raid** to retry. Recover
 Peer confirmation means another client has received data in memory. `/reload` or normal logout writes SavedVariables; losing every unsaved copy cannot be repaired. A recording gap cannot reconstruct events nobody observed. Raid Log retains author attribution supplied by trusted guild officers; it is not tamper-proof evidence.
 
 Officer synchronization requires the same transport build on all participating clients. After updating to 1.0.0-dev.5, reload every client to enable the native chat-compatible transport. Existing raid data is retained.
+
+Conflict review opens directly from the raid row. Compare the agreed value with an officer proposal, optionally edit the final value, then Accept. For a conflict containing several changes, Accept & next collects each decision before saving the whole conflict. End Raid keeps unresolved loot and SR conflicts available for later review.
