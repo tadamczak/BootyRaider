@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-dev.18 — 2026-10-29
+
+- Unify raid row actions at 24px with matching Join/Load icons and distinct sync-on/off icons.
+- Compact Session and match its open state and Sync tabs to Loot Master Tools; remove redundant active-session Sync.
+- Reapply separator texture bounds at the inner window border.
+
 ## 1.0.0-dev.17 — 2026-10-28
 
 - Choose Raid sync when creating a session; toggle sharing for active and saved raids.

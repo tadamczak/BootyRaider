@@ -449,11 +449,11 @@ function RaidManagement.CreateActionControls(page)
         button.raidName = Raider.UI.Components.CreateLabel(button, nil, "OVERLAY", "GameFontHighlightSmall")
         button.savedAt:SetPoint("RIGHT", button, "RIGHT", -8, 0); button.savedAt:SetWidth(112); button.savedAt:SetJustifyH("RIGHT"); button.savedAt:SetTextColor(0.78, 0.78, 0.72)
         controls.historyButtons[historyIndex] = button
-        local deleteButton = Raider.UI.Components.CreateDeleteButton(controls.historyCanvas, nil, 18, 2)
+        local deleteButton = Raider.UI.Components.CreateGoldToolbarButton(controls.historyCanvas, "trash")
         deleteButton.historyIndex = historyIndex; deleteButton:Hide()
         Raider.UI.Components.AttachTooltip(deleteButton, "Delete saved raid", "Permanently remove this raid snapshot from saved history.")
         controls.historyDeleteButtons[historyIndex] = deleteButton
-        local load = Raider.UI.Components.CreateIconButton(controls.historyCanvas, nil, "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up", 18, 2)
+        local load = Raider.UI.Components.CreateGoldToolbarButton(controls.historyCanvas, "start")
         load.historyIndex = historyIndex; load:Hide()
         Raider.UI.Components.AttachTooltip(load, "Load raid", "Open this saved raid snapshot.")
         controls.historyLoadButtons[historyIndex] = load
@@ -489,8 +489,11 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.SetClassicButtonIcon(controls.leave, "quit")
     Raider.UI.Components.AttachTooltip(controls.leave, "Leave Session", "Leave on this character. Other officers can continue the raid.")
     page.leaveButton = controls.leave
-    controls.session=Raider.UI.Components.CreateButton(page,nil,"Session",108,22);controls.session:Hide()
-    Raider.UI.Components.SetClassicButtonIcon(controls.session,"archive")
+    controls.session=Raider.UI.Components.CreateButton(page,nil,"Session",88,22);controls.session:Hide()
+    controls.session.bootyClassicKeepNormalSurface=true
+    controls.session.bootyHoverTextColor={1,0.82,0.28}
+    Raider.UI.Components.SetClassicButtonIcon(controls.session,"list",13,7,0)
+    Raider.UI.Components.AttachGoldHoverBorder(controls.session,0.35,0.35,0.35,1)
     page.sessionButton=controls.session
     controls.raidLeaderTools = Raider.UI.Components.CreateButton(page, nil, "Raid Leader Tools", 118, 22); controls.raidLeaderTools:Hide()
     controls.raidLeaderTools.bootyClassicKeepNormalSurface = true
@@ -1438,7 +1441,7 @@ function RaidManagement.UpdateActionAvailability(page, testRaid)
         local attendance=page.listRenderer and page.listRenderer.getData()
         local count=attendance and attendance.syncConflictCount or 0
         controls.raidSync:SetText("Sync")
-        controls.raidSync:ClearAllPoints();controls.raidSync:SetPoint("RIGHT",page.raidInfoButton,"LEFT",-6,0);controls.raidSync:Show()
+        controls.raidSync:Hide()
         Raider.UI.Components.SetButtonEnabled(controls.raidSync,not testRaid)
     end
     if controls.live then
@@ -2859,7 +2862,7 @@ function RaidManagement.SetActions(page, viewButton, raidLeaderToolsButton, loot
         { button = viewButton, width = 92 },
         { button = raidLeaderToolsButton, width = 118 },
         { button = lootMasterToolsButton, width = 118 },
-        { button = page.sessionButton, width = 108 },
+        { button = page.sessionButton, width = 88 },
     }
 end
 
@@ -3146,7 +3149,7 @@ function RaidManagement.LayoutActions(page)
         local nameWidth = math.max(48, nameLabel:GetStringWidth() + 4)
         local metaWidth = math.max(42, metaLabel:GetStringWidth() + 4)
         local savedWidth = math.min(pageWidth-24, math.max(108, page.classicSaved.label:GetStringWidth()+20))
-        local total = nameWidth + metaWidth + savedWidth + (showIssues and 96 or 0) + 108 + (showIssues and 48 or 40)
+        local total = nameWidth + metaWidth + savedWidth + (showIssues and 96 or 0) + 88 + (showIssues and 48 or 40)
         local compact = total > available
         page.classicActionOffset = compact and math.max(30, nameLabel:GetHeight()+4, metaLabel:GetHeight()+4) or 0
         local actionOffset = page.classicActionOffset
@@ -3162,7 +3165,7 @@ function RaidManagement.LayoutActions(page)
             left = PlaceRaidHeaderLabel(page, page.classicRaidName, math.min(nameWidth, math.max(1, pageWidth - savedWidth - metaWidth - 36)), top, left)
             left = PlaceRaidHeaderButton(page, page.classicSaved, savedWidth, top, left, scale)
             left = 6
-            local actionsWidth = 108 + (showIssues and 96 or 0)
+            local actionsWidth = 88 + (showIssues and 96 or 0)
             local gaps = showIssues and 24 or 16
             if iconOnly then
                 if showIssues then
@@ -3174,7 +3177,7 @@ function RaidManagement.LayoutActions(page)
             else
                 scale = math.min(1, math.max(1, available - gaps) / actionsWidth)
                 if showIssues then left = PlaceRaidHeaderButton(page, page.classicIssues, math.floor(96 * scale), top - actionOffset, left, scale) end
-                left = PlaceRaidHeaderButton(page, page.sessionButton, math.floor(108 * scale), top - actionOffset, left, scale)
+                left = PlaceRaidHeaderButton(page, page.sessionButton, math.floor(88 * scale), top - actionOffset, left, scale)
             end
         else
             page.classicRaidName:Show()
@@ -3182,7 +3185,7 @@ function RaidManagement.LayoutActions(page)
             left = PlaceRaidHeaderLabel(page, page.classicRaidName, nameWidth, top, left)
             left = PlaceRaidHeaderButton(page, page.classicSaved, savedWidth, top, left, scale)
             if showIssues then left = PlaceRaidHeaderButton(page, page.classicIssues, 96, top, left, scale) end
-            left=PlaceRaidHeaderButton(page,page.sessionButton,108,top,left,scale)
+            left=PlaceRaidHeaderButton(page,page.sessionButton,88,top,left,scale)
         end
         page.classicActionScale = scale
         UI.SetButtonLabelInsets(page.classicSaved, 8, 4)

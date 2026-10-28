@@ -177,6 +177,9 @@ function Sync.Create(parent,api)
     for index,value in ipairs({{"sessions","Raids"},{"log","Sync log"}}) do
         local key=value[1]
         controller.tabs[key]=Button(frame,value[2],10+(index-1)*98,-82,92,function() controller:SelectTab(key) end)
+        controller.tabs[key].bootyClassicKeepNormalSurface=true
+        controller.tabs[key].bootyHoverTextColor={1,0.82,0.28}
+        UI.AttachGoldHoverBorder(controller.tabs[key],0.35,0.35,0.35,1)
         UI.SetClassicButtonIcon(controller.tabs[key],key=="log" and "rules" or "refresh",13,7,0)
     end
     for _,button in pairs(controller.tabs) do button.bootyCaptionBottomInset=0;button.bootyLabelInsets={22,4};UI.ApplyButtonCaptionBaseline(button) end
@@ -566,7 +569,8 @@ function Sync.Create(parent,api)
         local headerHeight=math.max(22,UI.MeasureTextHeight(controller.officers,officerWidth,true));controller.officers:SetHeight(headerHeight)
         if not controller.toolbar then controller.toolbar=UI.CreateToolbarSurface(self,false,true);controller.toolbar:SetFrameLevel(self:GetFrameLevel());UI.SetSurfaceHorizontalBorders(controller.toolbar,false,true) end
         controller.toolbar.bootyBorderOutsetLeft=0;controller.toolbar.bootyBorderOutsetRight=0
-        controller.toolbar:ClearAllPoints();controller.toolbar:SetPoint("TOPLEFT",self,"TOPLEFT",0,-30);controller.toolbar:SetPoint("TOPRIGHT",self,"TOPRIGHT",0,-30);controller.toolbar:SetHeight(headerHeight+18);controller.toolbar:Show()
+        UI.SetSurfaceHorizontalBorders(controller.toolbar,false,true)
+        controller.toolbar:ClearAllPoints();controller.toolbar:SetPoint("TOPLEFT",self,"TOPLEFT",4,-30);controller.toolbar:SetPoint("TOPRIGHT",self,"TOPRIGHT",-4,-30);controller.toolbar:SetHeight(headerHeight+18);controller.toolbar:Show()
         local tableY=30+headerHeight+18+10
         controller.message:ClearAllPoints();controller.message:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,40);controller.message:SetWidth(w-20)
         controller.previous:ClearAllPoints();controller.previous:SetPoint("BOTTOMLEFT",self,"BOTTOMLEFT",10,10)

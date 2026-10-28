@@ -25,6 +25,12 @@ function RaidManagement.ToggleRaidSync(id)
     Raider.Runtime.RefreshViews()
     if Raider.Modules.RaidSync then Raider.Modules.RaidSync.RefreshVisible() end
 end
+local function SyncButtonState(button,enabled)
+    button.bootySyncEnabled=enabled and true or false
+    local key=enabled and "refresh" or "disable"
+    button.icon:SetTexture("Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\"..key..".tga")
+    UI.AttachTooltip(button,enabled and "Raid sync: on" or "Raid sync: off",enabled and "Stop synchronization on this character. Previously shared copies remain with other officers." or "Start synchronization with authorized officers.")
+end
 local function FitColumns(page,controls,headers,values,available,actionWidth)
     if not controls.columnMeasure then controls.columnMeasure=UI.CreateLabel(page,nil,"OVERLAY","GameFontHighlightSmall");controls.columnMeasure:Hide() end
     local measure=controls.columnMeasure;local columns={};local total=0
@@ -54,7 +60,7 @@ local function ActiveSessions(page,controls,width,y)
             row.raidType=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
             row.number=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall");row.members=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall");row.created=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
             row.storage=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall");row.lastSaved=UI.CreateLabel(row,nil,"OVERLAY","GameFontHighlightSmall")
-            row.join=UI.CreateButton(row,nil,"",24,22);UI.SetClassicButtonIcon(row.join,"start",13,6,0)
+            row.join=UI.CreateGoldToolbarButton(row,"start");row.join:SetWidth(24);row.join:SetHeight(24)
             UI.AttachTooltip(row.join,"Join session","Continue this shared raid session.")
             row.join:SetScript("OnClick",function()
                 local allowed,reason=Raider.Modules.RaidSyncRuntime.CanJoinRaid(row.raidId)
@@ -62,7 +68,7 @@ local function ActiveSessions(page,controls,width,y)
                 if not allowed then Raider.Runtime.Print(reason) end
                 Raider.Runtime.RefreshViews()
             end)
-            row.sync=UI.CreateButton(row,nil,"",24,22);UI.SetClassicButtonIcon(row.sync,"refresh",13,6,0)
+            row.sync=UI.CreateGoldToolbarButton(row,"refresh");row.sync:SetWidth(24);row.sync:SetHeight(24)
             UI.AttachTooltip(row.sync,"Raid sync","Toggle synchronization on this character. Stopping does not remove copies already shared with other officers.")
             row.sync:SetScript("OnClick",function() RaidManagement.ToggleRaidSync(row.raidId) end)
             controls.activeRows[index]=row
@@ -97,7 +103,7 @@ local function ActiveSessions(page,controls,width,y)
             local cellX=0;local rowHeight=26
             for column,label in ipairs(labels) do label:ClearAllPoints();label:SetPoint("LEFT",row,"LEFT",cellX,0);label:SetWidth(widths[column]-4);label:SetJustifyH("LEFT");label:SetJustifyV("MIDDLE");label:SetText(values[column]);label:SetHeight(0);rowHeight=math.max(rowHeight,UI.MeasureTextHeight(label,widths[column]-4,true)+10);cellX=cellX+widths[column] end
             row.join:ClearAllPoints();row.join:SetPoint("LEFT",row,"LEFT",cellX,0)
-            row.sync:ClearAllPoints();row.sync:SetPoint("LEFT",row.join,"RIGHT",2,0);UI.SetClassicButtonSelected(row.sync,api.IsRaidSyncEnabled(entry.id))
+            row.sync:ClearAllPoints();row.sync:SetPoint("LEFT",row.join,"RIGHT",2,0);SyncButtonState(row.sync,api.IsRaidSyncEnabled(entry.id))
             UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false);UI.SetAlternatingRowColor(row,nil,index);row:SetHeight(rowHeight);row:Show();rowY=rowY-rowHeight-2
         else row:Hide() end
     end
@@ -140,7 +146,7 @@ local function MeasureHistory(width, controls)
         values[index]={index,snapshot.id,ShortRaid(snapshot.raidName),Raider.Services.RaidRes.FormatDuration(duration),created and date("%Y-%m-%d %H:%M",created) or "Unknown",modified and date("%Y-%m-%d %H:%M",modified) or "Unknown",info.storage or "In memory",info.lastAuthor or "Unknown",info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended",""}
     end
     if not controls.historyHeaders[10] then controls.historyHeaders[10]=UI.CreateColumnLabel(page,"Actions","gold") end
-    local widths=FitColumns(page,controls,controls.historyHeaders,values,width,canEdit and 124 or 102)
+    local widths=FitColumns(page,controls,controls.historyHeaders,values,width,canEdit and 134 or 108)
     local numberWidth,nameWidth,raidWidth,durationWidth,createdWidth,modifiedWidth,storageWidth,authorWidth,statusWidth=unpack(widths)
     local dataWidth=0;for index=1,9 do dataWidth=dataWidth+widths[index] end
     local x = 8
@@ -160,7 +166,7 @@ local function MeasureHistory(width, controls)
         if snapshot then
             if not button.storage then button.storage=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall");button.author=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall");button.status=UI.CreateLabel(button,nil,"OVERLAY","GameFontHighlightSmall") end
             if not button.sync then
-                button.sync=UI.CreateButton(controls.historyCanvas,nil,"",22,22);UI.SetClassicButtonIcon(button.sync,"refresh",13,5,0)
+                button.sync=UI.CreateGoldToolbarButton(controls.historyCanvas,"refresh");button.sync:SetWidth(24);button.sync:SetHeight(24)
                 UI.AttachTooltip(button.sync,"Raid sync","Toggle synchronization on this character. Stopping does not remove previously shared copies.")
                 button.sync:SetScript("OnClick",function() RaidManagement.ToggleRaidSync(button.syncRaidId) end)
             end
@@ -183,18 +189,18 @@ local function MeasureHistory(width, controls)
                 Cell(button.status,button,dataWidth-statusWidth,statusWidth,info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended"))
             button:SetHeight(height); button:Show()
             Raider.UI.Components.StyleSelectableTableRow(button, math.mod(index, 2) == 0, page.selectedRaidHistoryId == snapshot.id)
-            load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(16); deleteButton:SetHeight(16)
+            load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(24); deleteButton:SetHeight(24)
             load:ClearAllPoints(); load:SetPoint("LEFT", button, "RIGHT", 4, 0); load:Show()
             if edit then
-                edit:SetWidth(18); edit:SetHeight(18); edit:ClearAllPoints(); edit:SetPoint("LEFT", load, "RIGHT", 2, 0)
+                edit:SetWidth(24); edit:SetHeight(24); edit:ClearAllPoints(); edit:SetPoint("LEFT", load, "RIGHT", 2, 0)
                 if canEdit then edit:Show() else edit:Hide() end
             end
             if log then
-                log:SetWidth(18); log:SetHeight(18); log:ClearAllPoints(); log:SetPoint("LEFT", canEdit and edit or load, "RIGHT", 2, 0)
+                log:SetWidth(24); log:SetHeight(24); log:ClearAllPoints(); log:SetPoint("LEFT", canEdit and edit or load, "RIGHT", 2, 0)
                 Raider.UI.Components.SetButtonEnabled(log,snapshot.syncRaidId~=nil);log:Show()
             end
             button.sync:ClearAllPoints();button.sync:SetPoint("LEFT",log or canEdit and edit or load,"RIGHT",2,0);button.sync:Show()
-            UI.SetButtonEnabled(button.sync,snapshot.syncRaidId~=nil and canEdit);UI.SetClassicButtonSelected(button.sync,api and api.IsRaidSyncEnabled(snapshot.syncRaidId) and snapshot.syncRaidId~=nil)
+            UI.SetButtonEnabled(button.sync,snapshot.syncRaidId~=nil and canEdit);SyncButtonState(button.sync,api and api.IsRaidSyncEnabled(snapshot.syncRaidId) and snapshot.syncRaidId~=nil)
             deleteButton:ClearAllPoints(); deleteButton:SetPoint("LEFT", button.sync, "RIGHT", 2, 0); deleteButton:Show()
             y = y - height - 2
         else if button.sync then button.sync:Hide() end;button.number:Hide(); button:Hide(); load:Hide(); deleteButton:Hide(); if edit then edit:Hide() end; if log then log:Hide() end end
