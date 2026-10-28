@@ -97,6 +97,8 @@ Raid Log shows dated officer actions, original nicknames and before/after detail
 
 ## Officer synchronization
 
+New Raid, Test Raid and Sync share the left side of the raid toolbar; Raid Info stays on its right. Active and saved session headings use matching text sizes and distinct icons.
+
 **Active raid sessions** appears above Saved raids. Join the existing session when another officer in your current party or raid has one; New Raid is disabled while that session is known or being checked. Separate groups can record separate sessions. Loading an ended snapshot reopens that same shared session (officer access required). Saved raids show **In memory** after changes and **On disk** for the version read at addon startup, plus the last editor; the active raid shows **Last save**. Save does not itself write WoW SavedVariables files.
 
 **Sync status** shows **Syncing…**, **Up to date**, **New data received. Please reload!**, or **Sync error! Send log**. Officers show synced/pending/error individually. Reload writes the current client data and loads it again; the disk indicator describes this character’s copy, not another officer’s disk. A connection alone does not prove an individual change was received.

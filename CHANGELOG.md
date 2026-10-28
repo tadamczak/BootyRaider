@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.10 — 2026-10-28
+
+- Align raid history actions in one full-width bordered toolbar, with unique icons and matching active/saved section headings.
+
 ## 1.0.0-dev.9 — 2026-10-27
 
 - List active sessions above saved raids and guard new sessions when a group already has one; loading an ended snapshot reopens its shared session.
