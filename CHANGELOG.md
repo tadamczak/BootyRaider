@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-dev.19 — 2026-10-29
+
+- Reduce redundant discovery replies and suppress advertisements for private raid edits.
+- Prevent live raid changes being delayed by repeated inventory discovery; support concurrent incoming streams from all twelve peers within the existing byte budget.
+- Coalesce technical status redraws and skip queue scans while waiting for the next scheduled wake.
+
 ## 1.0.0-dev.18 — 2026-10-29
 
 - Unify raid row actions at 24px with matching Join/Load icons and distinct sync-on/off icons.

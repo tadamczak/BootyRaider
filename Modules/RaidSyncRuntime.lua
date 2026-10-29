@@ -3,6 +3,7 @@ local SyncRuntime={}
 Raider.Modules.RaidSyncRuntime=SyncRuntime
 local runtime,nextWake,changed,statusChanged,registered,rosterAt,lastRosterFailure
 local lastSyncError
+local statusRefreshAt
 local onlineOfficers
 local maintenance,waitingConfirmation,compactedAt,maintenanceArmed={},{},{},false
 local function Now() return type(GetTime)=="function" and GetTime() or time() end
@@ -82,8 +83,11 @@ local function HiddenRecording()
         and Raider.Services.RaidRes.HasSession(Raider.Database.GetRaidAttendance())
 end
 function SyncRuntime.Tick()
-    if not Raider.active or not HasWork() then this:SetScript("OnUpdate",nil);nextWake=nil;return end
+    if not Raider.active then this:SetScript("OnUpdate",nil);nextWake=nil;return end
     local now=Now();if nextWake and now<nextWake then return end
+    -- Wake clears the deadline when client events add work. Until then, avoid
+    -- walking peers, queues and maintenance state on every rendered frame.
+    if not HasWork() then this:SetScript("OnUpdate",nil);nextWake=nil;return end
     if runtime.raidSync then runtime.raidSync:Tick() end
     if rosterAt and now>=rosterAt then
         rosterAt=nil
@@ -97,8 +101,9 @@ function SyncRuntime.Tick()
     end
     runtime.replica.Flush(1)
     CompactOne()
-    if changed or statusChanged then
+    if changed or statusChanged and (not statusRefreshAt or now>=statusRefreshAt) then
         local refresh=changed;changed=false;statusChanged=false
+        statusRefreshAt=now+0.25
         local view=runtime.views.raid
         if view and view.page and view.page:IsVisible() and Raider.Modules.RaidManagement.RefreshSyncStatus then Raider.Modules.RaidManagement.RefreshSyncStatus(view.page) end
         if refresh then runtime.RefreshViews() end
@@ -106,7 +111,8 @@ function SyncRuntime.Tick()
     end
     if runtime.replica.HasWork() then nextWake=now else nextWake=runtime.raidSync and runtime.raidSync:NextWake() end
     if rosterAt and (not nextWake or rosterAt<nextWake) then nextWake=rosterAt end
-    if changed or statusChanged or MaintenanceReady() then nextWake=now end
+    if statusChanged and (not nextWake or (statusRefreshAt or now)<nextWake) then nextWake=statusRefreshAt or now end
+    if changed or MaintenanceReady() then nextWake=now end
     if not HasWork() then runtime.events:SetScript("OnUpdate",nil);nextWake=nil end
 end
 local function Update() SyncRuntime.Tick() end
@@ -224,6 +230,6 @@ function SyncRuntime.Stop()
         runtime.events:SetScript("OnUpdate",nil)
         if registered then runtime.events:UnregisterEvent("CHAT_MSG_ADDON");runtime.events:UnregisterEvent("PLAYER_REGEN_ENABLED") end
     end
-    lastSyncError=nil;onlineOfficers=nil;registered=nil;nextWake=nil;rosterAt=nil;changed=nil;statusChanged=nil;maintenanceArmed=false;lastRosterFailure=nil
+    lastSyncError=nil;onlineOfficers=nil;registered=nil;nextWake=nil;rosterAt=nil;changed=nil;statusChanged=nil;statusRefreshAt=nil;maintenanceArmed=false;lastRosterFailure=nil
     if Raider.Modules.RaidSync then Raider.Modules.RaidSync.Close() end
 end

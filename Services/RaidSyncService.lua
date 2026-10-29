@@ -2,8 +2,10 @@ local Raider=BootyRaider
 Raider.Services=Raider.Services or {}
 local Sync={PREFIX="BRSYNC1",protocol=2,policy=1}
 Raider.Services.RaidSync=Sync
+-- Accommodate one incoming stream per supported peer while retaining the
+-- aggregate byte cap and incremental single-job codec budget.
 Sync.limits={packet=240,rate=1024,burst=2048,packetsPerTick=8,codecNodes=128,
-    peers=12,outbox=4,incoming=4,bufferBytes=2097152,window=4,summary=8,range=16,retry=3,timeout=15}
+    peers=12,outbox=4,incoming=12,bufferBytes=2097152,window=4,summary=8,range=16,retry=3,timeout=15}
 
 -- The installed 1.12 addons use SendAddonMessage(prefix,text,"GUILD") and
 -- CHAT_MSG_ADDON(prefix,text,channel,sender). GUILD + recipient routing avoids
@@ -383,8 +385,9 @@ function Sync.New(options)
         self:Stop("raid-policy-changed")
         return self:Start()
     end
-    function self:NotifyChanged()
+    function self:NotifyChanged(raidId)
         if not Ready() then return false end
+        if raidId and not Allowed(raidId) then return true end
         self.generation=self.generation+1;self.announce=true;self.discoveryRemaining=2;self.discoveryAt=Now()+3;return true
     end
     function self:Discover()
@@ -441,7 +444,9 @@ function Sync.New(options)
             if self.lastError=="peer-session-changed" then self.lastError=nil end
             if (connected or not peer.connected) and options.onConnected then options.onConnected(sender) end
             peer.connected=true
-            if fields[2]=="*" then Hello(sender) end
+            -- Suppress echo bursts only after addressed traffic proves the
+            -- peer knows us. Retry the greeting if our first reply was lost.
+            if fields[2]=="*" and (connected or not peer.contactConfirmed) then Hello(sender) end
             return true
         end
         local peer=self.peers[sender]
@@ -521,6 +526,7 @@ function Sync.New(options)
     function self:Receive(prefix,text,channel,sender)
         local accepted,reason=ReceivePacket(prefix,text,channel,sender)
         local peer=self.peers[sender]
+        if accepted and peer and string.sub(text,1,4)~="H~*~" then peer.contactConfirmed=true end
         if accepted and peer and options.presenceRevision then peer.presenceRevision=options.presenceRevision() end
         if accepted and peer and not peer.connected then
             peer.connected=true
@@ -543,13 +549,8 @@ function Sync.New(options)
     local function Schedule()
         if self.request then return end
         local now=Now()
-        -- Fetch small offers from every currently reachable source before choosing
-        -- one source for a missing range; offers also permit failover without author.
-        for _,peer in pairs(self.peers) do
-            if not peer.blocked and not peer.unavailable and peer.needsSummary and (not peer.cooldown or peer.cooldown<=now) then
-                Request(peer,{type="summary-request",offset=peer.offset or 0},1);return
-            end
-        end
+        -- Drain known live-raid updates before refreshing inventories. Historic
+        -- bulk transfers still yield to discovery of new live-raid data.
         for id,dependency in pairs(self.dependencies) do
             local chosen=self.peers[dependency.peer or ""]
             if not chosen or chosen.blocked or chosen.unavailable or (chosen.cooldown and chosen.cooldown>now) then
@@ -574,6 +575,15 @@ function Sync.New(options)
                         peer.offset=peer.summary.nextOffset;peer.needsSummary=true
                     end
                 end
+            end
+        end
+        if chosen and priority==1 then
+            Request(chosen,{type="range-request",raidId=range.raidId,origin=range.origin,first=range.first,last=math.min(range.last,range.first+Sync.limits.range-1)},priority)
+            return
+        end
+        for _,peer in pairs(self.peers) do
+            if not peer.blocked and not peer.unavailable and peer.needsSummary and (not peer.cooldown or peer.cooldown<=now) then
+                Request(peer,{type="summary-request",offset=peer.offset or 0},1);return
             end
         end
         if chosen then
