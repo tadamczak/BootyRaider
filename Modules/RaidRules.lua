@@ -4,7 +4,8 @@ Raider.Modules.RaidManagement = Raider.Modules.RaidManagement or {}
 local RaidManagement = Raider.Modules.RaidManagement
 
 function RaidManagement.CreateLootRulesDialog(options)
-    local frame = Raider.UI.Components.CreateContainer("BootyRaiderLootRulesDialog", UIParent)
+    local frame = Raider.UI.Components.CreateContainer(options.name or "BootyRaiderLootRulesDialog", UIParent)
+    local referenceName = options.name and options.name .. "ReferenceScroll" or "BootyRaiderLootRulesReferenceScroll"
     frame:SetWidth(690); frame:SetHeight(560); frame:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
     frame:EnableMouse(true); frame:Hide()
     frame:SetMovable(true); frame:RegisterForDrag("LeftButton")
@@ -60,8 +61,8 @@ function RaidManagement.CreateLootRulesDialog(options)
     frame.rulesPanel = Raider.UI.Components.CreateContainer(nil, content); frame.rulesPanel:SetPoint("TOPLEFT", frame, "TOPLEFT", 4, -254); frame.rulesPanel:SetWidth(682); frame.rulesPanel:SetHeight(268)
     UI.RegisterSkinnedSurface(frame.rulesPanel, "content", nil, {0,0,0,0}, {0.68,0.54,0.27,1})
     UI.SetSurfaceHorizontalBorders(frame.rulesPanel, true, true)
-    frame.rulesScroll = Raider.UI.Components.CreateScrollFrame("BootyRaiderLootRulesReferenceScroll", frame.rulesPanel, "UIPanelScrollFrameTemplate")
-    Raider.UI.Components.RegisterSkinnedScrollBar(getglobal("BootyRaiderLootRulesReferenceScrollScrollBar"))
+    frame.rulesScroll = Raider.UI.Components.CreateScrollFrame(referenceName, frame.rulesPanel, "UIPanelScrollFrameTemplate")
+    Raider.UI.Components.RegisterSkinnedScrollBar(getglobal(referenceName .. "ScrollBar"))
     frame.rulesScroll:SetPoint("TOPLEFT", frame.rulesPanel, "TOPLEFT", 4, -8); frame.rulesScroll:SetPoint("BOTTOMRIGHT", frame.rulesPanel, "BOTTOMRIGHT", -28, 7)
     frame.rulesCanvas = Raider.UI.Components.CreateContainer(nil, frame.rulesScroll); frame.rulesCanvas:SetWidth(604); frame.rulesCanvas:SetHeight(280); frame.rulesScroll:SetScrollChild(frame.rulesCanvas)
     frame.rulesText = Raider.UI.Components.CreateLabel(frame.rulesCanvas, nil, "OVERLAY", "GameFontHighlightSmall"); frame.rulesText:SetPoint("TOPLEFT", frame.rulesCanvas, "TOPLEFT", 0, 0); frame.rulesText:SetWidth(596); frame.rulesText:SetJustifyH("LEFT"); frame.rulesText:SetJustifyV("TOP")
@@ -69,7 +70,8 @@ function RaidManagement.CreateLootRulesDialog(options)
     frame.rulesCanvas:SetHeight(math.max(280, UI.MeasureTextHeight(frame.rulesText, 596) + 8))
     frame.contestedItems = Raider.UI.Components.CreateButton(content, nil, "Set Highly Contested Items", 154, 22)
     frame.contestedItems:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 8, 8)
-    frame.contestedItems:SetScript("OnClick", function() options.openHighlyContestedItems() end)
+    if options.openHighlyContestedItems then frame.contestedItems:SetScript("OnClick", function() options.openHighlyContestedItems() end)
+    else frame.contestedItems:Hide() end
     frame.save = Raider.UI.Components.CreateButton(content, nil, "Save", 78, 22); frame.save:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -94, 8)
     frame.cancel = Raider.UI.Components.CreateButton(content, nil, "Cancel", 78, 22); frame.cancel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 8)
     local function Close() frame:Hide() end
@@ -92,7 +94,7 @@ function RaidManagement.CreateLootRulesDialog(options)
         frame.rulesScroll:SetPoint("TOPLEFT", frame.rulesPanel, "TOPLEFT", 4, -8)
         frame.rulesScroll:SetPoint("BOTTOMRIGHT", frame.rulesPanel, "BOTTOMRIGHT", overflow and -24 or -4, 8)
         frame.rulesCanvas:SetWidth(width); frame.rulesCanvas:SetHeight(math.max(1,height))
-        local slider=getglobal("BootyRaiderLootRulesReferenceScrollScrollBar")
+        local slider=getglobal(referenceName .. "ScrollBar")
         if slider then if overflow then slider:Show() else slider:Hide() end end
     end
     frame.Open = function(self)

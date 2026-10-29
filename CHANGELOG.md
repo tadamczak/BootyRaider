@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.26 — 2026-10-29
+
+- Fix standalone tab separators and restore Raid Stats immediately with the updated shared window controls. Keep the save dialog inside its frame and add an editor toolbar with readable headings and per-raid Loot Rules. Clicking CSR Test Lab again closes it.
+
 ## 1.0.0-dev.25 — 2026-10-29
 
 - Notify officers with an open session when another officer saves and ends it: Continue Session reopens it; Quit returns to the raid list without another save.

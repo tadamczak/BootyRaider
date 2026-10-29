@@ -132,3 +132,5 @@ Without BootySuite, the top tabs **Raid**, **Raid Stats** and **CSR** switch bet
 Standalone Raid separators align with the top tabs and the side frame, including after resizing.
 
 **End & Save** after leaving a raid instance saves the same raid and marks the shared session **Ended**, just like the Session menu action. Cancelling or a failed save leaves the session active.
+
+Raid Stats editing has an action toolbar with **Add Entry**, **Loot Rules**, **Cancel** and **Save**. Loot Rules edits apply to that saved raid when you save; enable the relevant rank’s CSR rights and **Save CSR** to include its eligible reserves. Cancel discards the draft. Click **CSR Test Lab** again to close it and return to your saved history; reopening retains the temporary simulation. Minimizing and restoring Raid Stats keeps the selected raid visible.

@@ -41,15 +41,25 @@ local function CreateView(parent,host,id,create)
         end)
         view.standaloneNavigation.buttons[target]=button
     end
-    local show,hide,resize,stop=view.Show,view.Hide,view.OnResize,view.Stop
-    local function ResizeView(self) SizeBody();if resize then resize(self) end end
+    local show,hide,resize,stop,refresh=view.Show,view.Hide,view.OnResize,view.Stop,view.Refresh
+    local function JoinNavigationEdge()
+        local controls=view.page and view.page.syncHistoryControls
+        local historyToolbar=controls and controls.historyToolbar
+        if not historyToolbar then return end
+        -- With its heading hidden, the history toolbar meets the tab strip.
+        -- Keep the tabs' existing project edge instead of drawing both rails.
+        local top=not (BootyRaiderDB.raidHideSectionHeader and historyToolbar:IsShown())
+        if historyToolbar.bootyBorderTop~=top then UI.SetSurfaceHorizontalBorders(historyToolbar,top,true) end
+    end
+    local function ResizeView(self) SizeBody();if resize then resize(self) end;JoinNavigationEdge() end
     function view:OnResize()
         body.bootyResizeInProgress=true
         local ok,failure=pcall(ResizeView,self)
         body.bootyResizeInProgress=nil
         if not ok then error(failure) end
     end
-    function view:Show() frame:Show();SizeBody();show(self) end
+    function view:Show() frame:Show();SizeBody();show(self);JoinNavigationEdge() end
+    if refresh then function view:Refresh() refresh(self);JoinNavigationEdge() end end
     function view:Hide()
         local result,reason=hide(self)
         if result==false then return result,reason end

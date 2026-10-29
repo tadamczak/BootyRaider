@@ -703,7 +703,7 @@ function Database.UpdateRaidMetadata(raidId, metadata, auditChanges, auditKind)
     return true, id
 end
 
-function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnabled,raidName)
+function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnabled,raidName,lootRules)
     local allowed, reason = Database.CanManageHistory()
     if not allowed then return false, reason end
     Database.Ensure()
@@ -711,6 +711,9 @@ function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnable
     local canonical,entry=FindSavedRaid(history,raidId)
     if not entry or type(members)~="table" then return false end
     if raidName and not IsRaidType(raidName) then return false, "Choose a valid raid type." end
+    if lootRules~=nil and type(lootRules)~="table" then return false, "Loot rules are required." end
+    local savedRules=lootRules and Database.CopyLootRules(lootRules)
+    local rulesChanged=savedRules and not SameValue(entry.lootRules,savedRules)
     attendanceEnabled, csrEnabled = attendanceEnabled and true or false, csrEnabled and true or false
     local changes, current, included = {}, {}, {}
     local audit = Raider.Services and Raider.Services.RaidAudit
@@ -733,6 +736,7 @@ function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnable
     if entry.attendanceEnabled ~= attendanceEnabled or entry.csrEnabled ~= csrEnabled then
         table.insert(changes, {key="saved:flags",value={attendanceEnabled=attendanceEnabled,csrEnabled=csrEnabled}})
     end
+    if rulesChanged then table.insert(changes,{key="raid:loot-rules",value=savedRules}) end
     if table.getn(changes) == 0 and (not raidName or raidName == entry.raidName) then return true end
     if raidName then
         local updated, reason = Database.UpdateRaidMetadata(canonical, {id=canonical,raidName=raidName}, changes, "raid.edit")
@@ -744,6 +748,19 @@ function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnable
     end
     entry.members=members;entry.attendanceEnabled=attendanceEnabled and true or false;entry.csrEnabled=csrEnabled and true or false
     entry.modifiedAt=time()
+    if rulesChanged then
+        -- Publish the draft only after the complete edit commits. All local
+        -- representations of this identity use the same rules as its peers.
+        entry.lootRules=savedRules
+        local _,snapshot=FindSavedRaid(BootyRaiderDB.softReserveHistory,canonical)
+        if snapshot and snapshot.syncRaidId==entry.syncRaidId then
+            snapshot.lootRules=Database.CopyLootRules(savedRules);snapshot.modifiedAt=entry.modifiedAt
+        end
+        local active=BootyRaiderDB.raidAttendance
+        if active and entry.syncRaidId and active.syncRaidId==entry.syncRaidId then
+            active.lootRules=Database.CopyLootRules(savedRules)
+        end
+    end
     return true
 end
 

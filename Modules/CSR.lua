@@ -156,6 +156,9 @@ local function CreateTestLab(owner, onChanged, onExit)
         if onChanged then onChanged() end
     end
     function dialog:Open() self:Show(); self:Refresh() end
+    function dialog:Toggle()
+        if self:IsShown() then Exit() else self:Open() end
+    end
     dialog:SetScript("OnHide", function() dialog.playerPanel:Hide() end)
     dialog:Hide()
     if UI.WindowStack then UI.WindowStack.Register(dialog, {owner = owner}) end
@@ -203,7 +206,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     controller.description:SetText(controller.descriptionText)
     controller.testButton = UI.CreateButton(page, nil, "CSR Test Lab", 96, 22)
     UI.StyleActionButton(controller.testButton)
-    controller.testButton:SetScript("OnClick", function() controller.testLab:Open() end)
+    controller.testButton:SetScript("OnClick", function() controller.testLab:Toggle() end)
     controller.raidFilter = UI.CreateDropdownButton(page, nil, "Raid", 130)
     controller.raidFilter.bootyFlowWidth = 130; controller.raidFilter:SetHeight(26)
     controller.raidPanel = UI.CreateDropdownPanel(page, controller.raidFilter, 190, 178, 20)
