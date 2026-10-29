@@ -361,15 +361,48 @@ function Audit.Trade(attendance,sender,remainder,recipient,loot)
     table.insert(changes,{key="entitlement:"..string.lower(recipient.name),value=Audit.EntitlementValue(recipient)})
     return Audit.Commit(attendance,"loot.correct",changes,{subject=recipient.name,item=loot.name or loot.itemId})
 end
-function Audit.Save(attendance,entry,snapshot,endSession)
+local function ReplaceSavedContent(attendance,changes)
+    local included={}
+    for _,change in ipairs(changes) do included[change.key]=true end
+    local db=Store()
+    local raid=attendance.syncRaidId and db.raidJournal.raids[attendance.syncRaidId]
+    for key,record in pairs(raid and raid.records or {}) do
+        -- An explicit replacement must not resurrect the destination's former
+        -- roster/loot on projection. Archive choices keep their saved identity.
+        local content=key=="import:sr" or string.find(key,"^member:") or string.find(key,"^sr:")
+            or string.find(key,"^loot:") or string.find(key,"^entitlement:")
+            or string.find(key,"^saved:member:") or string.find(key,"^allocation:")
+        if content and not included[key] and not record.deleted then table.insert(changes,{key=key,deleted=true}) end
+    end
+end
+function Audit.Save(attendance,entry,snapshot,endSession,copySource)
     local changes=Audit.MemberChanges(attendance.members,attendance)
+    if copySource then
+        local included={}
+        for _,member in ipairs(attendance.members or {}) do included[string.lower(member.name)]=true end
+        for _,member in ipairs(attendance.departedMembers or {}) do
+            local key=string.lower(member.name)
+            if not included[key] then
+                included[key]=true
+                table.insert(changes,{key="member:"..key,value=Audit.MemberValue(member)})
+                table.insert(changes,{key="sr:"..key,value=Audit.SRValue(member,attendance)})
+            end
+        end
+    end
     if attendance.softReserveImport then table.insert(changes,{key="import:sr",value=Audit.ImportValue(attendance.softReserveImport)}) end
     local prepared,reason=PrepareLiveLoot(attendance,changes)
     if not prepared then return false,reason end
     AppendEntitlements(changes,attendance)
     table.insert(changes,{key="raid:metadata",value=Audit.Metadata(attendance)})
     table.insert(changes,Recorder(endSession and "ended" or "saved"))
-    if endSession then table.insert(changes,{key="raid:lifecycle",value="ended"}) end
+    local db=Store()
+    local raid=attendance.syncRaidId and db.raidJournal.raids[attendance.syncRaidId]
+    if copySource or not raid then
+        table.insert(changes,{key="raid:loot-rules",value=Copy(attendance.lootRules or {})})
+    end
+    if endSession or copySource or not raid or not raid.records["raid:lifecycle"] then
+        table.insert(changes,{key="raid:lifecycle",value=(endSession or attendance.syncEnded) and "ended" or "active"})
+    end
     table.insert(changes,{key="raid:save",value=attendance.saveOptions or {}})
     table.insert(changes,{key="saved:snapshot",value=true})
     table.insert(changes,{key="saved:statistic",value=attendance.saveOptions and (attendance.saveOptions.saveRaidStatistics or attendance.saveOptions.saveCSR) or false})
@@ -383,7 +416,15 @@ function Audit.Save(attendance,entry,snapshot,endSession)
                 lootRank=member.lootRank,attendance=member.attendance,srItems=member.srItems,lootItems=lootItems}})
         end
     end
-    local ok,operation=Audit.Commit(attendance,"raid.save",changes,{subject=attendance.snapshotId or "",endSession=endSession and true or nil})
+    if copySource then ReplaceSavedContent(attendance,changes) end
+    local disabledCopy=copySource and not attendance.syncRaidId and db.raidSyncDisabled and db.raidSyncDisabled[copySource.syncRaidId]
+    if disabledCopy then db.raidSyncDisabled[Audit.EnsureIdentity(attendance)]=true end
+    local ok,operation=Audit.Commit(attendance,"raid.save",changes,{subject=attendance.snapshotId or "",
+        endSession=endSession and true or nil,saveAs=copySource and true or nil})
+    if disabledCopy then
+        if ok then db.raidSyncPolicyRevision=(db.raidSyncPolicyRevision or 0)+1
+        else db.raidSyncDisabled[attendance.syncRaidId]=nil end
+    end
     if ok then
         PublishLootIds(prepared,entry,snapshot)
         attendance.syncLocalAuditFailure=nil

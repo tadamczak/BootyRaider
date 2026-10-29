@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.24 — 2026-10-29
+
+- Save a loaded raid under a different Raid ID as an independent copy, preserving the original through synchronization and reload.
+- Preserve destination identity for confirmed replacements, copy sync preferences and raid data, and keep save failures atomic.
+
 ## 1.0.0-dev.23 — 2026-10-29
 
 - Make End & Save from both raid-context prompts end the shared session as well as save its snapshot.

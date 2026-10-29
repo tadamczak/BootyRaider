@@ -329,7 +329,11 @@ function Replica.Create(options)
         local latest=latestId and J.GetOperation(db,latestId)
         if latestId~=nil and operation.kind~="raid.observe" and LaterChange(operation,latest) then state.latestOperations[operation.raidId]=operation.id end
         if not localChange then state.receivedSinceLoad=true;state.receivedRaids=state.receivedRaids or {};state.receivedRaids[operation.raidId]=true end
-        if localChange and (operation.kind=="raid.start" or operation.kind=="raid.reopen" or operation.kind=="raid.save") then db.syncJoinedRaidId=operation.raidId end
+        if localChange and operation.kind=="raid.save" and operation.detail and operation.detail.saveAs then
+            -- Saving a copy closes the local workspace; it does not join that
+            -- separate session and must not prevent reopening either snapshot.
+            db.syncJoinedRaidId=nil
+        elseif localChange and (operation.kind=="raid.start" or operation.kind=="raid.reopen" or operation.kind=="raid.save") then db.syncJoinedRaidId=operation.raidId end
         if not localChange and operation.kind~="raid.observe" then
             local action=Raider.Modules and Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
             api.LogSync("Received update by "..tostring(operation.author)..": "..tostring(action))
@@ -465,6 +469,8 @@ function Replica.Create(options)
         if not metadata then return nil,"Raid metadata is not available yet. Wait for synchronization." end
         local attendance={syncRaidId=id,snapshotId=metadata.id,raidName=metadata.raidName,displayName=metadata.displayName,
             sessionStartedAt=metadata.startedAt,createdAt=metadata.startedAt,endedAt=metadata.endedAt,lastSavedAt=metadata.savedAt,
+            modifiedAt=metadata.modifiedAt or metadata.savedAt or metadata.startedAt,
+            duration=metadata.endedAt and metadata.startedAt and metadata.endedAt-metadata.startedAt or nil,
             members={},departedMembers={},lootRules=Copy(Record(id,"raid:loot-rules") or {}),
             saveOptions=Copy(Record(id,"raid:save") or {}),_sessionDraft=true,nextLootRecordId=0}
         attendance.syncEnded=Record(id,"raid:lifecycle")=="ended" or nil
@@ -620,6 +626,7 @@ function Replica.Create(options)
     local function Snapshot(attendance)
         return {version=4,id=attendance.snapshotId,syncRaidId=attendance.syncRaidId,raidName=attendance.raidName,displayName=attendance.displayName,
             startedAt=attendance.sessionStartedAt,createdAt=attendance.createdAt,endedAt=attendance.endedAt,
+            modifiedAt=attendance.modifiedAt,duration=attendance.duration,
             savedAt=attendance.lastSavedAt,updatedAt=attendance.lastSavedAt,members=Copy(attendance.members),
             lootRules=Copy(attendance.lootRules),saveOptions=Copy(attendance.saveOptions),raidResId=attendance.softReserveImport.id or attendance.snapshotId,
             srUrl=attendance.softReserveImport.url,rollForExport=attendance.softReserveImport.rollForExport,

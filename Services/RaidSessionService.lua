@@ -244,6 +244,18 @@ function Session:Complete(saveOptions)
         -- confirmation never alter the active session or its historical source.
         local staged, key, value = {}, nil, nil
         for key, value in pairs(attendance) do staged[key] = value end
+        local sourceId = attendance._loadedSnapshotId or attendance.snapshotId
+        sourceId = sourceId and dependencies.database.GetSavedRaidState(sourceId)
+        local targetSyncId = snapshot and snapshot.syncRaidId or statistic and statistic.syncRaidId
+        local copySource
+        if sourceId and string.lower(sourceId) ~= string.lower(request.raidId)
+            or targetSyncId and targetSyncId ~= attendance.syncRaidId then
+            -- Save As creates an independent raid, or replaces the explicitly
+            -- confirmed destination. Never rename the source's journal identity.
+            copySource = attendance
+            staged.syncRaidId = targetSyncId
+            if staged.syncRaidId == attendance.syncRaidId then staged.syncRaidId = nil end
+        end
         staged.snapshotId, staged._loadedSnapshotId = request.raidId, nil
         local savedAt = dependencies.now()
         local endedAt = (request.endSession or request.saveRaidEndTime) and savedAt or request.endedAt
@@ -266,7 +278,7 @@ function Session:Complete(saveOptions)
         if Raider.Services.RaidAudit then
             preparedSnapshot=dependencies.raidRes.BuildSnapshot(staged)
             if not preparedSnapshot then return false,"The raid snapshot could not be prepared." end
-            local ok,reason=Raider.Services.RaidAudit.Save(staged,entry,preparedSnapshot,request.endSession)
+            local ok,reason=Raider.Services.RaidAudit.Save(staged,entry,preparedSnapshot,request.endSession,copySource)
             if not ok then return false,reason end
             if entry then entry.syncRaidId=staged.syncRaidId end
             preparedSnapshot.syncRaidId=staged.syncRaidId
