@@ -125,7 +125,8 @@ function Journal.Ensure(db, context)
     if type(db) ~= "table" then return nil, "invalid-database" end
     if context ~= nil then
         if type(context) ~= "table" then return nil, "invalid-context" end
-        contexts[db] = context
+        contexts[db]={actor=context.actor,realm=context.realm,now=context.now,entropy=context.entropy,
+            auditPolicy=contexts[db] and contexts[db].auditPolicy or nil}
     end
     context = contexts[db] or {}
     local state = db.raidJournal
@@ -157,6 +158,12 @@ function Journal.Ensure(db, context)
     state = {schema=Journal.schema,replicaId=identity,sequence=0,identitySequence=0,raids={},operations={}}
     db.raidJournal = state
     return state
+end
+
+function Journal.SetAuditPolicy(db, policy)
+    if type(db)~="table" or policy~=nil and type(policy)~="function" then return false,"invalid-audit-policy" end
+    contexts[db]=contexts[db] or {};contexts[db].auditPolicy=policy
+    return true
 end
 
 local function NewId(db, kind)
@@ -558,6 +565,11 @@ function Journal.Commit(db, raidId, kind, changes, detail, audit, resolving)
     timestamp, failure = Now(context)
     if not timestamp then return false, failure end
     if state.sequence >= maxCounter then return false, "sequence-exhausted" end
+    if audit~=false and context.auditPolicy then
+        local called,enabled=pcall(context.auditPolicy,raidId,kind,db)
+        if not called or type(enabled)~="boolean" then return false,"invalid-audit-policy" end
+        audit=enabled
+    end
     local sequence = state.sequence + 1
     local operation = {schema=Journal.schema,id=state.replicaId .. ":op:" .. sequence,origin=state.replicaId,
         sequence=sequence,raidId=raidId,author=author,timestamp=timestamp,kind=kind,changes=batch,detail=detail,audit=audit ~= false,resolution=resolving and true or nil}

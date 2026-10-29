@@ -125,7 +125,7 @@ function Replica.ValidateOperation(operation)
             elseif string.find(key,"^loot:") then
                 if type(value)~="table" or not Text(value.recipient,96) or not Item(value.item) or not Number(value.count,1000000) or value.count<1 then return false,"invalid-allocation" end
                 if not Optional(value.name,"string") or not Optional(value.link,"string",1024) or not Optional(value.ordinary,"boolean")
-                    or not Optional(value.historyKey,"string",300) then return false,"invalid-allocation-context" end
+                    or not Optional(value.historyKey,"string",300) or not Optional(value.timestamp,"number") then return false,"invalid-allocation-context" end
             elseif string.find(key,"^member:") then
                 if not Fields(value,memberFields) or not Text(value.name,96) or string.sub(key,8)~=Lower(value.name) then return false,"invalid-member" end
             elseif string.find(key,"^saved:member:") then
@@ -508,7 +508,7 @@ function Replica.Create(options)
                 if not ambiguous[key] and (not decision or not decision.duplicateOf) then
                     local member=Member(value.recipient);attendance.nextLootRecordId=attendance.nextLootRecordId+1
                     table.insert(member.loot,{syncRecordId=string.sub(key,6),recordId=attendance.nextLootRecordId,itemId=type(value.item)=="number" and value.item or nil,
-                        name=value.name or tostring(value.item),link=value.link,count=value.count,ordinaryReceipt=value.ordinary or nil,awardHistoryKey=value.historyKey})
+                        name=value.name or tostring(value.item),link=value.link,count=value.count,timestamp=value.timestamp,ordinaryReceipt=value.ordinary or nil,awardHistoryKey=value.historyKey})
                 end
             end
         end
@@ -537,6 +537,7 @@ function Replica.Create(options)
         end
         local flags=Record(id,"saved:flags") or {}
         local statistic={id=metadata.id,syncRaidId=id,displayName=metadata.displayName,raidName=metadata.raidName,
+            syncLifecycle=Record(id,"raid:lifecycle") or "active",syncSaved=Record(id,"saved:statistic")==true,
             createdAt=metadata.startedAt,startedAt=metadata.startedAt,endedAt=metadata.endedAt,savedAt=metadata.savedAt or metadata.startedAt,
             modifiedAt=metadata.modifiedAt or metadata.savedAt or metadata.startedAt,members={},lootRules=Copy(attendance.lootRules),
             attendanceEnabled=flags.attendanceEnabled~=false,csrEnabled=flags.csrEnabled==true,
@@ -551,7 +552,7 @@ function Replica.Create(options)
                 target.lootRank=saved.lootRank or target.guildRank;target.attendance=saved.attendance or 0
             end
             for _,item in ipairs(member.srItemIds) do table.insert(target.srItems,{itemId=type(item)=="number" and item or nil,name=type(item)=="string" and item or nil,count=1}) end
-            for _,loot in ipairs(member.loot) do table.insert(target.lootItems,{itemId=loot.itemId,name=loot.name,count=loot.count,syncRecordId=loot.syncRecordId});target.lootCount=target.lootCount+loot.count end
+            for _,loot in ipairs(member.loot) do table.insert(target.lootItems,{itemId=loot.itemId,name=loot.name,count=loot.count,timestamp=loot.timestamp,syncRecordId=loot.syncRecordId});target.lootCount=target.lootCount+loot.count end
             if not savedRecord or not savedRecord.deleted then table.insert(statistic.members,target) end
         end
         for key,record in pairs(records) do

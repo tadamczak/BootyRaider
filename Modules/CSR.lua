@@ -492,10 +492,14 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         local available = math.max(80, width - 16)
         self.title:ClearAllPoints(); self.title:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -8)
         UI.FitButtonLabel(self.title, math.max(1, available - 104))
+        local hideTitle=(BootyRaiderDB or {}).csrHideSectionHeader
+        if hideTitle then self.title:Hide() else self.title:Show() end
         self.testButton:ClearAllPoints(); self.testButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, -8)
-        self.description:ClearAllPoints(); self.description:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -42)
-        self.description:SetWidth(available); self.description:SetHeight(0)
-        local top = 42 + math.max(24, UI.MeasureTextHeight(self.description, available)) + 8
+        local descriptionTop=hideTitle and 8 or 42
+        local descriptionWidth=hideTitle and math.max(1,available-104) or available
+        self.description:ClearAllPoints(); self.description:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -descriptionTop)
+        self.description:SetWidth(descriptionWidth); self.description:SetHeight(0)
+        local top = descriptionTop + math.max(24, UI.MeasureTextHeight(self.description, descriptionWidth)) + 8
         top = UI.LayoutFlow(page, self.flow, 8, top, available, 8) + 8
         self.search:SetWidth(math.max(24, self.searchGroup:GetWidth()))
         self.groupBy:SetWidth(math.max(24, self.groupBox:GetWidth() - 62))

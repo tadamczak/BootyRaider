@@ -751,7 +751,7 @@ end
 
 -- Saved raids own their durable loot records. Runtime award queues, lookup
 -- indexes and UI objects stay with their controllers and are never copied.
-local lootScalarFields = { "recordId", "sourceRecordId", "syncRecordId", "auditFailure", "itemId", "name", "link", "icon", "count", "ordinaryReceipt", "awardHistoryKey", "tradedFrom", "tradedTo" }
+local lootScalarFields = { "recordId", "sourceRecordId", "syncRecordId", "auditFailure", "itemId", "name", "link", "icon", "count", "timestamp", "ordinaryReceipt", "awardHistoryKey", "tradedFrom", "tradedTo" }
 local memberScalarFields = { "name", "raidRank", "subgroup", "level", "class", "classFile", "zone", "online", "guildRank", "guildMember", "sr", "srSourceName", "srException" }
 local function CopyLootRecords(source)
     local records, index, fieldIndex = {}, nil, nil

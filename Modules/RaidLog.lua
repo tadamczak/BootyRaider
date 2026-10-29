@@ -126,6 +126,15 @@ end
 local function DefaultProvider(raidId,offset,limit)
     return Raider.Services.RaidAudit.GetLogSummary(raidId,offset,limit)
 end
+local function NeedsRecording(raidId)
+    local runtime=Raider.Runtime
+    local current=runtime and runtime.GetAttendance and runtime.GetAttendance()
+    if not current or current.syncRaidId~=raidId or current.syncEnded then return false end
+    local replica=runtime.replica
+    if replica and replica.GetRaidInfo and replica.GetRaidInfo(raidId).lifecycle=="ended" then return false end
+    local audit=Raider.Services.RaidAudit
+    return audit and not audit.IsLogRecording(raidId) or false
+end
 
 local dialog
 function Log.Open(record,owner)
@@ -142,7 +151,7 @@ end
 function Log.RefreshVisible()
     if not dialog or not dialog:IsVisible() or not dialog.raidId then return end
     local revision=Raider.Services.RaidAudit.GetRevision(dialog.raidId)
-    if revision~=dialog.revision then dialog.revision=revision;dialog:Refresh() end
+    if revision~=dialog.revision or dialog.recordingRequired~=NeedsRecording(dialog.raidId) then dialog.revision=revision;dialog:Refresh() end
 end
 
 function Log.Close()
@@ -154,6 +163,16 @@ function Log.Create(parent)
     local id=serial
     local frame=Dialog(parent,"Raid Log",820,340)
     local controller={frame=frame,rows={},offset=0}
+    controller.startRecording=UI.CreateButton(frame,nil,"Start Recording Raid Events",240,26)
+    controller.startRecording:SetPoint("CENTER",frame,"CENTER",0,0)
+    UI.StyleActionButton(controller.startRecording)
+    UI.AttachTooltip(controller.startRecording,"Record Raid Log","Record future officer actions performed on this character for this raid. Live Tracking and raid synchronization are unchanged.")
+    controller.startRecording:SetScript("OnClick",function()
+        local ok,reason=Raider.Services.RaidAudit.StartLogRecording(controller.raidId)
+        if not ok then if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print(reason) end;return end
+        controller:Refresh()
+    end)
+    controller.startRecording:Hide()
     controller.hint=Label(frame,"Click an action for before/after details.",10,-36,800)
     local headings={"Timestamp","Nickname","Action"}
     local positions,widths={10,156,260},{140,98,550}
@@ -247,6 +266,16 @@ function Log.Create(parent)
     function controller:Refresh()
         local pageSize=self.pageSize or 8
         if not self:IsVisible() or not self.raidId then return end
+        self.recordingRequired=NeedsRecording(self.raidId)
+        for _,widget in ipairs({self.hint,self.previous,self.next,self.count}) do if self.recordingRequired then widget:Hide() else widget:Show() end end
+        for _,heading in ipairs(self.headings) do if self.recordingRequired then heading:Hide() else heading:Show() end end
+        if self.recordingRequired then
+            self.startRecording:Show();self.empty:Hide()
+            if detail then detail:Hide() end
+            for _,row in ipairs(self.rows) do row.entry=nil;row:Hide() end
+            return
+        end
+        self.startRecording:Hide()
         local entries,total=self.provider(self.raidId,self.offset,pageSize)
         if type(entries)~="table" or type(total)~="number" then error("Raid Log provider must return entries and total") end
         local offset=math.max(0,math.floor(math.max(0,total-1)/pageSize)*pageSize)

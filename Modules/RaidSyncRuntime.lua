@@ -7,6 +7,7 @@ local statusRefreshAt
 local onlineOfficers
 local maintenance,waitingConfirmation,compactedAt,maintenanceArmed={},{},{},false
 local function Now() return type(GetTime)=="function" and GetTime() or time() end
+local function RecordLog(id,kind,database) return Raider.Services.RaidAudit.IsLogRecording(id,database) end
 local function Combat() return type(UnitAffectingCombat)=="function" and UnitAffectingCombat("player") and true or false end
 local function Scope()
     local snapshot=BootyLib.GuildDirectory and BootyLib.GuildDirectory.GetSnapshot()
@@ -134,6 +135,8 @@ local function Restore(attendance)
 end
 function SyncRuntime.Initialize(owner)
     runtime=owner
+    local database=Raider.Database.Ensure()
+    Raider.Services.RaidJournal.SetAuditPolicy(database,RecordLog)
     if not runtime.replica then
         runtime.replica=Raider.Services.RaidReplica.Create({db=Raider.Database.Ensure(),authorize=LocalAuthority,wake=SyncRuntime.Wake,
             recorderAvailable=function(name,id,peers)

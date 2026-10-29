@@ -430,7 +430,6 @@ local function ReleaseResources()
     if Runtime.events then
         for _,name in ipairs(eventNames) do Attempt(Runtime.events.UnregisterEvent,Runtime.events,name) end
     end
-    if Runtime.worldContext then Attempt(Runtime.worldContext.CancelConfirmation,Runtime.worldContext) end
     Attempt(RestoreLootHook)
     Attempt(Runtime.CloseSessionPrompts)
     if Runtime.endedSessionPrompt then Runtime.endedSessionPrompt.raidId=nil;Runtime.endedSessionPrompt.endRevision=nil end
@@ -477,13 +476,14 @@ function Runtime.Stop()
 end
 local function ApplySettingChanges(keys)
     if not Runtime.initialized or not Raider.active then return end
-    local native,tracking,autoLoot,csr=false,false,false,false
+    local native,tracking,autoLoot,csr,statistics=false,false,false,false,false
     for key in pairs(keys) do
         if (key=="profile" or key=="raidSyncEnabled") and Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.RefreshAuthority() end
         if key=="profile" or key=="useBootyRaidTab" or key=="useBootyRaidLogo" or string.find(key,"^nativeRaid") then native=true end
         if key=="profile" or key=="raidLiveTrackingEnabled" then tracking=true end
         if key=="profile" or string.find(key,"^lmAutoLoot") then autoLoot=true end
         if key=="profile" or string.find(key,"^csr") then csr=true end
+        if key=="profile" or string.find(key,"^raidStats") then statistics=true end
     end
     if native then Runtime.nativeRaidTab:Sync() end
     if autoLoot then Raider.Modules.MasterLootWindow.ApplyAutoLootSetting() end
@@ -493,6 +493,7 @@ local function ApplySettingChanges(keys)
         view:Refresh()
     end
     if csr and Runtime.views.csr then Runtime.views.csr:Refresh() end
+    if statistics and Runtime.views.raidStatistics then Runtime.views.raidStatistics:Refresh() end
 end
 function Runtime.BeginSettingsBatch()
     Runtime.settingsBatchDepth=(Runtime.settingsBatchDepth or 0)+1

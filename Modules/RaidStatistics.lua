@@ -52,7 +52,10 @@ local function OnItemsClick()
     local player = this.ownerRow.player
     local items = this.itemKind == "sr" and player.srItems or player.lootItems
     local kind = this.itemKind == "sr" and "Soft Reserves" or "Loot received"
-    this.statisticsController.itemDialog:Open(kind .. " - " .. tostring(player.name or "Player"), items)
+    local dialog=this.statisticsController.itemDialog
+    if dialog:IsShown() and dialog.sourcePlayer==player.name and dialog.sourceKind==this.itemKind then dialog:Hide();return end
+    dialog.sourcePlayer=player.name;dialog.sourceKind=this.itemKind
+    dialog:Open(kind .. " - " .. tostring(player.name or "Player"), items)
 end
 
 local function OnDirectItemEnter()
@@ -395,17 +398,20 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     UI.AttachLabelTooltip(page,controller.filterStatus,"Selected raids",function() return controller.filterStatus:GetText() end)
     controller.headers={controller.playerHeader,controller.attendanceHeader,controller.srHeader,controller.lootHeader}
     controller.editHeaders={controller.playerHeader,controller.attendanceHeader,controller.srHeader}
+    controller.visibleHeaders={}
     local function LayoutContent(width,height,self)
         local available=math.max(80,width-16)
+        local filterTop=(BootyRaiderDB or {}).raidStatsHideSectionHeader and 8 or 38
         self.title:ClearAllPoints();self.title:SetPoint("TOPLEFT",page,"TOPLEFT",8,-8);UI.FitButtonLabel(self.title,available)
-        self.filterPanel:ClearAllPoints();self.filterPanel:SetPoint("TOPLEFT",page,"TOPLEFT",0,-38);self.filterPanel:SetWidth(width)
+        if filterTop==8 then self.title:Hide() else self.title:Show() end
+        self.filterPanel:ClearAllPoints();self.filterPanel:SetPoint("TOPLEFT",page,"TOPLEFT",0,-filterTop);self.filterPanel:SetWidth(width)
         local filterBottom=UI.LayoutFlow(self.filterPanel,self.flow,4,8,available,6)+8
         self.filterPanel:SetHeight(filterBottom)
         self.search:SetWidth(math.max(24,self.searchGroup:GetWidth()))
         for _,key in ipairs({"from","to"}) do
             self[key.."Date"]:SetWidth(math.max(24,self[key.."Group"]:GetWidth()-(key=="from" and 54 or 38)))
         end
-        local top=38+filterBottom+8
+        local top=filterTop+filterBottom+8
         local stacked=available<650
         local historyWidth=stacked and available or math.min(270,available*0.34)
         local remaining=math.max(96,height-top-8)
@@ -447,22 +453,35 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     end
     function controller:Layout() UI.LayoutResponsiveCanvas(page,LayoutContent,self) end
     function controller:LayoutColumns(width)
-        local nameWidth=math.floor(width*0.30);local attendanceWidth=math.floor(width*0.23);local lootWidth=self.editMode and 0 or 32
-        local srX=nameWidth+attendanceWidth;local srWidth=math.max(24,width-srX-lootWidth)
+        local settings=BootyRaiderDB or {}
+        local single=self.singleRaid~=nil
+        self.showAttendance=self.editMode or (single and settings.raidStatsSingleShowAttendance~=false) or (not single and settings.raidStatsMultiShowAttendance~=false)
+        self.showSR=self.editMode or single or settings.raidStatsMultiShowSR~=false
+        self.showLoot=not self.editMode and (single or settings.raidStatsMultiShowLoot~=false)
+        self.useClassColors=(single and settings.raidStatsSingleUseClassColors~=false) or (not single and settings.raidStatsMultiUseClassColors~=false)
+        local lootWidth=self.showLoot and 32 or 0
+        local weight=30+(self.showAttendance and 23 or 0)+(self.showSR and 47 or 0)
+        local nameWidth=math.floor((width-lootWidth)*30/weight)
+        local attendanceWidth=self.showAttendance and math.floor((width-lootWidth)*23/weight) or 0
+        local srX=nameWidth+attendanceWidth;local srWidth=self.showSR and math.max(24,width-srX-lootWidth) or 0
+        if not self.showSR then nameWidth=width-attendanceWidth-lootWidth;srX=nameWidth+attendanceWidth end
         self.directItemLabel=srWidth>=90
         local starts={0,nameWidth,srX,width-lootWidth};local widths={nameWidth,attendanceWidth,srWidth,lootWidth}
-        for i=1,4 do local header=self.headers[i];header:ClearAllPoints();header:SetPoint("TOPLEFT",page,"TOPLEFT",self.playerRect.x+starts[i],-self.playerRect.y+22);header:SetWidth(widths[i]);header:SetHeight(20) end
-        if self.editMode then self.lootHeader:Hide() else self.lootHeader:Show() end
+        for index=table.getn(self.visibleHeaders),1,-1 do self.visibleHeaders[index]=nil end
+        for i=1,4 do
+            local header=self.headers[i];header:ClearAllPoints();header:SetPoint("TOPLEFT",page,"TOPLEFT",self.playerRect.x+starts[i],-self.playerRect.y+22);header:SetWidth(math.max(1,widths[i]));header:SetHeight(20)
+            if widths[i]>0 then header:Show();table.insert(self.visibleHeaders,header) else header:Hide() end
+        end
         self.attendanceHeader.label:SetText(width<420 and "Raids" or "Attendance")
-        UI.Table.FitHeaders(self.editMode and self.editHeaders or self.headers,12)
+        UI.Table.FitHeaders(self.visibleHeaders,12)
         for _,row in ipairs(self.rows) do
-            UI.Table.Cell(row.name,row,4,nameWidth-6,23);UI.Table.Cell(row.attendance,row,nameWidth,attendanceWidth-4,23)
+            UI.Table.Cell(row.name,row,4,nameWidth-6,23);UI.Table.Cell(row.attendance,row,nameWidth,math.max(1,attendanceWidth-4),23)
             row.nameEdit:ClearAllPoints();row.nameEdit:SetPoint("LEFT",row,"LEFT",2,0);row.nameEdit:SetWidth(math.max(20,nameWidth-4))
             row.attendanceEdit:ClearAllPoints();row.attendanceEdit:SetPoint("LEFT",row,"LEFT",nameWidth,0);row.attendanceEdit:SetWidth(math.max(20,attendanceWidth-4))
             row.srEdit:ClearAllPoints();row.srEdit:SetPoint("LEFT",row,"LEFT",srX,0);row.srEdit:SetWidth(math.max(20,srWidth-4))
             row.sr:ClearAllPoints();row.sr:SetPoint("LEFT",row,"LEFT",srX,0)
-            row.srDirect:ClearAllPoints();row.srDirect:SetPoint("LEFT",row,"LEFT",srX,0);row.srDirect:SetWidth(srWidth-4)
-            UI.Table.Cell(row.srMissing,row,srX,srWidth-4,23)
+            row.srDirect:ClearAllPoints();row.srDirect:SetPoint("LEFT",row,"LEFT",srX,0);row.srDirect:SetWidth(math.max(1,srWidth-4))
+            UI.Table.Cell(row.srMissing,row,srX,math.max(1,srWidth-4),23)
             row.loot:ClearAllPoints();row.loot:SetPoint("LEFT",row,"LEFT",width-lootWidth+4,0)
         end
     end
@@ -538,12 +557,18 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         if self.historyCollapsed then
             self.raidScroll:Hide();UI.SetScrollBarVisible(getglobal("BootyRaiderRaidStatisticsHistoryScrollScrollBar"),false)
         else raidOffset,visibleRaids,historyWidth=UI.Table.LayoutViewport(self.raidScroll,page,rect.x,rect.y,rect.width,rect.height,table.getn(entries),28,table.getn(self.raidButtons)) end
-        local nameWidth=math.floor(historyWidth*0.38);local raidWidth=math.floor(historyWidth*0.34)
-        local starts={6,nameWidth,nameWidth+raidWidth};local widths={nameWidth-8,raidWidth-4,historyWidth-nameWidth-raidWidth-4}
+        local settings=BootyRaiderDB or {}
+        local showId=settings.raidStatsListShowId~=false;local showTime=settings.raidStatsListShowTime~=false
+        local weight=(showId and 38 or 0)+34+(showTime and 28 or 0)
+        local nameWidth=showId and math.floor(historyWidth*38/weight) or 0
+        local timeWidth=showTime and math.floor(historyWidth*28/weight) or 0
+        local raidWidth=historyWidth-nameWidth-timeWidth
+        local starts={6,nameWidth+6,nameWidth+raidWidth};local widths={nameWidth-8,raidWidth-8,timeWidth-4}
         for index=1,3 do
             local header=self.historyHeaders[index]
             header:ClearAllPoints();header:SetPoint("TOPLEFT",page,"TOPLEFT",rect.x+starts[index],-rect.y+20)
             header:SetWidth(math.max(1,widths[index]));header:SetHeight(18);header:SetJustifyH("LEFT")
+            if not self.historyCollapsed and (index==2 or (index==1 and showId) or (index==3 and showTime)) then header:Show() else header:Hide() end
         end
         for index = 1, table.getn(self.raidButtons) do
             local button, logicalIndex = self.raidButtons[index], raidOffset + index
@@ -551,10 +576,11 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
             if raid and index <= visibleRaids then
                 button:ClearAllPoints();button:SetPoint("TOPLEFT",page,"TOPLEFT",rect.x,-rect.y-(index-1)*28);button:SetWidth(historyWidth)
                 button.raidId = raid.id
-                local nameWidth=math.floor(historyWidth*0.38);local raidWidth=math.floor(historyWidth*0.34);local timeWidth=historyWidth-nameWidth-raidWidth
-                button.idText:ClearAllPoints();button.idText:SetPoint("LEFT",button,"LEFT",6,0);button.idText:SetWidth(nameWidth-8);button.idText:SetJustifyH("LEFT");button.idText:SetText(tostring(raid.id));button.idText:Show()
-                button.zoneText:ClearAllPoints();button.zoneText:SetPoint("LEFT",button,"LEFT",nameWidth,0);button.zoneText:SetWidth(raidWidth-4);button.zoneText:SetJustifyH("LEFT");button.zoneText:SetText(tostring(raid.raidName or "Unknown"));button.zoneText:Show()
-                button.dateText:ClearAllPoints();button.dateText:SetPoint("LEFT",button,"LEFT",nameWidth+raidWidth,0);button.dateText:SetWidth(timeWidth-4);button.dateText:SetJustifyH("LEFT");button.dateText:SetText(date("%Y-%m-%d",tonumber(raid.savedAt) or 0));button.dateText:Show();button.allText:Hide()
+                button.idText:ClearAllPoints();button.idText:SetPoint("LEFT",button,"LEFT",starts[1],0);button.idText:SetWidth(math.max(1,widths[1]));button.idText:SetJustifyH("LEFT");button.idText:SetText(tostring(raid.id))
+                button.zoneText:ClearAllPoints();button.zoneText:SetPoint("LEFT",button,"LEFT",starts[2],0);button.zoneText:SetWidth(widths[2]);button.zoneText:SetJustifyH("LEFT");button.zoneText:SetText(tostring(raid.raidName or "Unknown"));button.zoneText:Show()
+                button.dateText:ClearAllPoints();button.dateText:SetPoint("LEFT",button,"LEFT",starts[3],0);button.dateText:SetWidth(math.max(1,widths[3]));button.dateText:SetJustifyH("LEFT");button.dateText:SetText(date("%Y-%m-%d",tonumber(raid.savedAt) or 0));button.allText:Hide()
+                if showId then button.idText:Show() else button.idText:Hide() end
+                if showTime then button.dateText:Show() else button.dateText:Hide() end
                 button.allText:SetText(tostring(raid.id) .. " | " .. tostring(raid.raidName or "Unknown") .. " | " .. date("%Y-%m-%d",tonumber(raid.savedAt) or 0))
                 local selected = self.selectedHistoryIds[raid.id] and true or false; button:Show()
                 button.bootyClassicSelected=false
@@ -595,10 +621,13 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
                 else
                 row.editMember=nil;row.nameEdit:Hide();row.attendanceEdit:Hide();row.srEdit:Hide();row.name:Show();row.attendance:Show();row.loot:Show();row.name:SetText(player.name)
                 local classKey=string.upper(tostring(player.class or ""));local classColor=(RAID_CLASS_COLORS and RAID_CLASS_COLORS[classKey]) or UI.Theme.classColors[classKey]
-                if classColor then row.name:SetTextColor(classColor.r,classColor.g,classColor.b) else row.name:SetTextColor(1,1,1) end
+                if self.useClassColors and classColor then row.name:SetTextColor(classColor.r,classColor.g,classColor.b) else row.name:SetTextColor(1,1,1) end
+                if not self.showAttendance then row.attendance:Hide() end
+                if not self.showLoot then row.loot:Hide() end
                 row.attendance:SetText(player.attendanceOff and "Off" or player.raids); row.loot:SetInactive(table.getn(player.lootItems or {}) == 0)
                 row.srMissing:Hide()
-                if singleRaid and self.directItemLabel and player.srItems and player.srItems[1] and player.srItems[1].itemId then
+                if not self.showSR then row.srDirect.itemId=nil;row.srDirect:Hide();row.sr:Hide()
+                elseif singleRaid and self.directItemLabel and player.srItems and player.srItems[1] and player.srItems[1].itemId then
                     local item = player.srItems[1]; row.sr:Hide(); row.srDirect.itemId = item.itemId; row.srDirect.itemName = item.name; row.srDirect.label:SetText(Raider.UI.Components.GetItemLabel(item.itemId) .. (table.getn(player.srItems) > 1 and (" +" .. (table.getn(player.srItems) - 1)) or "")); row.srDirect:Show()
                     local texture = type(GetItemIcon) == "function" and GetItemIcon(item.itemId) or nil; row.srDirect.iconRegion:SetTexture(texture or "Interface\\Icons\\INV_Misc_QuestionMark")
                 elseif singleRaid then row.srDirect.itemId = nil; row.srDirect:Hide(); row.sr:Hide(); row.srMissing:Show()

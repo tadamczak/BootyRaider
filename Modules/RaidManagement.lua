@@ -2594,6 +2594,10 @@ function RaidManagement.RefreshGroupView(page)
         local panel = page.groupPanels[groupIndex]
         panel:ClearAllPoints(); panel:SetPoint("TOPLEFT", page.groupCanvas, "TOPLEFT", x, y); panel:SetWidth(panelWidth); panel:SetHeight(bottom - top)
         if visible then panel:Show(); visibleIndex = visibleIndex + 1 else panel:Hide() end
+        -- Window focus reallocates absolute frame levels. Derive the outline
+        -- from the current tiles instead of retaining their creation levels.
+        panel.outlineLevel=panel:GetFrameLevel()+1
+        for _,slot in ipairs(page.groupSlots[groupIndex]) do panel.outlineLevel=math.max(panel.outlineLevel,slot:GetFrameLevel()+2) end
         local header = page.groupHeaders[groupIndex]
         RaidManagement.ApplyGroupTileAppearance(panel, header, headerHeight, settings)
         SetFontSize(header, headerTextSize)
@@ -2800,18 +2804,22 @@ function RaidManagement.CreateGroupGrid(page)
             slot.targetGroup = groupIndex; slot.slotIndex = slotIndex; slot.displayedMember = {}; slot:RegisterForClicks("LeftButtonUp", "RightButtonUp"); slot:RegisterForDrag("LeftButton")
             RaidManagement.AttachGroupSlotHandlers(slot, page)
             page.groupSlots[groupIndex][slotIndex] = slot
-            panel.outlineLevel = math.max(panel.outlineLevel or 0, slot:GetFrameLevel() + 2)
         end
     end
 end
 
 function RaidManagement.CreateMemberMenu(page, runAction, isIgnored)
+    local ancestor=page
+    while ancestor and ancestor~=UIParent do
+        Raider.UI.Components.InstallControlInput(ancestor)
+        ancestor=ancestor:GetParent()
+    end
     local dismiss = Raider.UI.Components.CreateControl(nil, UIParent)
-    dismiss:SetAllPoints(UIParent); dismiss:Hide()
+    dismiss:SetAllPoints(UIParent); dismiss:EnableMouse(true);dismiss:RegisterForClicks("LeftButtonUp","RightButtonUp");dismiss:Hide()
     page.memberMenuDismiss = dismiss
 
     local menu = Raider.UI.Components.CreateContainer(nil, UIParent)
-    menu:SetWidth(132); menu:SetHeight(168)
+    menu:SetWidth(132); menu:SetHeight(168);menu:EnableMouse(true)
     menu:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
     menu:SetBackdropColor(0.03, 0.03, 0.06, 0.98); menu:SetBackdropBorderColor(0.55, 0.55, 0.65, 1)
     menu.title = Raider.UI.Components.CreateLabel(menu, nil, "OVERLAY", "GameFontNormalSmall")
@@ -2829,9 +2837,12 @@ function RaidManagement.CreateMemberMenu(page, runAction, isIgnored)
         button.action = menuSpecs[menuIndex][2]
         button:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
         button:SetScript("OnClick", function()
-            local owner = page.contextSlot
-            if owner and owner.displayedMember then runAction(owner.displayedMember, this.action) end
+            local member,action=menu.member,this.action
             menu:Hide()
+            if member then
+                local ok,reason=runAction(member,action)
+                if ok==false and reason and Raider.Runtime then Raider.Runtime.Print(reason) end
+            end
         end)
         menu.buttons[menuIndex] = button
     end
@@ -2843,7 +2854,10 @@ function RaidManagement.CreateMemberMenu(page, runAction, isIgnored)
     menu.cancel:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
     menu.cancel:SetScript("OnClick", function() menu:Hide() end)
     dismiss:SetScript("OnClick", function() menu:Hide() end)
-    menu:SetScript("OnHide", function() dismiss:Hide() end); menu:Hide()
+    menu:SetScript("OnHide", function()
+        dismiss:Hide();page.contextSlot=nil;menu.member=nil
+        if Raider.UI.Components.openDropdownPanel==menu then Raider.UI.Components.openDropdownPanel=nil end
+    end); menu:Hide()
 
     page.showMemberMenu = function(owner) RaidManagement.ShowMemberMenu(page, owner, isIgnored) end
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(menu, {owner = page, kind = "popup", dismiss = dismiss}) end
@@ -2853,7 +2867,12 @@ end
 function RaidManagement.ShowMemberMenu(page, owner, isIgnored)
     if not owner or not owner.displayedMember then return end
     local member = owner.displayedMember
+    local previous=Raider.UI.Components.openDropdownPanel
+    if previous and previous~=page.memberMenu then previous:Hide() end
     page.contextSlot = owner
+    page.memberMenu.member={name=member.name,raidRank=member.raidRank,raidIndex=member.raidIndex}
+    page.memberMenu.toggle=owner
+    Raider.UI.Components.openDropdownPanel=page.memberMenu
     page.memberMenu.title:SetText(member.name or "Unknown")
     page.memberMenu.buttons[2].label:SetText((tonumber(member.raidRank) or 0) == 1 and "Demote" or "Promote")
     page.memberMenu.buttons[6].label:SetText(isIgnored(member.name) and "Unignore Player" or "Ignore Player")
@@ -2913,8 +2932,7 @@ local function ToolSpecs(page, kind)
             {key="quit",source=controls.quit,caption="End & Save",icon="save"}},
         leader = {{key = "rl-mode", source = controls.leaderMode, caption = "RL Mode", icon = "raid_tools", openRaid = true},
             {key = "ready-check", source = controls.readyCheck, caption = "Ready Check", icon = "check"},
-            {key = "raid-log", source = controls.raidLog, caption = "Raid Log", icon = "rules"},
-            {key = "live-tracking", source = controls.live, icon = "refresh"}},
+            {key = "raid-log", source = controls.raidLog, caption = "Raid Log", icon = "rules"}},
         loot = {
             {key = "loot-mode", source = controls.mode, caption = "LM Mode", icon = "loot_tools"},
             {key = "lm-config", source = page.lmConfigToggle, caption = "LM Config", icon = "settings"},

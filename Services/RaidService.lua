@@ -995,6 +995,7 @@ function RaidService.RecordReyCoinTrade(pending, recipient)
     table.insert(loot.rollHistory, sender .. " traded " .. pending.link .. " to " .. recipient .. ".")
     loot.tradedFrom = sender
     loot.tradedTo = recipient
+    loot.timestamp = time()
     loot.ordinaryReceipt = nil
     loot.awardHistoryKey = loot.awardHistoryKey or pending.historyKey
     recipientMember.loot = recipientMember.loot or {}
@@ -1466,7 +1467,7 @@ function RaidService.RecordLoot(message, confirmedAward,confirmedSoftReserve)
     local _, _, _, _, _, _, _, _, _, itemTexture = GetItemInfo(itemLink)
     attendance.nextLootRecordId = (tonumber(attendance.nextLootRecordId) or 0) + 1
     local loot = { recordId = attendance.nextLootRecordId, itemId = itemId, name = itemName,
-        link = itemLink, icon = itemTexture, count = quantity,
+        link = itemLink, icon = itemTexture, count = quantity, timestamp = time(),
         ordinaryReceipt = ordinary and true or nil,
         awardHistoryKey = award and award.historyKey or (transfer and transfer.historyKey) }
     AppendRollHistory(loot, rollHistory)
@@ -1524,8 +1525,13 @@ end
 function RaidService.RunMemberAction(member, action)
     if not member then return false end
     local name = member.name
-    if action == "leader" and type(PromoteToLeader) == "function" then
-        PromoteToLeader(name)
+    if action == "leader" then
+        -- Vanilla's RAID_LEADER menu uses PromoteByName; some extensions
+        -- additionally expose the later PromoteToLeader spelling.
+        local promote=type(PromoteByName)=="function" and PromoteByName or PromoteToLeader
+        if type(promote)~="function" then return false,"Changing the raid leader is unavailable on this client." end
+        if type(name)~="string" or name=="" then return false,"Select a raid member first." end
+        promote(name)
     elseif action == "assistant" then
         if (tonumber(member.raidRank) or 0) == 1 and type(DemoteAssistant) == "function" then DemoteAssistant(name)
         elseif type(PromoteToAssistant) == "function" then PromoteToAssistant(name) end

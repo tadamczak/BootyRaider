@@ -8,6 +8,14 @@ local WINDOW_SECONDS = 60 * 24 * 60 * 60
 local POINTS_PER_UNSUCCESSFUL_SR = 10
 local KNOWN_RAIDS = { ["Blackwing Lair"] = true, ["Molten Core"] = true, ["Onyxia's Lair"] = true, ["Karazhan10"] = true, ["Zul'Gurub"] = true, ["Other"] = true }
 
+function CSR.IsSavedAndEnded(raid, lifecycle, saved)
+    if type(raid)~="table" then return false end
+    if lifecycle==nil then lifecycle=raid.syncLifecycle;saved=raid.syncSaved end
+    if lifecycle~=nil then return lifecycle=="ended" and saved==true end
+    local endedAt,savedAt=tonumber(raid.endedAt or raid.completedAt),tonumber(raid.savedAt or raid.completedAt)
+    return endedAt~=nil and endedAt>0 and endedAt-endedAt==0 and savedAt~=nil and savedAt>0 and savedAt-savedAt==0
+end
+
 local function Normalize(value)
     return string.lower(tostring(value or ""))
 end
@@ -142,7 +150,7 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
         local savedAt = GetSavedAt(entries[index])
         local raidName = tostring(entries[index].raidName or "Other")
         local filterName = KNOWN_RAIDS[raidName] and raidName or "Other"
-        if entries[index].csrEnabled == true and (archives or savedAt >= cutoff) and savedAt <= now
+        if CSR.IsSavedAndEnded(entries[index]) and entries[index].csrEnabled == true and (archives or savedAt >= cutoff) and savedAt <= now
             and (not selectedRaids or selectedRaids[filterName]) then
             orderedCount = orderedCount + 1; ordered[orderedCount] = entries[index]
         end

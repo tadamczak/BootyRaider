@@ -84,6 +84,17 @@ local function EnsureNativeRaidGroupSettings()
     end
 end
 
+local function EnsureRaidGroupDefaults()
+    -- Both presentations start from the stock layout, but own their values.
+    for _,field in ipairs(nativeRaidGroupFields) do
+        local key,value="raidGroup"..field[1],field[2]
+        if BootyRaiderDB[key]==nil then
+            if type(value)=="table" then value={value[1],value[2],value[3]} end
+            BootyRaiderDB[key]=value
+        end
+    end
+end
+
 local borderPrefixes = {"raidGroup", "raidList"}
 local function BorderSize(value)
     value = tonumber(value)
@@ -151,7 +162,8 @@ local function InitializeDefaults(store)
         BootyRaiderDB.groupLayoutVersion = 2
     end
     if (tonumber(BootyRaiderDB.groupLayoutVersion) or 0) < 3 then
-        BootyRaiderDB.raidGroupShowBorder = false; BootyRaiderDB.nativeRaidGroupShowBorder = false
+        if BootyRaiderDB.raidGroupShowBorder~=nil then BootyRaiderDB.raidGroupShowBorder = false end
+        BootyRaiderDB.nativeRaidGroupShowBorder = false
         BootyRaiderDB.groupLayoutVersion = 3
     end
     if (tonumber(BootyRaiderDB.groupLayoutVersion) or 0) < 4 then
@@ -165,6 +177,7 @@ local function InitializeDefaults(store)
         if type(color) ~= "table" or color[1] == 0.48 and color[2] == 0.38 and color[3] == 0.20 then BootyRaiderDB.nativeRaidGroupBorderColor = {1,1,1} end
         BootyRaiderDB.groupLayoutVersion = 4
     end
+    EnsureRaidGroupDefaults()
     for _, prefix in ipairs(borderPrefixes) do
         if BootyRaiderDB[prefix .. "ShowHoverBorder"] == nil then BootyRaiderDB[prefix .. "ShowHoverBorder"] = false end
         BootyRaiderDB[prefix .. "HoverBorderSize"] = BorderSize(BootyRaiderDB[prefix .. "HoverBorderSize"])
@@ -184,6 +197,13 @@ local function InitializeDefaults(store)
     if BootyRaiderDB.raidClassColors == nil then BootyRaiderDB.raidClassColors = true end
     if BootyRaiderDB.csrShowClassIcon == nil then BootyRaiderDB.csrShowClassIcon = true end
     if BootyRaiderDB.csrUseClassColors == nil then BootyRaiderDB.csrUseClassColors = true end
+    if BootyRaiderDB.csrHideSectionHeader == nil then BootyRaiderDB.csrHideSectionHeader = false end
+    if BootyRaiderDB.raidStatsHideSectionHeader == nil then BootyRaiderDB.raidStatsHideSectionHeader = false end
+    for _,key in ipairs({"raidStatsListShowId","raidStatsListShowTime","raidStatsSingleUseClassColors",
+        "raidStatsSingleShowAttendance","raidStatsMultiUseClassColors","raidStatsMultiShowAttendance",
+        "raidStatsMultiShowSR","raidStatsMultiShowLoot"}) do
+        if BootyRaiderDB[key]==nil then BootyRaiderDB[key]=true end
+    end
     BootyRaiderDB.raidGroupOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidGroupOddLightness) or 5))
     BootyRaiderDB.raidListOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidListOddLightness) or 5))
     if BootyRaiderDB.raidHideSectionHeader == nil then BootyRaiderDB.raidHideSectionHeader = false end
@@ -191,7 +211,7 @@ local function InitializeDefaults(store)
     if BootyRaiderDB.useBootyRaidLogo == nil then BootyRaiderDB.useBootyRaidLogo = true end
     if BootyRaiderDB.nativeRaidButtonStyle ~= "booty" then BootyRaiderDB.nativeRaidButtonStyle = "game" end
     EnsureNativeRaidGroupSettings()
-    if BootyRaiderDB.raidLiveTrackingEnabled == nil then BootyRaiderDB.raidLiveTrackingEnabled = false end
+    if BootyRaiderDB.raidLiveTrackingEnabled == nil then BootyRaiderDB.raidLiveTrackingEnabled = true end
     local raidGroupColumns = tonumber(BootyRaiderDB.raidGroupColumns) or 2
     BootyRaiderDB.raidGroupColumns = math.max(1, math.min(4, math.floor(raidGroupColumns)))
     if BootyRaiderDB.raidGroupShowClass == nil then BootyRaiderDB.raidGroupShowClass = true end
@@ -465,7 +485,19 @@ function Database.GetRaidStatistics()
     local index, defaults = nil, BootyRaiderDB.lootRulesByRank
     for index = 1, table.getn(history.order) do
         local entry = history.raids[history.order[index]]
-        if entry then FreezeLootRules(entry, defaults); result[table.getn(result) + 1] = entry end
+        if entry then
+            local lifecycle,saved
+            if entry.syncRaidId and BootyRaiderDB.raidJournal and BootyRaiderDB.raidJournal.raids[entry.syncRaidId] then
+                local records=BootyRaiderDB.raidJournal.raids[entry.syncRaidId].records
+                local record,stored=records["raid:lifecycle"],records["saved:statistic"]
+                lifecycle=record and not record.deleted and not record.pendingCheckpoint and record.value or false
+                saved=stored and not stored.deleted and not stored.pendingCheckpoint and stored.value==true or false
+                entry.syncLifecycle,entry.syncSaved=lifecycle,saved
+            end
+            if Raider.Services.CSR.IsSavedAndEnded(entry,lifecycle,saved) then
+                FreezeLootRules(entry, defaults);result[table.getn(result)+1]=entry
+            end
+        end
     end
     return result
 end
@@ -766,42 +798,8 @@ end
 
 function Database.ResetRaidGroupView()
     Database.Ensure()
-    BootyRaiderDB.raidGroupOddLightness = 5
-    BootyRaiderDB.raidGroupColumns = 2
-    BootyRaiderDB.raidGroupHideEmptyGroups = false
-    BootyRaiderDB.raidGroupAutoAdjustVertically = false
-    BootyRaiderDB.raidGroupAutoAdjustHorizontally = false
-    BootyRaiderDB.raidGroupShowClass = true
-    BootyRaiderDB.raidGroupShowLevel = true
-    BootyRaiderDB.raidGroupShowHeader = true
-    BootyRaiderDB.raidGroupShowBorder = false
-    BootyRaiderDB.raidGroupBorderSize = 1
-    BootyRaiderDB.raidGroupShowHoverBorder = false
-    BootyRaiderDB.raidGroupHoverBorderSize = 1
-    BootyRaiderDB.raidGroupHoverBorderColor = {1, 0.78, 0.2}
-    BootyRaiderDB.raidGroupHeaderTextColor = { 1, 0.82, 0 }
-    BootyRaiderDB.raidGroupHeaderBackgroundColor = { 0.025, 0.025, 0.025 }
-    BootyRaiderDB.raidGroupHeaderHoverTextColor = {1,1,1}
-    BootyRaiderDB.raidGroupHeaderTransparency = 0
-    BootyRaiderDB.raidGroupMemberTexture = "color"
-    BootyRaiderDB.raidGroupBorderTexture = "project"
-    BootyRaiderDB.raidGroupViewBackgroundTexture = "color"
-    BootyRaiderDB.raidGroupViewBackgroundColor = {0.025,0.025,0.025}
-    BootyRaiderDB.raidGroupBorderColor = { 0.48, 0.38, 0.20 }
-    BootyRaiderDB.raidGroupClassColors = true
-    BootyRaiderDB.raidGroupShowLootMaster = true
-    BootyRaiderDB.raidGroupShowRoleIcon = true
-    BootyRaiderDB.raidGroupAutoTileWidth = true
-    BootyRaiderDB.raidGroupTileWidth = 280
-    BootyRaiderDB.raidGroupTileHeight = 22
-    BootyRaiderDB.raidGroupHeaderHeight = 18
-    BootyRaiderDB.raidGroupMargin = 0
-    BootyRaiderDB.raidGroupTileTextSize = 10
-    BootyRaiderDB.raidGroupHeaderTextSize = 9
-    BootyRaiderDB.raidGroupBackgroundColor = { 0.025, 0.025, 0.025 }
-    BootyRaiderDB.raidGroupTextColor = { 1, 1, 1 }
-    BootyRaiderDB.raidGroupHoverColor = { 0.12, 0.09, 0.025 }
-    BootyRaiderDB.raidGroupPressedColor = { 0.20, 0.14, 0.03 }
+    for _,field in ipairs(nativeRaidGroupFields) do BootyRaiderDB["raidGroup"..field[1]]=nil end
+    EnsureRaidGroupDefaults()
 end
 
 function Database.ResetNativeRaidGroupView()

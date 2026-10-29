@@ -63,7 +63,7 @@ local function Order(cache,now,selected,archives,awards)
         local at=Date(entry)
         local raidName=tostring(entry.raidName or "Other")
         local filter=known[raidName] and raidName or "Other"
-        if entry.csrEnabled==true and (not selected or selected[filter]) then
+        if Raider.Services.CSR.IsSavedAndEnded(entry) and entry.csrEnabled==true and (not selected or selected[filter]) then
             if at>now then cache.future=math.min(cache.future or at,at)
             elseif archives or awards or at>=now-WINDOW then
                 table.insert(ordered,entry)
@@ -113,22 +113,24 @@ function Service.BuildSummary(entries,rules,currentTime,target,rosterData,select
     local dirty,seen={},{}
     local changed=all and true or false
     for _,entry in ipairs(entries or {}) do
-        local id=entry.syncRaidId
-        seen[id]=true
-        local previous=cache.raids[id]
-        local change=changes[id] or {}
-        local revision=change.revision or 0
-        if not previous or previous.entry~=entry or previous.revision~=revision then
-            changed=true
-            local members=IndexMembers(entry)
-            if not previous or previous.revision==revision or (change.all or 0)>previous.revision then
-                DirtyMembers(dirty,previous and previous.members);DirtyMembers(dirty,members)
-            else
-                for name,at in pairs(change.names) do if at>previous.revision then dirty[name]=true end end
-                for name in pairs(previous.members) do if not members[name] then dirty[name]=true end end
-                for name in pairs(members) do if not previous.members[name] then dirty[name]=true end end
+        if baseline.IsSavedAndEnded(entry) then
+            local id=entry.syncRaidId
+            seen[id]=true
+            local previous=cache.raids[id]
+            local change=changes[id] or {}
+            local revision=change.revision or 0
+            if not previous or previous.entry~=entry or previous.revision~=revision then
+                changed=true
+                local members=IndexMembers(entry)
+                if not previous or previous.revision==revision or (change.all or 0)>previous.revision then
+                    DirtyMembers(dirty,previous and previous.members);DirtyMembers(dirty,members)
+                else
+                    for name,at in pairs(change.names) do if at>previous.revision then dirty[name]=true end end
+                    for name in pairs(previous.members) do if not members[name] then dirty[name]=true end end
+                    for name in pairs(members) do if not previous.members[name] then dirty[name]=true end end
+                end
+                cache.raids[id]={entry=entry,members=members,revision=revision}
             end
-            cache.raids[id]={entry=entry,members=members,revision=revision}
         end
     end
     for id,source in pairs(cache.raids) do

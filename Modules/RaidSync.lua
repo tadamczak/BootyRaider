@@ -23,7 +23,7 @@ local function Dialog(parent,title,width,height)
     local sizes=Raider.Database.Ensure().raidDialogSizes or {};Raider.Database.Ensure().raidDialogSizes=sizes
     local saved=sizes[title] or {}
     if title=="Resolve raid conflict" and saved.layoutVersion~=2 then saved={layoutVersion=2};sizes[title]=saved end
-    UI.Window.MakeResizable(frame,{minWidth=width,minHeight=height,width=saved.width,height=saved.height,
+    UI.Window.MakeResizable(frame,{minWidth=title=="Raid synchronization" and 500 or width,minHeight=height,width=saved.width,height=saved.height,
         save=function(w,h) sizes[title]={width=w,height=h,layoutVersion=2} end})
     frame:Hide();return frame
 end
@@ -184,6 +184,7 @@ function Sync.Create(parent,api)
     end
     for _,button in pairs(controller.tabs) do button.bootyCaptionBottomInset=0;button.bootyLabelInsets={22,4};UI.ApplyButtonCaptionBaseline(button) end
     controller.officers=Label(frame,"",360,-36,470,36)
+    UI.AttachLabelTooltip(frame,controller.officers,"Connected officers",function() return controller.officersText or "No other officer connected." end)
     controller.headings={}
     for _,title in ipairs({"#","Raid ID","Raid","Status","Sync status","Conflicts","Actions"}) do table.insert(controller.headings,Label(frame,title,10,-112,100,18)) end
     for _,heading in ipairs(controller.headings) do heading:SetTextColor(unpack(UI.Theme.colors.goldText)) end
@@ -521,7 +522,9 @@ function Sync.Create(parent,api)
         self.status:SetText(prefix..(status.syncStatus or "Up to date").."|r")
         local names={}
         for _,peer in ipairs(status.peers or {}) do if peer.available or peer.syncState=="error" then table.insert(names,peer.name.." - "..(peer.syncState or "pending")) end end
-        self.officers:SetText(table.getn(names)>0 and (string.gsub(prefix,"Sync status:","Connected officers:")..table.concat(names,", ").."|r") or "No other officer connected.")
+        self.officerCount=table.getn(names)
+        self.officersText=self.officerCount>0 and (string.gsub(prefix,"Sync status:","Connected officers:")..table.concat(names,", ").."|r") or "No other officer connected."
+        self.officers:SetText(self.officersText)
         frame:LayoutContent(frame:GetWidth(),frame:GetHeight())
         local visiblePageSize=self.visiblePageSize or pageSize
         local all,total={},0
@@ -566,7 +569,13 @@ function Sync.Create(parent,api)
         controller.tabs.log:ClearAllPoints();controller.tabs.log:SetPoint("LEFT",controller.tabs.sessions,"RIGHT",6,0)
         local officerWidth=math.max(1,w-222)
         controller.officers:ClearAllPoints();controller.officers:SetPoint("TOPLEFT",self,"TOPLEFT",208,-39);controller.officers:SetWidth(officerWidth);controller.officers:SetHeight(0)
-        local headerHeight=math.max(22,UI.MeasureTextHeight(controller.officers,officerWidth,true));controller.officers:SetHeight(headerHeight)
+        controller.officers:SetText(controller.officersText or "")
+        local headerHeight=math.max(22,UI.MeasureTextHeight(controller.officers,officerWidth,true))
+        if headerHeight>math.max(32,h-180) or w<600 and headerHeight>32 then
+            controller.officers:SetText(tostring(controller.officerCount or 0).." officers connected.")
+            headerHeight=math.max(22,UI.MeasureTextHeight(controller.officers,officerWidth,true))
+        end
+        controller.officers:SetHeight(headerHeight)
         if not controller.toolbar then controller.toolbar=UI.CreateToolbarSurface(self,false,true);controller.toolbar:SetFrameLevel(self:GetFrameLevel());UI.SetSurfaceHorizontalBorders(controller.toolbar,false,true) end
         controller.toolbar.bootyBorderOutsetLeft=0;controller.toolbar.bootyBorderOutsetRight=0
         UI.SetSurfaceHorizontalBorders(controller.toolbar,false,true)
@@ -581,12 +590,16 @@ function Sync.Create(parent,api)
         local values={}
         for i,row in ipairs(controller.rows) do values[i]={};for c,cell in ipairs(row.cells) do values[i][c]=cell:GetText() end end
         local widths=Raider.Modules.RaidManagement.FitRaidColumns(self,controller,controller.headings,values,w-20,88)
-        local x=10
+        local x,headingHeight=10,18
         for c,heading in ipairs(controller.headings) do
             heading:ClearAllPoints();heading:SetPoint("TOPLEFT",self,"TOPLEFT",x,-tableY);heading:SetWidth(widths[c]-6);x=x+widths[c]
-            if tableMode then heading:Show() else heading:Hide() end
+            if tableMode then
+                heading:SetHeight(0);headingHeight=math.max(headingHeight,UI.MeasureTextHeight(heading,widths[c]-6,true));heading:Show()
+            else heading:Hide() end
         end
-        local rowY=tableY+(tableMode and 24 or 0);local maxHeight=26
+        for _,heading in ipairs(controller.headings) do heading:SetHeight(headingHeight) end
+        local headingSpace=tableMode and headingHeight+6 or 0
+        local rowY=tableY+headingSpace;local maxHeight=26
         for index,row in ipairs(controller.rows) do
             local height=26;local cellX=4
             row:ClearAllPoints();row:SetPoint("TOPLEFT",self,"TOPLEFT",10,-rowY);row:SetWidth(w-20)
@@ -597,13 +610,17 @@ function Sync.Create(parent,api)
                     height=math.max(height,UI.MeasureTextHeight(cell,widths[c]-6,true)+10);cellX=cellX+widths[c]
                 elseif cell~=row.label then cell:Hide() end
             end
-            if not tableMode then row.label:ClearAllPoints();row.label:SetPoint("LEFT",row,"LEFT",4,0);row.label:SetWidth(w-28);row.label:SetHeight(0);height=math.max(26,UI.MeasureTextHeight(row.label,w-28,true)+10) end
+            if not tableMode then
+                local actionWidth=0;for _,button in pairs(row.actions) do if button:IsShown() then actionWidth=actionWidth+28 end end
+                row.label:ClearAllPoints();row.label:SetPoint("LEFT",row,"LEFT",4,0);row.label:SetWidth(w-28-actionWidth);row.label:SetHeight(0)
+                height=math.max(26,UI.MeasureTextHeight(row.label,w-28-actionWidth,true)+10);cellX=w-24-actionWidth
+            end
             for _,key in ipairs({"stop","join","reopen","conflicts","compare","resolve"}) do local button=row.actions[key];if button:IsShown() then button:ClearAllPoints();button:SetPoint("LEFT",row,"LEFT",cellX,0);cellX=cellX+28 end end
             row:SetHeight(height);rowY=rowY+height+2;maxHeight=math.max(maxHeight,height)
         end
         local previous=controller.visiblePageSize
-        controller.visiblePageSize=math.max(1,math.min(pageSize,math.floor((h-tableY-24-72)/(maxHeight+2))))
-        controller.empty:ClearAllPoints();controller.empty:SetPoint("TOPLEFT",self,"TOPLEFT",14,-tableY-24);controller.empty:SetWidth(w-28)
+        controller.visiblePageSize=math.max(1,math.min(pageSize,math.floor((h-tableY-headingSpace-72)/(maxHeight+2))))
+        controller.empty:ClearAllPoints();controller.empty:SetPoint("TOPLEFT",self,"TOPLEFT",14,-tableY-headingSpace);controller.empty:SetWidth(w-28)
         if previous~=controller.visiblePageSize and not controller.refreshing and controller:IsVisible() then controller:Refresh() end
     end
     function controller:Open(raidId,tab)

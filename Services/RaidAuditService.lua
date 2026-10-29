@@ -11,6 +11,17 @@ end
 local function IsTest()
     return Raider.Services.TestRaid and Raider.Services.TestRaid.IsActive()
 end
+function Audit.IsLogRecording(id,db)
+    db=db or Raider.Database.Ensure()
+    return type(db.raidLogRecording)=="table" and db.raidLogRecording[id]==true or false
+end
+function Audit.StartLogRecording(id)
+    if type(id)~="string" or id=="" or string.len(id)>300 then return false,"Select a raid session first." end
+    local db=Store()
+    db.raidLogRecording=db.raidLogRecording or {}
+    db.raidLogRecording[id]=true
+    return true
+end
 function Audit.EnsureIdentity(record)
     if not record then return nil end
     if not record.syncRaidId then record.syncRaidId = Raider.Services.RaidJournal.NewRaidId(Store()) end
@@ -169,7 +180,7 @@ function Audit.Start(attendance)
 end
 function Audit.LootValue(member,loot)
     return {recipient=member.name,item=tonumber(loot.itemId) or loot.itemId or loot.name,name=loot.name,link=loot.link,count=loot.count or 1,
-        ordinary=loot.ordinaryReceipt==true,historyKey=loot.awardHistoryKey}
+        ordinary=loot.ordinaryReceipt==true,historyKey=loot.awardHistoryKey,timestamp=loot.timestamp}
 end
 local function Copy(value)
     if type(value)~="table" then return value end
@@ -277,6 +288,7 @@ function Audit.PrepareSavedMemberChanges(record,members,changes)
                 value.name=loot.name or (existing and SameItem(existing.item,item) and existing.name or nil)
                 if existing and not SameItem(existing.item,item) then value.link=nil end
                 value.count=tonumber(loot.count) or 1;value.ordinary=existing and existing.ordinary==true or false
+                if not existing then value.timestamp=loot.timestamp end
                 table.insert(changes,{key="loot:"..loot.syncRecordId,value=value})
             end
         end
