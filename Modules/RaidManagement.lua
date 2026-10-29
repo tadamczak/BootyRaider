@@ -605,8 +605,11 @@ local function OnRaidPageSizeChanged()
     if not this:IsVisible() then return end
     -- The standalone host sizes content and invokes OnResize as one layout.
     -- Native width/height notifications inside that batch must not render again.
-    local parent=this:GetParent()
-    if this.bootyResizeInProgress or parent and parent.bootyResizeInProgress then return end
+    local owner=this
+    while owner do
+        if owner.bootyResizeInProgress then return end
+        owner=owner:GetParent()
+    end
     local currentWidth, currentHeight = PageSpan(this)
     if math.abs(currentWidth - (this.layoutWidth or 0)) <= 0.5 and math.abs(currentHeight - (this.layoutHeight or 0)) <= 0.5 then return end
     this.layoutWidth, this.layoutHeight = currentWidth, currentHeight
@@ -3653,7 +3656,7 @@ function RaidManagement.CreateLootMasterController(options)
     options.page.reyCoinPanel.resizeGrip.texture:Hide()
     UI.RegisterSkinCallback(function() options.page.reyCoinPanel.resizeGrip.texture:Hide() end)
     local configPanel=options.page.lmConfigPanel
-    configPanel:SetMovable(true);configPanel:RegisterForDrag("LeftButton")
+    configPanel:SetMovable(true);configPanel:EnableMouse(true);configPanel:RegisterForDrag("LeftButton")
     configPanel:SetScript("OnDragStart",function() if options.page.lmConfigSolo then configPanel:StartMoving() end end)
     configPanel:SetScript("OnDragStop",function() configPanel:StopMovingOrSizing();controller.ReanchorPanels() end)
     local reyPanel = options.page.reyCoinPanel

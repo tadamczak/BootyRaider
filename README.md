@@ -127,4 +127,4 @@ Raid row actions use matching compact gold buttons. Sync uses a circular-arrow i
 
 Synchronization supports up to 12 other officers (13 clients including yours). It sends missing changes and inventory metadata; unchanged discovery does not resend the raid database. Private raid edits do not trigger shared inventory announcements. Technical status display updates are grouped during packet bursts; raid data changes remain immediate.
 
-Without BootySuite, the top tabs **Raid**, **Raid Stats** and **CSR** switch between BootyRaider views while retaining your raid session. Standalone resizing uses the same update cadence as Suite and settles immediately when you release the mouse.
+Without BootySuite, the top tabs **Raid**, **Raid Stats** and **CSR** switch between BootyRaider views while retaining your raid session, window position and size. Standalone resizing follows Suite behavior. Drag the LM Config window when opened from the main Raid view.

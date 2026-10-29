@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.21 — 2026-10-29
+
+- Keep the window position and size when switching standalone tabs; resize content through live native anchors like Suite.
+- Enable dragging LM Config when opened from the main Raid view.
+
 ## 1.0.0-dev.20 — 2026-10-29
 
 - Avoid duplicate Raid redraws during host-managed resizing.

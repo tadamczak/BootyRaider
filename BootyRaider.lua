@@ -8,6 +8,7 @@ local function CreateView(parent,host,id,create)
     local UI=Raider.UI.Components
     local frame=UI.CreateContainer(nil,parent);frame:SetAllPoints(parent)
     local body=UI.CreateContainer(nil,frame);body:SetPoint("TOPLEFT",frame,"TOPLEFT",0,-30)
+    body:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",0,0)
     body.bootyWidthOwner=parent;body.bootyWidthInset=0;body.bootyHeightOwner=parent;body.bootyHeightInset=30
     local toolbar=UI.CreateToolbarSurface(frame,false,true)
     toolbar.bootyBorderOutsetLeft=0;toolbar.bootyBorderOutsetRight=0;UI.SetSurfaceHorizontalBorders(toolbar,false,true)
@@ -31,7 +32,7 @@ local function CreateView(parent,host,id,create)
         button:SetScript("OnClick",function()
             if target==id then return end
             local previous=host.windows and host.windows[id]
-            local opened=host.OpenView(target)
+            local opened=host.OpenView(target,previous)
             if opened and previous then
                 local ready,reason=previous.HideView()
                 if ready==false then host.Print(reason or "Cannot close this raid view.");return end
