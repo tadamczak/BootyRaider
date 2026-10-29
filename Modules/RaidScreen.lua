@@ -182,6 +182,7 @@ function Screen.Create(parent, host)
         beginRaidSession=function() Runtime.sessionController:Begin();Runtime.worldContext.Update() end,
         startNewRaid=function(id,name,syncEnabled) return Runtime.sessionController:StartNew(id,name,syncEnabled) end,
         saveRaidSession=Runtime.SaveSession,quitRaidSession=Runtime.QuitSession,
+        handleEndedSession=Runtime.ShowEndedSessionPrompt,
         continueRaidSession=function(context) Runtime.sessionController:Continue(context) end,
         dismissRaidSessionTransition=function(context) Runtime.sessionController:DismissTransition(context) end,
         hasPendingRaidTransition=function() return Raider.raidSessionTransitionPending end,
@@ -198,6 +199,7 @@ function Screen.Create(parent, host)
     function controller:Hide() page:Hide();lifecycle:Hide() end
     function controller:Refresh() Refresh() end
     function controller:HideSessionTransitionPrompt() page.HideSessionTransitionPrompt() end
+    function controller:CancelSessionSave() page.CancelSessionSave() end
     function controller:OnResize() SizePage();Refresh() end
     function controller:OnGroupChanged()
         if page:IsVisible() then Raid.UpdateConvertRaidButton(page, false) end

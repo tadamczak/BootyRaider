@@ -67,6 +67,9 @@ function Runtime.RequestRaidScan()
     return true
 end
 function Runtime.SaveSession(options)
+    if type(options)=="table" and options.endSession and Runtime.ShowEndedSessionPrompt(Raider.Database.GetRaidAttendance()) then
+        return false,"This raid has already ended. Choose Continue Session or Quit."
+    end
     local saved,failure=Runtime.sessionController:Complete(options)
     if saved then Runtime.CloseSessionPrompts(); Runtime.RefreshViews() end
     return saved,failure
@@ -75,6 +78,7 @@ function Runtime.QuitSession(leaveOnly)
     local ok,reason=Runtime.sessionController:Quit(leaveOnly)
     if ok==false then return false,reason end
     Runtime.CloseSessionPrompts()
+    Runtime.RefreshViews()
     return true
 end
 function Runtime.AcceptLoadedSnapshot()
@@ -147,9 +151,74 @@ function Runtime.CloseSessionPrompts()
     HideTransitionPrompt()
     local view=Runtime.views.raid
     if view and view.HideSessionTransitionPrompt then view:HideSessionTransitionPrompt() end
+    if Runtime.endedSessionPrompt then Runtime.endedSessionPrompt:Hide() end
+end
+function Runtime.ShowEndedSessionPrompt(attendance)
+    local current=Raider.Database.GetRaidAttendance()
+    if not Raider.active or not attendance or attendance~=current or not attendance.syncRaidId or not Runtime.replica or Runtime.IsTestRaid() then return false end
+    local id=attendance.syncRaidId
+    -- Most context events read only the cached lifecycle. Attribution is needed
+    -- once an end is observed, not on each roster/world notification.
+    if Runtime.replica.GetRaidInfo(id).lifecycle~="ended" then return false end
+    local status=Runtime.replica.GetStatus(id)
+    local revision=status.lifecycleRevision
+    Raider.raidSessionPaused=true;Raider.raidLiveTracking=false
+    local dialog=Runtime.endedSessionPrompt
+    if dialog and dialog.raidId==id and dialog.endRevision==revision then return true end
+    Runtime.CloseSessionPrompts()
+    local view=Runtime.views.raid
+    if view and view.CancelSessionSave then view:CancelSessionSave() end
+    if not dialog then
+        dialog=UI.Window.CreateProjectConfirmation("BootyRaiderSessionEnded","Raid ended","Continue Session","raids",{modal=false})
+        if UI.WindowStack then UI.WindowStack.SetOwner(dialog,RaidPromptOwner) end
+        dialog:SetWidth(430);dialog.no:SetText("Quit");dialog.no:SetWidth(96);dialog.yes:SetWidth(132)
+        dialog.yes:ClearAllPoints();dialog.yes:SetPoint("BOTTOMRIGHT",dialog,"BOTTOMRIGHT",-8,8)
+        dialog.no:ClearAllPoints();dialog.no:SetPoint("RIGHT",dialog.yes,"LEFT",-10,0)
+        Runtime.endedSessionPrompt=dialog
+    end
+    dialog.raidId=id;dialog.endRevision=revision
+    local message=tostring(status.endedBy or "An officer")..(status.savedAndEnded and " has saved and ended the raid." or " has ended the raid.")
+        .." Do you want to continue this session?"
+    local function Owner()
+        local owner=Raider.Database.GetRaidAttendance()
+        if not Raider.active or not owner or owner.syncRaidId~=id or dialog.raidId~=id or dialog.endRevision~=revision then return nil end
+        local latest=Runtime.replica.GetStatus(id)
+        if latest.lifecycle=="ended" and latest.lifecycleRevision~=revision then Runtime.ShowEndedSessionPrompt(owner);return nil end
+        return owner,latest
+    end
+    local onContinue,onQuit
+    local function Failure(reason)
+        dialog:Open(message.."\n"..tostring(reason),onContinue,onQuit)
+    end
+    onContinue=function()
+        local owner,latest=Owner();if not owner then return end
+        if latest.lifecycle=="ended" then
+            local ok,reason=Runtime.replica.Reopen(id,revision)
+            if not ok then Failure(reason);return end
+        end
+        -- Keep local physical receipts. Recovering a fresh projection here
+        -- could discard facts still awaiting a successful journal write.
+        owner.syncEnded=nil
+        Runtime.sessionController:Continue(nil)
+        Runtime.CloseSessionPrompts()
+        Runtime.AcceptLoadedSnapshot()
+        Runtime.RefreshViews()
+    end
+    onQuit=function()
+        local owner,latest=Owner();if not owner then return end
+        if latest.needsAttention then
+            Failure("Some loot changes exist only on this character. Continue the session and save them before quitting.")
+            return
+        end
+        local ok,reason=Runtime.QuitSession(true)
+        if not ok then Failure(reason) end
+    end
+    dialog:Open(message,onContinue,onQuit)
+    return true
 end
 local function ShowTransitionPrompt(contextKey)
     local attendance=Raider.Database.GetRaidAttendance()
+    if Runtime.ShowEndedSessionPrompt(attendance) then return false end
     if not Raider.raidSessionDraft or not Raider.Services.RaidRes.HasSession(attendance) then Runtime.CloseSessionPrompts(); return false end
     Runtime.sessionController:ConfirmTransition(contextKey)
     if not Runtime.transitionPrompt then
@@ -172,6 +241,7 @@ local function ShowTransitionPrompt(contextKey)
         or "You left the raid context. Continue this session, or save and end it?"
     dialog.contextKey=contextKey
     dialog:Open(message,function()
+        if Runtime.ShowEndedSessionPrompt(Raider.Database.GetRaidAttendance()) then return end
         if Raider.Database.GetRaidAttendance()~=attendance or not Raider.raidSessionDraft then Runtime.CloseSessionPrompts(); return end
         Runtime.sessionController:Continue(contextKey)
         if string.find(contextKey or "","different-raid-context|",1,true)==1 then
@@ -181,6 +251,7 @@ local function ShowTransitionPrompt(contextKey)
         end
         Runtime.RefreshViews()
     end,function()
+        if Runtime.ShowEndedSessionPrompt(Raider.Database.GetRaidAttendance()) then return end
         if Raider.Database.GetRaidAttendance()~=attendance or not Raider.raidSessionDraft then Runtime.CloseSessionPrompts(); return end
         Runtime.OpenView("raid")
         local view=Runtime.GetView("raid")
@@ -321,6 +392,7 @@ function Runtime.Initialize(host)
         showRaidStartReminder=function() UI.ShowOpaquePopup("BOOTY_RAIDER_START_RAID_REMINDER") end,
         hideRaidStartReminder=function() UI.HideOpaquePopup("BOOTY_RAIDER_START_RAID_REMINDER") end,
         showSessionTransitionPrompt=ShowTransitionPrompt,hideSessionTransitionPrompt=HideTransitionPrompt,
+        handleEndedSession=Runtime.ShowEndedSessionPrompt,
     })
     Runtime.nativeRaidTab=Raider.Modules.NativeRaidTab.Create({
         isEnabled=function() return Raider.active and not Runtime.stoppingNativeContent and Raider.Database.GetSetting("useBootyRaidTab") end,
@@ -360,7 +432,8 @@ local function ReleaseResources()
     end
     if Runtime.worldContext then Attempt(Runtime.worldContext.CancelConfirmation,Runtime.worldContext) end
     Attempt(RestoreLootHook)
-    Attempt(HideTransitionPrompt)
+    Attempt(Runtime.CloseSessionPrompts)
+    if Runtime.endedSessionPrompt then Runtime.endedSessionPrompt.raidId=nil;Runtime.endedSessionPrompt.endRevision=nil end
     for _,view in pairs(Runtime.views) do
         if view.Stop then Attempt(view.Stop,view) elseif view.Hide then Attempt(view.Hide,view) end
     end

@@ -770,10 +770,16 @@ function Replica.Create(options)
         local localFailure=active and id and Canonical(active.syncRaidId)==Canonical(id) and active.syncLocalAuditFailure
         local lifecycle=id and Record(Canonical(id),"raid:lifecycle")
         local metadata=id and Record(Canonical(id),"raid:metadata")
-        if lifecycle=="ended" and not blocked and not transport.lastError then
+        local lifecycleRevision,endedBy,savedAndEnded
+        if lifecycle=="ended" then
             local _,record=Record(Canonical(id),"raid:lifecycle")
             local operation=record and record.revision and J.GetOperation(db,record.revision)
-            message=tostring(operation and operation.author or "An officer").." ended this raid. Updates still synchronize. Reopen it to continue recording."
+            lifecycleRevision=record and record.revision
+            endedBy=operation and operation.author
+            savedAndEnded=operation and operation.kind=="raid.save" and operation.detail and operation.detail.endSession==true or false
+            if not blocked and not transport.lastError then
+                message=tostring(endedBy or "An officer").." ended this raid. Updates still synchronize. Reopen it to continue recording."
+            end
         end
         if localFailure then message="Needs attention: a confirmed loot change is stored only locally. Save the raid to retry synchronization. "..tostring(localFailure) end
         local syncStatus=transport.lastError and "Sync error! Send log" or (id and state.receivedRaids and state.receivedRaids[Canonical(id)] or not id and state.receivedSinceLoad) and "New data received. Please reload!"
@@ -781,7 +787,8 @@ function Replica.Create(options)
         if id and not api.IsRaidSyncEnabled(id) then syncStatus="Sync off" end
         return {syncStatus=syncStatus,revision=state.revision+(transport.revision or 0),localOnly=transport.localOnly~=false,pending=transport.pending or 0,
             conflicts=conflicts,compatible=transport.compatible~=false,peers=type(transport.peers)=="table" and transport.peers or {},
-            raidName=metadata and metadata.id,retryAvailable=transport.lastError~=nil,lifecycle=lifecycle,recordingGap=recordingGap,csrWithheld=blocked and true or false,needsAttention=localFailure and true or false,message=message}
+            raidName=metadata and metadata.id,retryAvailable=transport.lastError~=nil,lifecycle=lifecycle,lifecycleRevision=lifecycleRevision,
+            endedBy=endedBy,savedAndEnded=savedAndEnded,recordingGap=recordingGap,csrWithheld=blocked and true or false,needsAttention=localFailure and true or false,message=message}
     end
     local function RaidList()
         if state.catalog then return state.catalog end

@@ -8,6 +8,12 @@ local function GroupSettings(page)
     return page and page.groupSettings or BootyRaiderDB
 end
 
+local function HandleEndedSession(options, attendance)
+    if not attendance then return false end
+    if options.handleEndedSession and options.handleEndedSession(attendance) then return true end
+    return attendance.syncEnded and true or false
+end
+
 function RaidManagement.ResetIssueAttention(page)
     page.bootyIssuesHidden = nil
     local button = page.classicIssues
@@ -3375,6 +3381,13 @@ end
 function RaidManagement.HandleWorldContext(options, context, confirmed)
     if options.setTransitionPending then options.setTransitionPending(nil) end
     local attendance = options.getAttendance()
+    if not options.isTestRaid() and HandleEndedSession(options, attendance) then
+        context.active = false; context.observedRaid = false
+        context.raidZone = nil; context.promptedContext = nil
+        options.setContinuedContext(nil)
+        options.hideSessionTransitionPrompt(); options.hideRaidStartReminder()
+        return
+    end
     local zone = options.getZone() or ""
     local inInstance, instanceType = options.getInstanceState()
     local inRaidInstance = inInstance and instanceType == "raid"
@@ -4204,6 +4217,17 @@ function RaidManagement.AttachActionHandlers(options)
         if pendingSaveRequest and options.cancelRaidSave then options.cancelRaidSave(pendingSaveRequest.confirmation) end
         pendingSaveRequest = nil
     end
+    options.page.CancelSessionSave = function()
+        saveDialog.transitionContext = nil
+        CancelPreparedSave(); overwriteDialog:Hide(); saveDialog:Hide()
+        saveDialog.attendanceOwner = nil
+    end
+    local function StopEndedTransition()
+        if not HandleEndedSession(options, options.getAttendance()) then return false end
+        if sessionPrompt then sessionPrompt:Hide() end
+        options.page.CancelSessionSave()
+        return true
+    end
     local overwriteHide = overwriteDialog:GetScript("OnHide")
     overwriteDialog:SetScript("OnHide", function()
         if overwriteHide then overwriteHide() end
@@ -4218,6 +4242,7 @@ function RaidManagement.AttachActionHandlers(options)
         saveDialog.error:SetText(message or "The raid could not be saved."); saveDialog.error:Show()
     end
     local function SubmitSave(request)
+        if StopEndedTransition() then return end
         pendingSaveRequest = nil
         local saved, failure = options.saveRaidSession(request)
         if saved == true then saveDialog.transitionContext = nil; saveDialog:Hide()
@@ -4232,11 +4257,13 @@ function RaidManagement.AttachActionHandlers(options)
         CancelPreparedSave(); overwriteDialog:Hide(); saveDialog.attendanceOwner = nil
     end)
     saveDialog.cancel:SetScript("OnClick", function()
+        local transitionContext = saveDialog.transitionContext
         saveDialog:Hide()
-        if saveDialog.transitionContext and sessionPrompt then sessionPrompt:Show() end
         saveDialog.transitionContext = nil
+        if transitionContext and not StopEndedTransition() then options.page.ShowSessionTransitionPrompt(transitionContext) end
     end)
     saveDialog.save:SetScript("OnClick", function()
+        if StopEndedTransition() then return end
         local raidId=string.gsub(tostring(saveDialog.raidId:GetText() or ""),"^%s+","");raidId=string.gsub(raidId,"%s+$","")
         if raidId=="" then saveDialog.error:SetText("Raid ID is required.");saveDialog.error:Show();return end
         if options.getAttendance() ~= saveDialog.attendanceOwner then SaveFailure("The active raid changed. Reopen Save Raid before saving."); return end
@@ -4290,6 +4317,7 @@ function RaidManagement.AttachActionHandlers(options)
         self.error:Hide();SyncAttendanceOption(); self:Show();self.raidId:SetFocus();self.raidId:HighlightText()
     end
     options.page.OpenSaveDialog = function(contextKey, endSession)
+        if StopEndedTransition() then return end
         saveDialog.transitionContext=contextKey;saveDialog.endSession=endSession==true;saveDialog:Open()
     end
     saveDialog:Hide()
@@ -4344,20 +4372,24 @@ function RaidManagement.AttachActionHandlers(options)
     sessionPrompt:Hide()
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(sessionPrompt, {owner = options.page}) end
     continueButton:SetScript("OnClick", function()
+        if StopEndedTransition() then return end
         sessionPrompt:Hide()
         if options.continueRaidSession then options.continueRaidSession(sessionPrompt.contextKey) end
         if sessionPrompt.contextKey and string.find(sessionPrompt.contextKey, "different-raid-context|", 1, true) == 1 then OfferCurrentRaidRefresh() end
     end)
     saveButton:SetScript("OnClick", function()
+        if StopEndedTransition() then return end
         sessionPrompt:Hide()
         options.page.OpenSaveDialog(sessionPrompt.contextKey,true)
     end)
     closeButton:SetScript("OnClick", function()
+        if StopEndedTransition() then return end
         sessionPrompt:Hide()
         if options.dismissRaidSessionTransition then options.dismissRaidSessionTransition(sessionPrompt.contextKey) end
         options.refresh()
     end)
     options.page.ShowSessionTransitionPrompt = function(contextKey)
+        if StopEndedTransition() then return end
         if sessionPrompt:IsVisible() then return end
         sessionPrompt.contextKey = contextKey
         if contextKey and string.find(contextKey, "different-raid-context|", 1, true) == 1 then

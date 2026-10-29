@@ -154,8 +154,8 @@ function SyncRuntime.Initialize(owner)
             onAttendance=function(previous,attendance)
                 Raider.Services.Raid.PreserveLootSession(previous,attendance)
                 if attendance.syncEnded then
-                    Raider.raidSessionPaused=true
-                    if not previous.syncEnded then runtime.Print(runtime.replica.GetStatus(attendance.syncRaidId).message) end
+                    Raider.raidSessionPaused=true;Raider.raidLiveTracking=false
+                    runtime.ShowEndedSessionPrompt(attendance)
                 end
                 if previous.raidName~=attendance.raidName then
                     Raider.Services.AutoLoot.ApplyRaidPreset(attendance.raidName);Raider.OnSettingChanged("lmAutoLootPresets")

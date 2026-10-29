@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.25 — 2026-10-29
+
+- Notify officers with an open session when another officer saves and ends it: Continue Session reopens it; Quit returns to the raid list without another save.
+- Suppress obsolete departure/save prompts after a shared end, including already-open confirmations, and refresh the raid screen on Quit.
+
 ## 1.0.0-dev.24 — 2026-10-29
 
 - Save a loaded raid under a different Raid ID as an independent copy, preserving the original through synchronization and reload.
