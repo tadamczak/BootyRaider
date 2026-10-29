@@ -210,7 +210,7 @@ function Screen.Create(parent, host)
         page:Hide();lifecycle:Hide();lifecycle:CancelRosterUpdate()
     end
     function controller:ClearSelection() selectedName=nil end
-    function controller:OpenSaveDialog(context) page.OpenSaveDialog(context) end
+    function controller:OpenSaveDialog(context, endSession) page.OpenSaveDialog(context, endSession) end
     function controller:OfferCurrentRaidRefresh() page.OfferCurrentRaidRefresh() end
     page.lootMasterController.resetOnLoad()
     return controller

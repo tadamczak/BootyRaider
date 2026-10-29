@@ -130,3 +130,5 @@ Synchronization supports up to 12 other officers (13 clients including yours). I
 Without BootySuite, the top tabs **Raid**, **Raid Stats** and **CSR** switch between BootyRaider views while retaining your raid session, window position and size. Standalone resizing follows Suite behavior. Drag the LM Config window when opened from the main Raid view.
 
 Standalone Raid separators align with the top tabs and the side frame, including after resizing.
+
+**End & Save** after leaving a raid instance saves the same raid and marks the shared session **Ended**, just like the Session menu action. Cancelling or a failed save leaves the session active.

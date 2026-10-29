@@ -184,7 +184,7 @@ local function ShowTransitionPrompt(contextKey)
         if Raider.Database.GetRaidAttendance()~=attendance or not Raider.raidSessionDraft then Runtime.CloseSessionPrompts(); return end
         Runtime.OpenView("raid")
         local view=Runtime.GetView("raid")
-        if view and view.OpenSaveDialog then view:OpenSaveDialog(contextKey) end
+        if view and view.OpenSaveDialog then view:OpenSaveDialog(contextKey,true) end
     end)
 end
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.23 — 2026-10-29
+
+- Make End & Save from both raid-context prompts end the shared session as well as save its snapshot.
+- Reset the save dialog mode explicitly on every entry point, preserving cancellation and failed-save behavior.
+
 ## 1.0.0-dev.22 — 2026-10-29
 
 - Align standalone Raid toolbars and filter/history separators with the top navigation separator.

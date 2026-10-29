@@ -4289,15 +4289,15 @@ function RaidManagement.AttachActionHandlers(options)
         self.raidId:SetText(attendance and (attendance.snapshotId or (attendance.softReserveImport and attendance.softReserveImport.id)) or "")
         self.error:Hide();SyncAttendanceOption(); self:Show();self.raidId:SetFocus();self.raidId:HighlightText()
     end
-    options.page.OpenSaveDialog = function(contextKey) saveDialog.transitionContext=contextKey;saveDialog.endSession=false;saveDialog:Open() end
+    options.page.OpenSaveDialog = function(contextKey, endSession)
+        saveDialog.transitionContext=contextKey;saveDialog.endSession=endSession==true;saveDialog:Open()
+    end
     saveDialog:Hide()
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(saveDialog, {owner = options.page}) end
     options.page.saveSessionDialog = saveDialog
     controls.export:SetScript("OnClick", function()
         if options.isTestRaid and options.isTestRaid() then return end
-        saveDialog.transitionContext = nil
-        saveDialog.endSession = false
-        saveDialog:Open()
+        options.page.OpenSaveDialog(nil,false)
     end)
     controls.addStatistics:Hide()
     local leaveDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderLeaveSessionDialog", "Leave Session", "Leave", "quit")
@@ -4312,7 +4312,7 @@ function RaidManagement.AttachActionHandlers(options)
     end)
     controls.quit:SetScript("OnClick", function()
         if options.isTestRaid and options.isTestRaid() then options.quitRaidSession(true);options.refresh();return end
-        saveDialog.transitionContext=nil;saveDialog.endSession=true;saveDialog:Open()
+        options.page.OpenSaveDialog(nil,true)
     end)
 
     sessionPrompt = Raider.UI.Components.CreateContainer("BootyRaiderRaidSessionPrompt", UIParent)
@@ -4350,8 +4350,7 @@ function RaidManagement.AttachActionHandlers(options)
     end)
     saveButton:SetScript("OnClick", function()
         sessionPrompt:Hide()
-        saveDialog.transitionContext = sessionPrompt.contextKey
-        saveDialog:Open()
+        options.page.OpenSaveDialog(sessionPrompt.contextKey,true)
     end)
     closeButton:SetScript("OnClick", function()
         sessionPrompt:Hide()
