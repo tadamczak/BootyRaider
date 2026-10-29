@@ -8,6 +8,7 @@ Raider.Modules.RaidScreen = Screen
 function Screen.Create(parent, host)
     Runtime.Initialize(host)
     local page = UI.CreateContainer(nil,parent)
+    page.bootyStandalone = host and host.standalone or false
     page:SetAllPoints(parent);page.bootyWidthOwner=parent;page.bootyHeightOwner=parent
     page.bootyWidthInset=0;page.bootyHeightInset=0;page:Hide()
     local function SizePage()

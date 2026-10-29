@@ -61,7 +61,8 @@ function RaidManagement.CreateChrome(page, callbacks)
     local view = {}
     view.classicToolbar = Raider.UI.Components.CreateContainer(nil, page)
     page.classicToolbar = view.classicToolbar
-    view.classicToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", 4, -48); view.classicToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", -4, -48); view.classicToolbar:SetHeight(42)
+    local toolbarInset = page.bootyStandalone and 0 or 4
+    view.classicToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", toolbarInset, -48); view.classicToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", -toolbarInset, -48); view.classicToolbar:SetHeight(42)
     view.classicToolbar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 8, edgeSize = 8, insets = { left = 2, right = 2, top = 2, bottom = 2 } }); view.classicToolbar:SetBackdropColor(0, 0, 0, 0); view.classicToolbar:SetBackdropBorderColor(0, 0, 0, 0)
     Raider.UI.Components.RegisterSkinnedSurface(view.classicToolbar, "title", { bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 8, edgeSize = 8, insets = { left = 2, right = 2, top = 2, bottom = 2 } }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 }); view.classicToolbar:Hide()
     Raider.UI.Components.SetSurfaceHorizontalBorders(view.classicToolbar, true, true)
@@ -336,6 +337,10 @@ function RaidManagement.CreateChrome(page, callbacks)
     view.filterLabel = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontNormalSmall")
     view.filterLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -82); view.filterLabel:SetText(""); view.filterLabel:Hide()
     view.filterToolbar = Raider.UI.Components.CreateToolbarSurface(page, false, true); page.filterToolbar = view.filterToolbar; view.filterToolbar:Hide()
+    -- Standalone pages already reach the same inner rails as their tab strip.
+    local filterOutset = page.bootyStandalone and 0 or 4
+    view.filterToolbar.bootyBorderOutsetLeft=filterOutset;view.filterToolbar.bootyBorderOutsetRight=filterOutset
+    Raider.UI.Components.SetSurfaceHorizontalBorders(view.filterToolbar,false,true)
 
     local function CreateFilterButton(text, x)
         local button = Raider.UI.Components.CreateDropdownButton(page, nil, text, 84)
@@ -1119,7 +1124,6 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
     controls.searchBox:SetWidth(page.classicSearchWidth)
     controls.refreshButton:ClearAllPoints(); controls.refreshButton:SetPoint("LEFT", controls.searchBox, "RIGHT", 4, 0)
     if page.filterToolbar then
-        page.filterToolbar.bootyBorderOutsetLeft=4;page.filterToolbar.bootyBorderOutsetRight=4;Raider.UI.Components.SetSurfaceHorizontalBorders(page.filterToolbar,false,true)
         page.filterToolbar:ClearAllPoints(); page.filterToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -92 - submenuOffset); page.filterToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, -92 - submenuOffset)
         page.filterToolbar:SetHeight(38 + extraRows)
     end
@@ -3202,7 +3206,8 @@ function RaidManagement.LayoutActions(page)
             page.raidInfoButton:ClearAllPoints(); page.raidInfoButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, top - actionOffset)
             page.raidInfoButton:Show()
         end
-        page.classicToolbar:ClearAllPoints(); page.classicToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", 4, -48 - sectionOffset - actionOffset); page.classicToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", -4, -48 - sectionOffset - actionOffset); page.classicToolbar:SetHeight(42 + toolbarOffset)
+        local toolbarInset = page.bootyStandalone and 0 or 4
+        page.classicToolbar:ClearAllPoints(); page.classicToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", toolbarInset, -48 - sectionOffset - actionOffset); page.classicToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", -toolbarInset, -48 - sectionOffset - actionOffset); page.classicToolbar:SetHeight(42 + toolbarOffset)
         page.classicListButton:ClearAllPoints(); page.classicListButton:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -56 - sectionOffset - actionOffset)
         page.classicGroupButton:ClearAllPoints(); page.classicGroupButton:SetPoint("LEFT", page.classicListButton, "RIGHT", 8, 0)
         page.classicTwoButton:ClearAllPoints(); page.classicTwoButton:SetPoint("LEFT", page.classicGroupButton, "RIGHT", 8, 0)

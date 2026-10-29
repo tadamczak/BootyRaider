@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.22 — 2026-10-29
+
+- Align standalone Raid toolbars and filter/history separators with the top navigation separator.
+
 ## 1.0.0-dev.21 — 2026-10-29
 
 - Keep the window position and size when switching standalone tabs; resize content through live native anchors like Suite.

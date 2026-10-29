@@ -224,8 +224,9 @@ function RaidManagement.ShowRaidHistoryControls(page, controls, canStartRaid)
     if not controls.historyToolbar then
         controls.historyToolbar=UI.CreateToolbarSurface(page,true,true)
         controls.historyToolbar:SetFrameLevel(page:GetFrameLevel())
-        -- Match the existing full-width filter strip, including its frame outset.
-        controls.historyToolbar.bootyBorderOutsetLeft=4;controls.historyToolbar.bootyBorderOutsetRight=4
+        -- Match the filter strip's host-specific inner rail alignment.
+        local outset=page.bootyStandalone and 0 or 4
+        controls.historyToolbar.bootyBorderOutsetLeft=outset;controls.historyToolbar.bootyBorderOutsetRight=outset
         UI.SetSurfaceHorizontalBorders(controls.historyToolbar,true,true)
     end
     controls.scan:ClearAllPoints();controls.scan:SetPoint("TOPLEFT",page,"TOPLEFT",8,actionY)
