@@ -126,3 +126,5 @@ During a session, use **Session → Save Raid / Raid Sync / Leave Session / End 
 Raid row actions use matching compact gold buttons. Sync uses a circular-arrow icon when on and a disabled icon when off, with an explicit state tooltip. Join and Load share the same play icon. The compact Session menu is the active raid’s Sync entry point. Raid Log describes data edits and their authors; Sync log describes data exchange, delivery confirmations, officer connections and synchronization errors.
 
 Synchronization supports up to 12 other officers (13 clients including yours). It sends missing changes and inventory metadata; unchanged discovery does not resend the raid database. Private raid edits do not trigger shared inventory announcements. Technical status display updates are grouped during packet bursts; raid data changes remain immediate.
+
+Without BootySuite, the top tabs **Raid**, **Raid Stats** and **CSR** switch between BootyRaider views while retaining your raid session. Standalone resizing uses the same update cadence as Suite and settles immediately when you release the mouse.

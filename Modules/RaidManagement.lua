@@ -603,6 +603,10 @@ end
 
 local function OnRaidPageSizeChanged()
     if not this:IsVisible() then return end
+    -- The standalone host sizes content and invokes OnResize as one layout.
+    -- Native width/height notifications inside that batch must not render again.
+    local parent=this:GetParent()
+    if this.bootyResizeInProgress or parent and parent.bootyResizeInProgress then return end
     local currentWidth, currentHeight = PageSpan(this)
     if math.abs(currentWidth - (this.layoutWidth or 0)) <= 0.5 and math.abs(currentHeight - (this.layoutHeight or 0)) <= 0.5 then return end
     this.layoutWidth, this.layoutHeight = currentWidth, currentHeight
@@ -1299,7 +1303,9 @@ function RaidManagement.RefreshPage(renderer)
     local page, rows = renderer.page, renderer.rows
     renderer.countRefresh()
     RaidManagement.BeginRefresh(page, rows)
-    local pageWidth = PageSpan(page)
+    local pageWidth, pageHeight = PageSpan(page)
+    -- A late anchored size notification must recognize the host's completed layout.
+    page.layoutWidth, page.layoutHeight = pageWidth, pageHeight
     page.classicActionOffset = 0
     page.classicActionScale = 1
     -- The normal metadata row already has nine pixels of top padding. The

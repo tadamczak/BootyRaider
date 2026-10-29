@@ -1,5 +1,68 @@
 local Raider = BootyRaider
 local Runtime = Raider.Runtime
+local standaloneViews={{id="raid",label="Raid",icon="raids",width=78},
+    {id="raidStatistics",label="Raid Stats",icon="raid_stats",width=104},
+    {id="csr",label="CSR",icon="csr",width=72}}
+local function CreateView(parent,host,id,create)
+    if not host or not host.standalone then return create(parent) end
+    local UI=Raider.UI.Components
+    local frame=UI.CreateContainer(nil,parent);frame:SetAllPoints(parent)
+    local body=UI.CreateContainer(nil,frame);body:SetPoint("TOPLEFT",frame,"TOPLEFT",0,-30)
+    body.bootyWidthOwner=parent;body.bootyWidthInset=0;body.bootyHeightOwner=parent;body.bootyHeightInset=30
+    local toolbar=UI.CreateToolbarSurface(frame,false,true)
+    toolbar.bootyBorderOutsetLeft=0;toolbar.bootyBorderOutsetRight=0;UI.SetSurfaceHorizontalBorders(toolbar,false,true)
+    toolbar:SetPoint("TOPLEFT",frame,"TOPLEFT",0,0);toolbar:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0);toolbar:SetHeight(28)
+    local function SizeBody()
+        local width,height=UI.GetFrameSpan(parent)
+        frame:SetWidth(width);frame:SetHeight(height)
+        body:SetWidth(math.max(1,width));body:SetHeight(math.max(1,height-30))
+    end
+    SizeBody()
+    local view=create(body)
+    view.frame=frame;view.standaloneNavigation={frame=toolbar,body=body,buttons={}}
+    local left=6
+    for _,entry in ipairs(standaloneViews) do
+        local target=entry.id
+        local button=UI.CreateButton(toolbar,nil,entry.label,entry.width,22)
+        button:SetPoint("TOPLEFT",toolbar,"TOPLEFT",left,-2);left=left+entry.width+4
+        button.bootyClassicKeepNormalSurface=true;button.bootyHoverTextColor={1,0.82,0.28}
+        UI.SetClassicButtonIcon(button,entry.icon,13,7,0);UI.AttachGoldHoverBorder(button,0.35,0.35,0.35,1)
+        UI.SetClassicButtonSelected(button,target==id)
+        button:SetScript("OnClick",function()
+            if target==id then return end
+            local previous=host.windows and host.windows[id]
+            local opened=host.OpenView(target)
+            if opened and previous then
+                local ready,reason=previous.HideView()
+                if ready==false then host.Print(reason or "Cannot close this raid view.");return end
+                previous:Hide()
+            end
+        end)
+        view.standaloneNavigation.buttons[target]=button
+    end
+    local show,hide,resize,stop=view.Show,view.Hide,view.OnResize,view.Stop
+    local function ResizeView(self) SizeBody();if resize then resize(self) end end
+    function view:OnResize()
+        body.bootyResizeInProgress=true
+        local ok,failure=pcall(ResizeView,self)
+        body.bootyResizeInProgress=nil
+        if not ok then error(failure) end
+    end
+    function view:Show() frame:Show();SizeBody();show(self) end
+    function view:Hide()
+        local result,reason=hide(self)
+        if result==false then return result,reason end
+        frame:Hide();return result,reason
+    end
+    if stop then
+        function view:Stop()
+            local result,reason=stop(self)
+            if result==false then return result,reason end
+            frame:Hide();return result,reason
+        end
+    end
+    return view
+end
 local function RequestHistoryOnShow(view)
     local show=view.Show
     function view:Show()
@@ -8,23 +71,29 @@ local function RequestHistoryOnShow(view)
     end
     return view
 end
-local function CreateRaid(parent,host) return RequestHistoryOnShow(Raider.Modules.RaidScreen.Create(parent,host)) end
+local function CreateRaid(parent,host)
+    return RequestHistoryOnShow(CreateView(parent,host,"raid",function(body) return Raider.Modules.RaidScreen.Create(body,host) end))
+end
 local function CreateStatistics(parent,host)
     Runtime.Initialize(host)
-    local view=Raider.Modules.RaidStatistics.Create(parent,Raider.Database.GetRaidStatistics,Raider.Database.DeleteRaidStatistic,Raider.Database.UpdateRaidStatistic)
-    view.frame=view.page
+    local view=CreateView(parent,host,"raidStatistics",function(body)
+        local controller=Raider.Modules.RaidStatistics.Create(body,Raider.Database.GetRaidStatistics,Raider.Database.DeleteRaidStatistic,Raider.Database.UpdateRaidStatistic)
+        controller.frame=controller.page;return controller
+    end)
     Runtime.views.raidStatistics=view
     return RequestHistoryOnShow(view)
 end
 local function CreateCSR(parent,host)
     Runtime.Initialize(host)
-    local view=Raider.Modules.CSR.Create(parent,Raider.Database.GetRaidStatistics,Raider.Database.GetLootRules,Raider.Database.GetRosterData,
-        function(id)
-            Runtime.OpenView("raidStatistics")
-            local statistics=Runtime.GetView("raidStatistics")
-            if statistics and statistics.SelectRaid then statistics:SelectRaid(id) end
-        end,{canManageHistory=Raider.Services.RankPolicy.CanManageHistory,setSourceArchived=Raider.Database.SetCSRSourceArchived})
-    view.frame=view.page
+    local view=CreateView(parent,host,"csr",function(body)
+        local controller=Raider.Modules.CSR.Create(body,Raider.Database.GetRaidStatistics,Raider.Database.GetLootRules,Raider.Database.GetRosterData,
+            function(id)
+                Runtime.OpenView("raidStatistics")
+                local statistics=Runtime.GetView("raidStatistics")
+                if statistics and statistics.SelectRaid then statistics:SelectRaid(id) end
+            end,{canManageHistory=Raider.Services.RankPolicy.CanManageHistory,setSourceArchived=Raider.Database.SetCSRSourceArchived})
+        controller.frame=controller.page;return controller
+    end)
     Runtime.views.csr=view
     return RequestHistoryOnShow(view)
 end

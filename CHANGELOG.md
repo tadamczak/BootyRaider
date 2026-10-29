@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.20 — 2026-10-29
+
+- Avoid duplicate Raid redraws during host-managed resizing.
+- Add visible Raid, Raid Stats and CSR tabs to standalone windows; preserve integrated Suite navigation.
+
 ## 1.0.0-dev.19 — 2026-10-29
 
 - Reduce redundant discovery replies and suppress advertisements for private raid edits.
