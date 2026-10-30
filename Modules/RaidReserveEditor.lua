@@ -245,8 +245,48 @@ function Management.CreateReserveReview(page, getAttendance, refresh)
     end,function(_,index) frame.selected[index]=not frame.selected[index]; frame.list:Refresh() end)
     frame.save:SetText("Apply selected")
     frame.save:SetScript("OnClick",function()
-        if getAttendance()~=frame.attendance then frame.message:SetText("The session roster changed. Reopen the review."); return end
-        local ok,failure=Raider.Services.RaidRes.ReapplyCustomChanges(frame.attendance,frame.importInfo,frame.selected)
+        local attendance=getAttendance()
+        if not frame.attendance or not attendance or attendance~=frame.attendance and
+            (not frame.raidId or attendance.syncRaidId~=frame.raidId) then
+            frame.message:SetText("The raid session changed. Reopen Import SR.");return
+        end
+        local audit=Raider.Services.RaidAudit
+        if frame.editBase then
+            -- Projection replaces the attendance table, even for this officer's
+            -- own import. Check causal data, not that transient table identity.
+            -- Unselected players may still receive unrelated SR edits.
+            local baseline={raidId=frame.editBase.raidId,heads={},keys={"import:sr","raid:lifecycle"}}
+            for index,change in ipairs(frame.list.values) do
+                if frame.selected[index] then table.insert(baseline.keys,"sr:"..string.lower(change.name)) end
+            end
+            for _,key in ipairs(baseline.keys) do baseline.heads[key]=frame.editBase.heads[key] end
+            if not audit.CheckEditBase(baseline) then
+                frame.message:SetText("SR data changed. Your selections are kept.\nReopen Import SR to review the latest changes.");return
+            end
+        end
+        local importInfo=attendance.softReserveImport
+        if not importInfo or not Raider.Services.RaidJournal.Equal(frame.importValue,audit.ImportValue(importInfo)) then
+            frame.message:SetText("The import changed. Reopen Import SR to review the latest changes.");return
+        end
+        if frame.editBase then
+            -- A remote operation can arrive before Open, while its projection
+            -- is still queued. Fresh heads alone do not make the old view fresh.
+            local journal,db=Raider.Services.RaidJournal,Raider.Database.Ensure()
+            local imported=journal.GetRecord(db,frame.raidId,"import:sr")
+            local ready=not imported or not imported.deleted and journal.Equal(imported.value,frame.importValue)
+            for index,change in ipairs(frame.list.values) do
+                if ready and frame.selected[index] then
+                    local record=journal.GetRecord(db,frame.raidId,"sr:"..string.lower(change.name))
+                    for _,member in ipairs(attendance.members or {}) do
+                        if string.lower(member.name)==string.lower(change.name) and record then
+                            ready=not record.deleted and journal.Equal(record.value,audit.SRValue(member,attendance));break
+                        end
+                    end
+                end
+            end
+            if not ready then frame.message:SetText("New SR updates are loading. Try Apply selected again.");return end
+        end
+        local ok,failure=Raider.Services.RaidRes.ReapplyCustomChanges(attendance,importInfo,frame.selected)
         if not ok then frame.message:SetText(failure); return end
         frame:Hide(); refresh()
     end)
@@ -254,11 +294,20 @@ function Management.CreateReserveReview(page, getAttendance, refresh)
         self.attendance=getAttendance(); self.importInfo=self.attendance and self.attendance.softReserveImport
         local changes=self.importInfo and self.importInfo.customReview
         if table.getn(changes or {})==0 then return false end
-        self.selected={}; self.list.values=changes; self.list.offset=0; self.list:Refresh()
+        local audit=Raider.Services.RaidAudit
+        self.raidId=self.attendance.syncRaidId
+        local keys={"import:sr","raid:lifecycle"}
+        for _,change in ipairs(changes) do table.insert(keys,"sr:"..string.lower(change.name)) end
+        self.editBase=audit.CaptureEditBase(self.attendance,keys)
+        self.importValue=audit.ImportValue(self.importInfo)
+        self.selected={}; self.list.values=self.importValue.review; self.list.offset=0; self.list:Refresh()
         self.message:SetText("Closing this window keeps the review pending. Reopen it from Import SR.")
         if UI.WindowStack then UI.WindowStack.WithOwner(page, function() self:Show() end) else self:Show() end
         return true
     end
-    frame:SetScript("OnHide",function() frame.list.values={};frame.list:Refresh();frame.attendance=nil;frame.importInfo=nil;frame.selected={} end)
+    frame:SetScript("OnHide",function()
+        frame.list.values={};frame.list:Refresh();frame.attendance=nil;frame.importInfo=nil;frame.selected={}
+        frame.importValue=nil;frame.editBase=nil;frame.raidId=nil
+    end)
     return frame
 end

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.30 — 2026-10-31
+
+- Keep custom SR review usable after session data refreshes, while guarding newer imports and selected-player edits. Ordinary SR saves no longer record an unchanged exception as a removal.
+
 ## 1.0.0-dev.29 — 2026-10-30
 
 - Separate editable inclusion/exclusion presets with protected built-ins and custom deletion. Add section resets, restore the native raid appearance, align hidden-header filters and resize persistent loot/SR lists with gold context columns. Preserve older recorded loot times.

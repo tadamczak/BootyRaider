@@ -378,7 +378,7 @@ function RaidResService.SetMemberReservations(attendance, name, ids, exception)
     end
     if exception and table.getn(normalized)==0 then return false,"Select an SR before enabling an exception." end
     AssignItems(member, normalized)
-    if exception ~= nil then
+    if exception ~= nil and (member.srException==true) ~= (exception==true) then
         member.srException=exception==true and true or nil
         RecordChange(attendance, member, "exception")
     end
@@ -390,6 +390,7 @@ function RaidResService.SetMemberException(attendance, name, allowed)
     local member = FindMember(attendance, name)
     if not member then return false, "This player is no longer in the session roster." end
     if allowed and table.getn(member.srItemIds or {}) == 0 then return false, "Assign a Soft Reserve before allowing an exception." end
+    if (member.srException==true) == (allowed==true) then return true end
     member.srException = allowed == true and true or nil
     RecordChange(attendance, member, "exception"); SyncMutation(attendance)
     return true
