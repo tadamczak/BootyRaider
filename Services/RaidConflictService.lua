@@ -151,6 +151,11 @@ local function Latest(state,heads)
     return best
 end
 local function LiveRaid(state,raid)
+    -- Deletion preserves the last live lifecycle for historical eligibility.
+    -- Its saved-history corrections still require explicit conflict resolution.
+    for key,heads in pairs(raid.heads or {}) do
+        if string.find(key,"^raid:session%-deleted:") and next(heads) then return false end
+    end
     local id=Latest(state,raid.heads and raid.heads["raid:lifecycle"])
     local value=id and Record(state,"raid:lifecycle",id)
     return value and value.value=="active" and not value.deleted
@@ -291,7 +296,7 @@ function C.Publish(state,operation)
     local raid=state.raids[operation.raidId]
     local needsRebuild=raid.conflicts and next(raid.conflicts)~=nil
     for _,change in ipairs(operation.changes) do
-        if change.key=="raid:lifecycle" then needsRebuild=true end
+        if change.key=="raid:lifecycle" or string.find(change.key,"^raid:session%-deleted:") then needsRebuild=true end
         local heads=raid.heads and raid.heads[change.key]
         local parents={};for _,id in ipairs(Parents(change)) do parents[id]=true end
         for id in pairs(heads or {}) do if not parents[id] then needsRebuild=true end end

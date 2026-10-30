@@ -895,7 +895,7 @@ function RaidResService.BuildSnapshot(attendance)
     return snapshot
 end
 
-function RaidResService.RestoreSnapshot(snapshot)
+function RaidResService.RestoreSnapshot(snapshot,prepareOnly)
     if not snapshot or not snapshot.id then return nil end
     local members, index, itemIndex = {}, 0, 0
     local hasLootHistory = (tonumber(snapshot.version) or 0) >= 4
@@ -977,6 +977,7 @@ function RaidResService.RestoreSnapshot(snapshot)
         _sessionDraft = true,
     }
     attendance.softReserveImport.customReview = CopyChanges(snapshot.srCustomReview)
+    if prepareOnly then return attendance end
     return Raider.Database.StoreRaidAttendance(attendance)
 end
 

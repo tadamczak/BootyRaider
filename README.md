@@ -57,7 +57,7 @@ Receiving an item retains its previous reserve entries as **AWARDED** under **Sh
 
 Only current guild ranks **Officer Wukong** and **Mukla** can archive/activate CSR, edit saved raid details, or edit/remove Raid Stats. Reading history remains available to everyone. These controls wait for current guild information; a raid leader or assistant role alone grants no history editing rights.
 
-**Settings → Addon UI → CSR → Display** offers **Show class icon** and **Use class colors**, both enabled by default. Expand controls appear before the class/item icon and name.
+**Settings → Addon UI → CSR → General** offers **Use class colors**. **Layout** controls class icons and visibility of each filter. These options are enabled by default. Hiding all filters removes the filter toolbar; hidden filters retain their selected values. Expand controls appear before the class/item icon and name.
 
 Save Raid offers a reload to write data to disk. This waits until other Booty products have no active raid or recording. A failed startup or Stop reports its reason and retains raid data.
 
@@ -89,7 +89,7 @@ Changing the active Raid Type also selects its auto-loot exclusion preset and up
 
 LM Config opened from Loot Master Tools can be dragged like Reycoin list. Add SR uses a gold plus, Remove uses a trash bin, and edit actions use the same gold wrench.
 
-Auto Loot Inclusions follows Raid Type: Molten Core includes Lava Core and Fiery Core; other raids currently have empty presets. Changing type retains your custom inclusions. The SR editor automatically requests uncached visible items and highlights the selected catalogue row. Allow to SR without loot rights is available only when that player has no SR rights. Saving without rights and without this exception asks for confirmation. The exception asterisk remains visible when hovering the item.
+Auto Loot Inclusions follows Raid Type: Molten Core includes Lava Core and Fiery Core; other raids initially have empty inclusion presets. LM Config offers both **Add Exclusion Preset** and **Add Inclusion Preset**. In **Settings → Addon UI → Raid → Loot Master Mode → LM Config → Auto Loot Presets**, edit an existing preset or choose **New preset** to add one, with separate exclusion and inclusion lists. Changing Raid Type uses those saved presets and retains your custom entries. The SR editor automatically requests uncached visible items and highlights the selected catalogue row. Allow to SR without loot rights is available only when that player has no SR rights. Saving without rights and without this exception asks for confirmation. The exception asterisk remains visible when hovering the item.
 
 The SR editor retains resolved item names and quality colours across selection, filtering and reopening for the current login. The missing-rights confirmation uses a short, fully visible message.
 
@@ -121,6 +121,8 @@ During an active session, concurrent edits use the newest recorded change automa
 
 New sessions have **Raid sync** checked by default. Uncheck it to keep that raid and its CSR source data on this character. Gold sync icons beside active and saved raids toggle this setting; a pressed icon means sharing is enabled. Stopping synchronization does not delete copies already received by other officers. Enabling it again exchanges missing changes. The setting is saved per raid on this character.
 
+The trash icon in **Active raid sessions** removes that session after confirmation, including its active copies on synchronizing officers. Previously saved snapshots are retained; unsaved changes are not saved by this action. Loading a retained snapshot starts a separate session with a **(restored)** name, preserving the original saved raid. Update all synchronizing officers to the same build before using this action.
+
 During a session, use **Session → Save Raid / Raid Sync / Leave Session / End & Save**. Raid Sync for a local-only raid shows **Start raid synchronization** in the center. The Sync table shows #, Raid ID, Raid, Active/Ended status, individual sync status, conflicts and actions. The current raid has a Stop Sync icon. Connected officers remain beside the tabs; the global status stays on the main Raid tab.
 
 Raid row actions use matching compact gold buttons. Sync uses a circular-arrow icon when on and a disabled icon when off, with an explicit state tooltip. Join and Load share the same play icon. The compact Session menu is the active raid’s Sync entry point. Raid Log describes data edits and their authors; Sync log describes data exchange, delivery confirmations, officer connections and synchronization errors.
@@ -135,7 +137,7 @@ Standalone Raid separators align with the top tabs and the side frame, including
 
 Raid Stats editing has an action toolbar with **Add Entry**, **Loot Rules**, **Cancel** and **Save**. Loot Rules edits apply to that saved raid when you save; enable the relevant rank’s CSR rights and **Save CSR** to include its eligible reserves. Cancel discards the draft. Click **CSR Test Lab** again to close it and return to your saved history; reopening retains the temporary simulation. Minimizing and restoring Raid Stats keeps the selected raid visible.
 
-In **Settings → Addon UI → Raid Stats**, General can hide the heading. Layout controls Raid ID/time in the raid list, class colors/attendance in single-raid details, and class colors/attendance/SR/loot in multi-raid details. CSR has its own General heading option. **Synchronize raids and CSR with other officers** remains one shared switch in Raid → General. Auto-loot presets, exclusions and inclusions remain in **LM Config**. Game UI options are grouped under Raid; fresh and reset addon Groups use the same stock appearance as native Groups, while existing custom preferences are kept.
+In **Settings → Addon UI → Raid Stats**, General controls the heading and class colors for all details. Layout controls each filter, Raid ID/time in the raid list, attendance in single-raid details, and attendance/SR/loot in multi-raid details. Hiding ID or time makes the raid list narrower. Hiding all filters removes their toolbar; hidden filters retain their selected values. CSR has its own General heading and class-color options. **Addon UI → General** contains **Synchronize raids and CSR with other officers** and **Show action messages in chat**. Raid → Layout → Loot Master Mode View controls opacity. Raid → Loot Master Mode → LM Config uses the same auto-loot mode and rarity selectors as the LM Config window. Game UI options are grouped under Raid; fresh and reset addon Groups use the same stock appearance as native Groups, while existing custom preferences are kept.
 
 Click **Loot received** or **Soft Reserves** again to close its list. Loot received shows the actual receipt date and time in gold, without Raid ID; older loot without a recorded time shows **Unknown time**. Repeated ordinary receipts remain grouped with the first receipt time.
 

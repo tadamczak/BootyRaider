@@ -81,6 +81,14 @@ function Runtime.QuitSession(leaveOnly)
     Runtime.RefreshViews()
     return true
 end
+function Runtime.OnSessionDeleted(previous,id)
+    Runtime.CloseSessionPrompts()
+    local view=Runtime.views.raid
+    if view and view.CancelSessionSave then view:CancelSessionSave() end
+    local ok,reason=Runtime.sessionController:Quit(true)
+    if ok==false then Runtime.Print(reason) end
+    Runtime.Print("The active raid session was deleted. Saved snapshots are preserved.")
+end
 function Runtime.AcceptLoadedSnapshot()
     -- Loading the same saved ID can occur after a zone change. Re-observe the
     -- current context before acknowledging it, rather than keeping its old zone.
@@ -350,6 +358,7 @@ function Runtime.Initialize(host)
     Raider.Database.onRaidAttendanceChanged=Raider.Services.Raid.OnRaidAttendanceChanged
     Raider.Database.onRaidAttendanceMetadataChanged=Raider.Services.Raid.PreserveLootSession
     Runtime.session=Raider.Services.RaidSession.Create({getProjection=function(id) return Runtime.replica.GetProjection(id) end,
+        isSessionDeleted=function(id) return Runtime.replica.IsSessionDeleted(id) end,
         canJoinRaid=Raider.Modules.RaidSyncRuntime.CanJoinRaid,
         resumeRaid=function(id)
             local allowed,reason=Raider.Modules.RaidSyncRuntime.CanJoinRaid(id);if not allowed then return false,reason end

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.28 — 2026-10-30
+
+- Add active-session removal while preserving saved snapshots, editable auto-loot presets and matching LM selectors. Reorganize settings, allow individual Raid Stats/CSR filters to be hidden, reclaim unused layout space and unify gold column headings.
+
 ## 1.0.0-dev.27 — 2026-10-29
 
 - Include only saved, ended raids in Raid Stats and CSR. Add display settings, toggled item lists with loot timestamps, independent Raid Log recording, native Group defaults and corrected member menus. Allow a narrower synchronization window.

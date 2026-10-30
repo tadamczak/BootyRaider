@@ -193,7 +193,8 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     local page = UI.CreateResponsiveCanvas(host, "BootyRaiderCSRPage")
     local controller = { page = page, rows = {}, detailRows = {}, detailLines = {}, viewButtons = {},
         summary = { players = {} }, selectedRaids = {}, expanded = {}, sortStates = {},
-        nodes = {}, pairs = {}, groups = {}, layoutRows = {}, groupMode = "default", showArchived = false }
+        nodes = {}, pairs = {}, groups = {}, layoutRows = {}, groupMode = "default", showArchived = false,
+        showAwarded = false, visibility = {} }
     page.csrController = controller; host.csrController = controller
     local raidNames = Raider.Services.RaidStatistics.GetRaidNames()
     for _, name in ipairs(raidNames) do controller.selectedRaids[name] = true end
@@ -207,8 +208,8 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     controller.testButton = UI.CreateButton(page, nil, "CSR Test Lab", 96, 22)
     UI.StyleActionButton(controller.testButton)
     controller.testButton:SetScript("OnClick", function() controller.testLab:Toggle() end)
-    controller.raidFilter = UI.CreateDropdownButton(page, nil, "Raid", 130)
-    controller.raidFilter.bootyFlowWidth = 130; controller.raidFilter:SetHeight(26)
+    controller.raidFilter = UI.CreateDropdownButton(page, nil, "Raid", 87)
+    controller.raidFilter.bootyFlowWidth = 87; controller.raidFilter:SetHeight(26)
     controller.raidPanel = UI.CreateDropdownPanel(page, controller.raidFilter, 190, 178, 20)
     controller.raidDismiss = controller.raidPanel.dismiss
     controller.raidFilter:SetScript("OnClick", function()
@@ -217,44 +218,58 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     UI.FilterPanel.Refresh(controller.raidPanel, raidNames, controller.selectedRaids, function() controller:Refresh() end, true, true)
     controller.raidChecks = controller.raidPanel.options
     controller.searchGroup = UI.CreateContainer(nil, page)
-    controller.searchGroup:SetWidth(162); controller.searchGroup:SetHeight(26); controller.searchGroup.bootyFlowWidth = 162
-    controller.search = UI.CreateFramedEditBox(controller.searchGroup, nil, 162)
-    controller.search:SetPoint("LEFT", controller.searchGroup, "LEFT", 0, 0); controller.search:SetHeight(22)
+    controller.searchGroup:SetWidth(108); controller.searchGroup:SetHeight(26); controller.searchGroup.bootyFlowWidth = 108
+    controller.search = UI.CreateFramedEditBox(controller.searchGroup, nil, 108)
+    controller.search:SetPoint("LEFT", controller.searchGroup, "LEFT", 0, 0); controller.search:SetHeight(26)
     controller.search:SetAutoFocus(false)
     controller.search:SetScript("OnEscapePressed", function() this:ClearFocus() end)
     controller.search:SetScript("OnEnterPressed", function() this:ClearFocus() end)
     controller.search:SetScript("OnTextChanged", function() controller:Refresh() end)
     UI.AttachPlaceholder(controller.search, "Search...")
     controller.groupBox = UI.CreateContainer(nil, page)
-    controller.groupBox:SetWidth(182); controller.groupBox:SetHeight(26); controller.groupBox.bootyFlowWidth = 182
+    controller.groupBox:SetWidth(128); controller.groupBox:SetHeight(26)
     local groupLabel
     groupLabel, controller.groupBy = UI.CreateChoiceField({ parent = controller.groupBox, label = "Group By", x = 0, y = 0,
-        buttonOffset = 62, width = 120, height = 76, firstY = -5, step = 22, initialText = "Default",
+        buttonOffset = 48, width = 80, height = 76, firstY = -5, step = 22, initialText = "Default", font = "GameFontHighlightSmall",
         choices = {{ value = "default", text = "Default" }, { value = "player", text = "Player" }, { value = "item", text = "Item" }},
         getValue = function() return controller.groupMode end,
         onSelect = function(value) controller:SetGroupBy(value) end })
     groupLabel:ClearAllPoints(); groupLabel:SetPoint("LEFT", controller.groupBox, "LEFT", 0, 0)
+    groupLabel:SetJustifyV("MIDDLE"); groupLabel:SetHeight(26); controller.groupLabel = groupLabel
     controller.groupBy:SetHeight(26)
-    controller.archivedGroup = UI.CreateContainer(nil, page)
-    controller.archivedGroup:SetWidth(180); controller.archivedGroup:SetHeight(26); controller.archivedGroup.bootyFlowWidth = 180
-    controller.archivedCheck = UI.CreateCheckButton(nil, controller.archivedGroup, "UICheckButtonTemplate")
-    controller.archivedCheck:SetPoint("LEFT", controller.archivedGroup, "LEFT", 0, 0)
-    controller.archivedCheck:SetWidth(18); controller.archivedCheck:SetHeight(18); controller.archivedCheck:SetChecked(false)
-    controller.archivedCheck.label = UI.CreateLabel(controller.archivedGroup, nil, "OVERLAY", "GameFontHighlightSmall")
-    controller.archivedCheck.label:SetPoint("LEFT", controller.archivedCheck, "RIGHT", 0, 0)
-    controller.archivedCheck.label:SetText("Show archived CSR")
-    controller.archivedCheck.label:SetJustifyH("LEFT"); controller.archivedCheck.label:SetJustifyV("MIDDLE")
-    controller.archivedCheck:SetScript("OnClick", function()
-        controller.showArchived = this:GetChecked() and true or false; controller:Refresh()
-    end)
-    controller.archivedCheck.labelHit = UI.CreateControl(nil, controller.archivedGroup)
-    controller.archivedCheck.labelHit:SetPoint("LEFT", controller.archivedCheck, "RIGHT", 0, 0)
-    controller.archivedCheck.labelHit:SetWidth(156); controller.archivedCheck.labelHit:SetHeight(26)
-    controller.archivedCheck.labelHit:SetScript("OnClick", function()
-        local check = controller.archivedCheck; check:SetChecked(not check:GetChecked())
-        controller.showArchived = check:GetChecked() and true or false; controller:Refresh()
-    end)
-    controller.flow = { controller.raidFilter, controller.searchGroup, controller.groupBox, controller.archivedGroup }
+    local function HistoryFilter(text, field)
+        local group = UI.CreateContainer(nil, page)
+        group:SetWidth(156); group:SetHeight(26); group.bootyFlowWidth = 156
+        local check = UI.CreateCheckButton(nil, group, "UICheckButtonTemplate")
+        check:SetPoint("LEFT", group, "LEFT", 0, 0)
+        check:SetWidth(18); check:SetHeight(18); check:SetChecked(false)
+        check.label = UI.CreateLabel(group, nil, "OVERLAY", "GameFontHighlightSmall")
+        check.label:SetPoint("LEFT", check, "RIGHT", 0, 0); check.label:SetText(text)
+        check.label:SetJustifyH("LEFT"); check.label:SetJustifyV("MIDDLE")
+        if check.label.SetWordWrap then check.label:SetWordWrap(false) end
+        check:SetScript("OnClick", function()
+            controller[field] = this:GetChecked() and true or false; controller:Refresh()
+        end)
+        check.labelHit = UI.CreateControl(nil, group)
+        check.labelHit:SetPoint("LEFT", check, "RIGHT", 0, 0); check.labelHit:SetHeight(26)
+        check.labelHit:SetScript("OnClick", function()
+            check:SetChecked(not check:GetChecked())
+            controller[field] = check:GetChecked() and true or false; controller:Refresh()
+        end)
+        return group, check
+    end
+    controller.archivedGroup, controller.archivedCheck = HistoryFilter("Show archived CSR", "showArchived")
+    controller.awardedGroup, controller.awardedCheck = HistoryFilter("Show awarded CSR", "showAwarded")
+    controller.filterControls = { controller.raidFilter, controller.searchGroup, controller.groupBox, controller.archivedGroup, controller.awardedGroup }
+    local filterSettings = { "csrShowRaidFilter", "csrShowSearchFilter", "csrShowGroupFilter", "csrShowArchivedFilter", "csrShowAwardedFilter" }
+    controller.flow = {}
+    controller.filterDividers = {}
+    for index = 1, 2 do
+        local divider = UI.CreateContainer(nil, host)
+        UI.RegisterSkinnedSurface(divider, "content", nil, {0, 0, 0, 0}, {0.68, 0.54, 0.27, 1})
+        UI.JoinSurfaceEdges(divider, true, false); divider:SetHeight(4)
+        controller.filterDividers[index] = divider
+    end
     controller.headers = {}
     local function OnSort() controller:Sort(this.tableKey, this.sortKey) end
     for index, text in ipairs({ "Player name", "Item", "CSR" }) do
@@ -488,28 +503,89 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         for index = table.getn(self.layoutRows), table.getn(self.nodes) + 1, -1 do self.layoutRows[index] = nil end
         return total
     end
+    local function PanelWidth(frame)
+        if frame.bootyWidthOwner and frame.bootyWidthInset then return UI.GetFrameSpan(frame.bootyWidthOwner) - frame.bootyWidthInset end
+        return UI.GetFrameSpan(frame)
+    end
+    local function LayoutDivider(divider, top)
+        local panel = host.bootyContentPanel or host
+        local width, hostWidth = PanelWidth(panel), PanelWidth(host)
+        local pageLeft, panelLeft = page.GetLeft and page:GetLeft(), panel.GetLeft and panel:GetLeft()
+        local inset = pageLeft and panelLeft and (pageLeft - panelLeft) or (width - hostWidth) / 2
+        divider:ClearAllPoints(); divider:SetPoint("TOPLEFT", page, "TOPLEFT", -inset, -top)
+        divider:SetWidth(width)
+        UI.JoinSurfaceEdges(divider, true, false, panel.bootyBorderOutsetLeft, panel.bootyBorderOutsetRight)
+    end
+    function controller:SyncFilterDividers()
+        local viewport = page.layoutViewport
+        local offset = viewport:GetVerticalScroll()
+        local bottom = offset + viewport:GetHeight()
+        for index, divider in ipairs(self.filterDividers) do
+            local top = index == 1 and self.filterTop or self.filterBottom
+            if host:IsShown() and page:IsShown() and top and top >= offset and top + 4 <= bottom then divider:Show() else divider:Hide() end
+        end
+    end
     local function LayoutContent(width, height, self)
         local available = math.max(80, width - 16)
         self.title:ClearAllPoints(); self.title:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -8)
         UI.FitButtonLabel(self.title, math.max(1, available - 104))
-        local hideTitle=(BootyRaiderDB or {}).csrHideSectionHeader
+        local settings=BootyRaiderDB or {}
+        local hideTitle=settings.csrHideSectionHeader
         if hideTitle then self.title:Hide() else self.title:Show() end
-        self.testButton:ClearAllPoints(); self.testButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, -8)
         local descriptionTop=hideTitle and 8 or 42
         local descriptionWidth=hideTitle and math.max(1,available-104) or available
-        self.description:ClearAllPoints(); self.description:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -descriptionTop)
         self.description:SetWidth(descriptionWidth); self.description:SetHeight(0)
-        local top = descriptionTop + math.max(24, UI.MeasureTextHeight(self.description, descriptionWidth)) + 8
-        top = UI.LayoutFlow(page, self.flow, 8, top, available, 8) + 8
+        local descriptionHeight=UI.MeasureTextHeight(self.description,descriptionWidth)
+        local buttonTop,top=8,descriptionTop+math.max(24,descriptionHeight)+8
+        if hideTitle then
+            local blockHeight=math.max(descriptionHeight,self.testButton:GetHeight())
+            descriptionTop=8+(blockHeight-descriptionHeight)/2
+            buttonTop=8+(blockHeight-self.testButton:GetHeight())/2
+            top=blockHeight+16
+        end
+        self.description:ClearAllPoints();self.description:SetPoint("TOPLEFT",page,"TOPLEFT",8,-descriptionTop)
+        self.description:SetHeight(descriptionHeight)
+        self.testButton:ClearAllPoints();self.testButton:SetPoint("TOPRIGHT",page,"TOPRIGHT",-8,-buttonTop)
+        local font, size, flags = self.archivedCheck.label:GetFont()
+        self.groupLabel:SetFont(font, size, flags); self.groupLabel:SetWidth(0)
+        self.groupLabelWidth = math.ceil(self.groupLabel:GetStringWidth())
+        self.groupBox.bootyFlowWidth = self.groupLabelWidth + 4 + 80
+        self.groupBy:ClearAllPoints(); self.groupBy:SetPoint("LEFT", self.groupBox, "LEFT", self.groupLabelWidth + 4, 0)
+        self.groupBy:SetWidth(80)
+        self.archivedCheck.label:SetWidth(0); self.awardedCheck.label:SetWidth(0)
+        self.archivedGroup.bootyFlowWidth = 18 + math.ceil(self.archivedCheck.label:GetStringWidth()) + 2
+        self.awardedGroup.bootyFlowWidth = 18 + math.ceil(self.awardedCheck.label:GetStringWidth()) + 2
+        for index=table.getn(self.flow),1,-1 do table.remove(self.flow,index) end
+        for index,control in ipairs(self.filterControls) do
+            if settings[filterSettings[index]]~=false then control:Show();table.insert(self.flow,control) else control:Hide() end
+        end
+        if not self.raidFilter:IsShown() then self.raidPanel:Hide() end
+        if not self.groupBox:IsShown() then self.groupBy.panel:Hide() end
+        if not self.searchGroup:IsShown() then self.search:ClearFocus() end
+        self.filterTop,self.filterBottom=nil,nil
+        if table.getn(self.flow)>0 then
+            self.filterTop = top
+            LayoutDivider(self.filterDividers[1], top)
+            self.filterBottom = UI.LayoutFlow(page, self.flow, 8, top + 8, available, 8) + 4
+            LayoutDivider(self.filterDividers[2], self.filterBottom)
+            top = self.filterBottom + 12
+        end
         self.search:SetWidth(math.max(24, self.searchGroup:GetWidth()))
-        self.groupBy:SetWidth(math.max(24, self.groupBox:GetWidth() - 62))
         self.archivedCheck.label:SetWidth(math.max(1, self.archivedGroup:GetWidth() - 18))
         self.archivedCheck.labelHit:SetWidth(math.max(1, self.archivedGroup:GetWidth() - 18))
+        self.awardedCheck.label:SetWidth(math.max(1, self.awardedGroup:GetWidth() - 18))
+        self.awardedCheck.labelHit:SetWidth(math.max(1, self.awardedGroup:GetWidth() - 18))
         self.headerTop, self.bodyTop = top, top + 24
         self.bodyHeight, self.bodyWidth = math.max(48, height - self.bodyTop - 8), available
         return self.bodyTop + self.bodyHeight + 8
     end
-    function controller:Layout() UI.LayoutResponsiveCanvas(page, LayoutContent, self) end
+    function controller:Layout() UI.LayoutResponsiveCanvas(page, LayoutContent, self); self:SyncFilterDividers() end
+    local previousPageScroll = page.layoutViewport:GetScript("OnVerticalScroll")
+    page.layoutViewport:SetScript("OnVerticalScroll", function()
+        if previousPageScroll then previousPageScroll() end
+        controller:SyncFilterDividers()
+    end)
+    page:SetScript("OnHide", function() for _, divider in ipairs(controller.filterDividers) do divider:Hide() end end)
     local function HeaderCells(row, fields, widths, tableKey)
         local x = 8
         for index, field in ipairs(fields) do
@@ -704,12 +780,13 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     end
     function controller:Refresh()
         if not host:IsShown() then return end
+        self.visibility.showArchived, self.visibility.showAwarded = self.showArchived, self.showAwarded
         if self.testMode then
             local state = self.testLab.state
-            Raider.Services.CSR.BuildSummary(state.entries, nil, state.now, self.summary, nil, nil, self.search:GetText(), self.showArchived)
+            Raider.Services.CSR.BuildSummary(state.entries, nil, state.now, self.summary, nil, nil, self.search:GetText(), self.visibility)
         else
             local service = Raider.Services.RaidCSR or Raider.Services.CSR
-            service.BuildSummary(getEntries(), nil, time(), self.summary, getRosterData(), self.selectedRaids, self.search:GetText(), self.showArchived)
+            service.BuildSummary(getEntries(), nil, time(), self.summary, getRosterData(), self.selectedRaids, self.search:GetText(), self.visibility)
         end
         self.description:SetText(self.descriptionText .. (self.summary.provisional and "\n* Provisional: unresolved raid changes may affect these points." or "")
             .. (self.actionError and ("\n|cffff5555" .. tostring(self.actionError) .. "|r") or ""))

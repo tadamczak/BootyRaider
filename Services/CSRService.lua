@@ -137,7 +137,11 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
 
     local now = tonumber(currentTime) or time()
     local cutoff = now - WINDOW_SECONDS
-    local archives = showArchived == true
+    -- The eighth argument also accepts reusable visibility options. Keep the
+    -- legacy boolean true meaning all nonactive history for existing callers.
+    local visibility = type(showArchived) == "table" and showArchived or nil
+    local archives = showArchived == true or visibility and visibility.showArchived == true or false
+    local awards = showArchived == true or visibility and visibility.showAwarded == true or false
     local query = Normalize(searchText)
     -- Keep the public rules/rosterData arguments for callers. Eligibility belongs
     -- to each saved raid's rules/member records, never current defaults/roster.
@@ -150,7 +154,7 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
         local savedAt = GetSavedAt(entries[index])
         local raidName = tostring(entries[index].raidName or "Other")
         local filterName = KNOWN_RAIDS[raidName] and raidName or "Other"
-        if CSR.IsSavedAndEnded(entries[index]) and entries[index].csrEnabled == true and (archives or savedAt >= cutoff) and savedAt <= now
+        if CSR.IsSavedAndEnded(entries[index]) and entries[index].csrEnabled == true and (archives or awards or savedAt >= cutoff) and savedAt <= now
             and (not selectedRaids or selectedRaids[filterName]) then
             orderedCount = orderedCount + 1; ordered[orderedCount] = entries[index]
         end
@@ -241,9 +245,11 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
                 local sourceCount = table.getn(sources)
                 for index = 1, sourceCount do
                     local source = sources[index]
+                    local visible = source.status == "ACTIVE" or source.status == "ARCHIVED" and archives
+                        or source.status == "AWARDED" and awards
                     if source.status == "ACTIVE" then activeCount = activeCount + source.count
-                    elseif archives then archivedCount = archivedCount + source.count end
-                    if source.status == "ACTIVE" or archives then
+                    elseif visible then archivedCount = archivedCount + source.count end
+                    if visible then
                         kept = kept + 1; sources[kept] = source
                     end
                 end
@@ -269,6 +275,7 @@ function CSR.BuildSummary(entries, rules, currentTime, target, rosterData, selec
     summary.cutoff = cutoff
     summary.now = now
     summary.showArchived = archives
+    summary.showAwarded = awards
     summary.pointsPerItem = POINTS_PER_UNSUCCESSFUL_SR
     return summary
 end

@@ -191,6 +191,7 @@ local function InitializeDefaults(store)
     if BootyRaiderDB.lmAutoLoot == nil then BootyRaiderDB.lmAutoLoot = false end
     if type(BootyRaiderDB.lmAutoLootRarities) ~= "number" or BootyRaiderDB.lmAutoLootRarities < 0 or BootyRaiderDB.lmAutoLootRarities > 31 then BootyRaiderDB.lmAutoLootRarities = 7 end
     if type(BootyRaiderDB.lmAutoLootPresets) ~= "number" then BootyRaiderDB.lmAutoLootPresets = 0 end
+    if type(BootyRaiderDB.lmAutoLootInclusionPresets) ~= "number" then BootyRaiderDB.lmAutoLootInclusionPresets = BootyRaiderDB.lmAutoLootPresets end
     if type(BootyRaiderDB.lmAutoLootExceptions) ~= "string" then BootyRaiderDB.lmAutoLootExceptions = "" end
     if type(BootyRaiderDB.lmAutoLootInclusions) ~= "string" then BootyRaiderDB.lmAutoLootInclusions = "" end
     if tonumber(BootyRaiderDB.outOfFocusOpacity) == nil then BootyRaiderDB.outOfFocusOpacity = 100 end
@@ -199,9 +200,17 @@ local function InitializeDefaults(store)
     if BootyRaiderDB.csrUseClassColors == nil then BootyRaiderDB.csrUseClassColors = true end
     if BootyRaiderDB.csrHideSectionHeader == nil then BootyRaiderDB.csrHideSectionHeader = false end
     if BootyRaiderDB.raidStatsHideSectionHeader == nil then BootyRaiderDB.raidStatsHideSectionHeader = false end
-    for _,key in ipairs({"raidStatsListShowId","raidStatsListShowTime","raidStatsSingleUseClassColors",
-        "raidStatsSingleShowAttendance","raidStatsMultiUseClassColors","raidStatsMultiShowAttendance",
-        "raidStatsMultiShowSR","raidStatsMultiShowLoot"}) do
+    if BootyRaiderDB.raidStatsUseClassColors==nil then
+        local previous=BootyRaiderDB.raidStatsSingleUseClassColors
+        if previous==nil then previous=BootyRaiderDB.raidStatsMultiUseClassColors end
+        BootyRaiderDB.raidStatsUseClassColors=previous~=false
+    end
+    BootyRaiderDB.raidStatsSingleUseClassColors=nil
+    BootyRaiderDB.raidStatsMultiUseClassColors=nil
+    for _,key in ipairs({"raidStatsListShowId","raidStatsListShowTime",
+        "raidStatsSingleShowAttendance","raidStatsMultiShowAttendance","raidStatsMultiShowSR","raidStatsMultiShowLoot",
+        "raidStatsShowRaidFilter","raidStatsShowSearchFilter","raidStatsShowFromFilter","raidStatsShowToFilter","raidStatsShowSelectAll",
+        "csrShowRaidFilter","csrShowSearchFilter","csrShowGroupFilter","csrShowArchivedFilter","csrShowAwardedFilter"}) do
         if BootyRaiderDB[key]==nil then BootyRaiderDB[key]=true end
     end
     BootyRaiderDB.raidGroupOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidGroupOddLightness) or 5))

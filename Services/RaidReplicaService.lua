@@ -1,5 +1,5 @@
 local Raider=BootyRaider
-local Replica={policy=1}
+local Replica={policy=2}
 Raider.Services.RaidReplica=Replica
 local function Copy(value)
     if type(value)~="table" then return value end
@@ -70,8 +70,34 @@ local function Heads(value)
     end
     return true
 end
+local function ArchivedItem(item)
+    return type(item)=="table" and Item(item.itemId or item.name) and Optional(item.count,"number",1000000)
+        and Optional(item.timestamp,"number") and Optional(item.link,"string",1024)
+end
+local function ArchivedHistory(value,statistic)
+    if value==false then return true end
+    if type(value)~="table" or not Text(value.id) or not Text(value.syncRaidId,300) or not Text(value.raidName)
+        or not Optional(value.savedAt,"number") or not Optional(value.startedAt,"number") or not Optional(value.endedAt,"number") then return false end
+    local function Member(member)
+        if type(member)~="table" or not Text(member.name,96) then return false end
+        if statistic then
+            return List(member.srItems or {},40,function(item)return type(item)=="table" and Item(item.itemId or item.name) end)
+                and List(member.lootItems or {},512,ArchivedItem)
+        end
+        return List(member.srItemIds or {},40,Item) and List(member.loot or {},512,ArchivedItem)
+            and Optional(member.sr,"string",4096) and Optional(member.guildRank,"string") and Optional(member.class,"string")
+    end
+    return List(value.members,128,Member) and List(value.departedMembers or {},128,Member)
+        and (statistic or ImportExport(value.exportChunks))
+end
 local function KnownKey(key)
+    if type(key)=="string" and string.sub(key,1,8)=="archive:" then
+        local field=string.sub(key,9)
+        return field=="raid:metadata" or field=="raid:loot-rules" or field=="saved:flags" or field=="saved:snapshot" or field=="saved:statistic"
+            or string.find(field,"^saved:member:") or string.find(field,"^csr:")
+    end
     return type(key)=="string" and (key=="raid:metadata" or key=="raid:lifecycle" or key=="raid:alias-decision" or key=="raid:save" or key=="raid:loot-rules"
+        or string.find(key,"^raid:session%-deleted:")
         or key=="saved:snapshot" or key=="saved:statistic" or key=="saved:flags" or key=="import:sr"
         or string.find(key,"^member:") or string.find(key,"^sr:") or string.find(key,"^loot:") or string.find(key,"^entitlement:")
         or string.find(key,"^saved:member:") or string.find(key,"^csr:") or string.find(key,"^recorder:")
@@ -101,8 +127,17 @@ function Replica.ValidateOperation(operation)
         local key,value=change.key,change.value
         if type(key)~="string" then return false,"invalid-domain-key" end
         if not KnownKey(key) then return false,"unknown-domain-record" end
-        if not change.deleted then
-            if key=="raid:metadata" then
+        local archiveKey=string.sub(key,1,8)=="archive:"
+        if archiveKey then key=string.sub(key,9) end
+        local archiveDeleted=archiveKey and value==false and (key=="saved:snapshot" or key=="saved:statistic" or string.find(key,"^saved:member:"))
+        local sessionDeletion=string.find(key,"^raid:session%-deleted:")
+        if sessionDeletion and (change.deleted or change.base or change.bases) then return false,"invalid-session-tombstone" end
+        if not change.deleted and not archiveDeleted then
+            if sessionDeletion then
+                if type(value)~="table" or not ArchivedHistory(value.snapshot,false) or not ArchivedHistory(value.statistic,true) then return false,"invalid-session-archive" end
+                for field in pairs(value) do if field~="snapshot" and field~="statistic" then return false,"invalid-session-archive" end end
+                for _,entry in pairs(value) do if entry and operation.raidId and entry.syncRaidId~=operation.raidId then return false,"invalid-session-archive-identity" end end
+            elseif key=="raid:metadata" then
                 if not Fields(value,{id="string",raidName="string",displayName="string",startedAt="number",endedAt="number",savedAt="number",modifiedAt="number"})
                     or not Text(value.id) or not Text(value.raidName) then return false,"invalid-raid-metadata" end
             elseif string.find(key,"^sr:") then
@@ -132,6 +167,7 @@ function Replica.ValidateOperation(operation)
                 if type(value)~="table" or not Text(value.name,96) or string.sub(key,14)~=Lower(value.name)
                     or not Optional(value.class,"string") or not Optional(value.guildRank,"string") or not Optional(value.lootRank,"string")
                     or not Optional(value.attendance,"number",1000000) then return false,"invalid-saved-member" end
+                if archiveKey and (not List(value.srItems or {},40,ArchivedItem) or not List(value.lootItems or {},512,ArchivedItem)) then return false,"invalid-archived-member-items" end
             elseif key=="raid:alias-decision" then
                 if type(value)~="table" or not List(value.members,128,function(id)return Text(id,300) end) or table.getn(value.members)<2
                     or type(value.claims)~="table" or type(value.observed)~="table" or not Text(value.selectionFingerprint,100) then return false,"invalid-alias-decision" end
@@ -231,6 +267,18 @@ function Replica.Create(options)
         end
         return id
     end
+    state.deletedSessions={}
+    local function DeletionKey(id)
+        if state.deletedSessions[id]==nil then
+            local found
+            for key,record in pairs(Raid(id) and Raid(id).records or {}) do
+                if string.find(key,"^raid:session%-deleted:") and not record.deleted and (not found or key<found) then found=key end
+            end
+            state.deletedSessions[id]=found or false
+        end
+        return state.deletedSessions[id]
+    end
+    function api.IsSessionDeleted(id) return id and (DeletionKey(id) or DeletionKey(Canonical(id))) and true or false end
     local function ReindexAliases()
         state.aliases={};state.aliasSources={};state.mergeConflicts={};state.aliasBlocked={};state.aliasGroups={};state.aliasDecisions={};state.aliasPlans={}
         local journal=J.Ensure(db)
@@ -240,7 +288,7 @@ function Replica.Create(options)
             for _,key in ipairs(Keys(raid.records)) do
                 if string.find(key,"^merge:") then
                     local merge,record=Record(target,key);local source=merge and merge.source or string.sub(key,7)
-                    if record and not record.deleted and Text(source,300) and source~=target then
+                    if record and not record.deleted and Text(source,300) and source~=target and not DeletionKey(source) and not DeletionKey(target) then
                         graph[source]=graph[source] or {};graph[target]=graph[target] or {}
                         graph[source][target]=true;graph[target][source]=true
                         targets[source]=targets[source] or {};targets[source][target]=true
@@ -340,7 +388,10 @@ function Replica.Create(options)
         end
         if localChange and operation.kind=="raid.leave" and db.syncJoinedRaidId==operation.raidId then db.syncJoinedRaidId=nil end
         local reindex=operation.kind=="raid.merge"
-        for _,change in ipairs(operation.changes or {}) do if change.key=="raid:alias-decision" or string.find(change.key,"^merge:") then reindex=true end end
+        for _,change in ipairs(operation.changes or {}) do
+            if change.key=="raid:alias-decision" or string.find(change.key,"^merge:") then reindex=true end
+            if string.find(change.key,"^raid:session%-deleted:") then state.deletedSessions[operation.raidId]=nil;reindex=true end
+        end
         local previousTargets={}
         if reindex then
             for id in pairs(J.Ensure(db).raids) do previousTargets[id]={canonical=Canonical(id),blocked=state.aliasBlocked[id] and true or false} end
@@ -367,9 +418,9 @@ function Replica.Create(options)
         if localChange and state.transport and state.transport.NotifyChanged then state.transport:NotifyChanged(operation.raidId) end
         if options.wake then options.wake() end
     end
-    local function Commit(id,kind,changes,detail)
+    local function Commit(id,kind,changes,detail,audit)
         local allowed,reason=Authorized();if not allowed then return false,reason or "Current guild officer authority is required." end
-        local ok,operation=J.Commit(db,id,kind,changes,detail)
+        local ok,operation=J.Commit(db,id,kind,changes,detail,audit)
         if ok and operation then api.OnOperation(operation,"applied",true) end
         return ok,operation
     end
@@ -568,11 +619,14 @@ function Replica.Create(options)
         end
         return attendance,statistic
     end
-    function api.GetProjection(id) return Build(id) end
+    function api.GetProjection(id)
+        if api.IsSessionDeleted(id) then return nil,"This active session was deleted. Load its saved snapshot to start a new session." end
+        return Build(id)
+    end
     function api.GetJoinedRaidId()
         local id=db.syncJoinedRaidId
         if db.raidAttendance then id=db.raidAttendance.syncRaidId end
-        return id and Raid(Canonical(id)) and Record(Canonical(id),"raid:lifecycle")~="ended" and id or nil
+        return id and not api.IsSessionDeleted(id) and Raid(Canonical(id)) and Record(Canonical(id),"raid:lifecycle")~="ended" and id or nil
     end
     function api.GetRaidInfo(id)
         if not id then return {storage="In memory"} end
@@ -589,7 +643,7 @@ function Replica.Create(options)
             state.latestOperations[id]=latest and latest.id or false
         end
         local info={storage=state.loadedRaids[id] and not state.changedRaids[id] and "On disk" or "In memory",
-            lifecycle=Record(id,"raid:lifecycle") or "active",lastAuthor=latest and latest.author or "Unknown",lastSave=metadata.savedAt,modifiedAt=latest and latest.timestamp}
+            lifecycle=api.IsSessionDeleted(id) and "deleted" or Record(id,"raid:lifecycle") or "active",lastAuthor=latest and latest.author or "Unknown",lastSave=metadata.savedAt,modifiedAt=latest and latest.timestamp}
         state.raidInfo[id]=info;return info
     end
 
@@ -624,6 +678,160 @@ function Replica.Create(options)
         end
         history.raids[entry.id]=entry;table.insert(history.order,1,entry.id)
     end
+    local function ExistingHistory(field,id)
+        for _,entry in pairs(db[field] and db[field].raids or {}) do if entry.syncRaidId==id then return entry end end
+    end
+    local function PackHistory(entry)
+        if not entry then return false end
+        local result=Copy(entry)
+        if result.rollForExport then
+            result.exportChunks={}
+            for index=1,string.len(result.rollForExport),4096 do table.insert(result.exportChunks,string.sub(result.rollForExport,index,index+4095)) end
+            result.rollForExport=nil
+        end
+        return result
+    end
+    -- Stable content ordering only breaks equal original save times. It never
+    -- promotes a copy merely because another officer relayed it later.
+    local function ArchiveOrder(value)
+        if type(value)~="table" then return type(value)..":"..tostring(value) end
+        local parts,keys={},{}
+        for key in pairs(value) do table.insert(keys,key) end
+        table.sort(keys,function(a,b)return type(a)..tostring(a)<type(b)..tostring(b) end)
+        for _,key in ipairs(keys) do
+            local entry=ArchiveOrder(value[key]);table.insert(parts,tostring(key)..":"..string.len(entry)..":"..entry)
+        end
+        return table.concat(parts,";")
+    end
+    local function NewerArchive(candidate,current)
+        if not candidate then return false end
+        if not current then return true end
+        local a,b=candidate.savedAt or candidate.updatedAt or 0,current.savedAt or current.updatedAt or 0
+        if a~=b then return a>b end
+        return not J.Equal(candidate,current) and ArchiveOrder(candidate)>ArchiveOrder(current)
+    end
+    local function ApplyArchiveEdits(id,snapshot,statistic)
+        local function ReplaceMember(entry,name,value,isSnapshot)
+            if not entry then return end
+            local index
+            for i,member in ipairs(entry.members or {}) do if Lower(member.name)==name then index=i;break end end
+            if not value then if index then table.remove(entry.members,index) end;return end
+            local previous=index and entry.members[index]
+            local member=Copy(value)
+            if isSnapshot then
+                member=Copy(previous or {})
+                for field,fieldValue in pairs(value) do if field~="srItems" and field~="lootItems" then member[field]=Copy(fieldValue) end end
+                member.srItemIds={};member.loot=Copy(value.lootItems or {})
+                for _,item in ipairs(value.srItems or {}) do table.insert(member.srItemIds,item.itemId or item.name) end
+                member.sr=nil
+                local previousLoot={}
+                for _,loot in ipairs(previous and previous.loot or {}) do if loot.syncRecordId then previousLoot[loot.syncRecordId]=loot end end
+                for index,loot in ipairs(member.loot) do
+                    local old=loot.syncRecordId and previousLoot[loot.syncRecordId]
+                    if old then local merged=Copy(old);for field,fieldValue in pairs(loot) do merged[field]=fieldValue end;member.loot[index]=merged end
+                end
+            else
+                member.srCount=table.getn(member.srItems or {});member.lootCount=0
+                for _,loot in ipairs(member.lootItems or {}) do member.lootCount=member.lootCount+(loot.count or 1) end
+            end
+            if index then entry.members[index]=member else table.insert(entry.members,member) end
+        end
+        for _,key in ipairs(Keys(Raid(id).records)) do
+            local record=Raid(id).records[key]
+            if string.sub(key,1,8)=="archive:" then
+                local value=not record.deleted and record.value or nil
+                local field=string.sub(key,9)
+                if record.conflicted and not record.revision then field="" end
+                if field=="raid:metadata" and value then
+                    for _,entry in pairs({snapshot=snapshot,statistic=statistic}) do if entry then
+                        entry.id=value.id;entry.raidName=value.raidName;entry.displayName=value.displayName;entry.modifiedAt=value.modifiedAt
+                    end end
+                elseif field=="raid:loot-rules" and value then
+                    if snapshot then snapshot.lootRules=Copy(value) end;if statistic then statistic.lootRules=Copy(value) end
+                elseif field=="saved:flags" and value and statistic then
+                    statistic.attendanceEnabled=value.attendanceEnabled;statistic.csrEnabled=value.csrEnabled
+                elseif string.find(field,"^saved:member:") then
+                    local name=string.sub(field,14)
+                    ReplaceMember(snapshot,name,value,true);ReplaceMember(statistic,name,value,false)
+                elseif string.find(field,"^csr:") and value and statistic then
+                    local name=Lower(value.player);statistic.csrArchived=statistic.csrArchived or {}
+                    statistic.csrArchived[name]=statistic.csrArchived[name] or {};statistic.csrArchived[name][value.item]=value.archived and true or nil
+                    if not next(statistic.csrArchived[name]) then statistic.csrArchived[name]=nil end
+                    if not next(statistic.csrArchived) then statistic.csrArchived=nil end
+                end
+                if record.conflicted and statistic then
+                    statistic.syncDisputed=true
+                    if snapshot then snapshot.syncDisputed=true end
+                end
+            end
+        end
+    end
+    local function RestoreDeletedHistory(id)
+        local best={snapshot=false,statistic=false};local pending=false
+        for key in pairs(Raid(id).records) do
+            if string.find(key,"^raid:session%-deleted:") then
+                local archive,record=Record(id,key)
+                if not archive or record.pendingCheckpoint or record.conflicted then pending=true
+                else for _,field in ipairs({"snapshot","statistic"}) do
+                    if NewerArchive(archive[field],best[field]) then best[field]=archive[field] end
+                end end
+            end
+        end
+        if pending then return false,"Waiting for the preserved saved raid." end
+        local localArchive={snapshot=PackHistory(ExistingHistory("softReserveHistory",id)),statistic=PackHistory(ExistingHistory("raidStatistics",id))}
+        local relay=false;local edited=false
+        for key in pairs(Raid(id).records) do if string.sub(key,1,8)=="archive:" then edited=true;break end end
+        for _,field in ipairs({"snapshot","statistic"}) do
+            local candidate,current=localArchive[field],best[field]
+            local later=candidate and current and (candidate.savedAt or candidate.updatedAt or 0)>(current.savedAt or current.updatedAt or 0)
+            if (not edited or not current or later) and NewerArchive(candidate,current) then best[field]=candidate;relay=true end
+        end
+        -- An offline officer may possess a saved copy unknown to the deleter.
+        -- Preserve it once before replacing history; relay time is not save time.
+        if relay then
+            local changes={{key="raid:session-deleted:"..J.NewRecordId(db),value=best}}
+            local valid,failure=Replica.ValidateOperation({raidId=id,changes=changes})
+            if not valid then return false,failure end
+            local ok,reason=Commit(id,"raid.session.preserve",changes,nil,false)
+            if not ok then return false,reason end
+        end
+        best=Copy(best);ApplyArchiveEdits(id,best.snapshot,best.statistic)
+        for _,pair in ipairs({{"softReserveHistory","snapshot","saved:snapshot"},{"raidStatistics","statistic","saved:statistic"}}) do
+            local preserved=best[pair[2]]
+            local _,flag=Record(id,"archive:"..pair[3])
+            if flag and flag.conflicted and not flag.revision then flag=nil end
+            if not flag then _,flag=Record(id,pair[3]) end
+            if flag and (flag.deleted or flag.value==false) then RemoveHistory(db[pair[1]],id)
+            elseif preserved then
+                local entry=Copy(preserved)
+                if entry.exportChunks then entry.rollForExport=table.concat(entry.exportChunks);entry.exportChunks=nil end
+                if not J.Equal(ExistingHistory(pair[1],id),entry) then StoreHistory(pair[1],entry) end
+            end
+        end
+        return true
+    end
+    function api.GetDeleteSessionToken(id) return RevisionToken(Canonical(id)) end
+    function api.DeleteSession(id,expected)
+        local allowed,reason=Authorized();if not allowed then return false,reason or "Current guild officer authority is required." end
+        id=Canonical(id)
+        if not Raid(id) then return false,"Raid session not found." end
+        if api.IsSessionDeleted(id) then return false,"This active session was already deleted." end
+        if Record(id,"raid:lifecycle")=="ended" then return false,"This raid has already ended. Refresh the active session list." end
+        if not expected or not J.Equal(expected,RevisionToken(id)) then return false,"The raid changed. Review it and confirm deletion again." end
+        local archive={snapshot=PackHistory(ExistingHistory("softReserveHistory",id)),statistic=PackHistory(ExistingHistory("raidStatistics",id))}
+        if Record(id,"saved:snapshot")==true and not archive.snapshot then
+            return false,"Wait for the saved snapshot to finish synchronizing before deleting this session."
+        end
+        -- Immutable per-action keys make concurrent deletions terminal without
+        -- mixing their saved copies or allowing later live edits to resurrect it.
+        local changes={{key="raid:session-deleted:"..J.NewRecordId(db),value=archive}}
+        local valid,failure=Replica.ValidateOperation({raidId=id,changes=changes});if not valid then return false,failure end
+        local ok,operation=Commit(id,"raid.session.delete",changes,
+            {subject=(Record(id,"raid:metadata") or {}).id or id})
+        if not ok then return false,operation end
+        api.Flush(1,id)
+        return true
+    end
     local function Snapshot(attendance)
         return {version=4,id=attendance.snapshotId,syncRaidId=attendance.syncRaidId,raidName=attendance.raidName,displayName=attendance.displayName,
             startedAt=attendance.sessionStartedAt,createdAt=attendance.createdAt,endedAt=attendance.endedAt,
@@ -634,14 +842,27 @@ function Replica.Create(options)
             srCustomChanges=Copy(attendance.srCustomChanges),srCustomReview=Copy(attendance.softReserveImport.customReview),
             unmatched=Copy(attendance.softReserveImport.unmatchedReservations),source=attendance.softReserveImport.origin or "officer-sync"}
     end
-    function api.Flush(limit)
+    function api.Flush(limit,onlyRaid)
         local used=0
-        for _,id in ipairs(Keys(state.dirty)) do
+        for _,id in ipairs(onlyRaid and {onlyRaid} or Keys(state.dirty)) do
             if used>=(limit or 1) then break end
             state.dirty[id]=nil;used=used+1
             local affected=state.dirtyNames[id];state.dirtyNames[id]=nil
-            local attendance,statistic=Build(id)
-            state.waiting[id]=not attendance and statistic or nil
+            local removed=api.IsSessionDeleted(id)
+            if removed then
+                local active=db.raidAttendance
+                local joined=db.syncJoinedRaidId and Canonical(db.syncJoinedRaidId)==id
+                if active and Canonical(active.syncRaidId)==id then db.raidAttendance=nil else active=nil end
+                if joined then db.syncJoinedRaidId=nil end
+                if (active or joined) and options.onSessionDeleted then options.onSessionDeleted(active,id) end
+                local restored,reason=RestoreDeletedHistory(id)
+                state.waiting[id]=not restored and reason or nil
+                if Raider.Services.RaidCSR then Raider.Services.RaidCSR.Invalidate(id,affected or nil) end
+                state.projected[id]=true
+            end
+            local attendance,statistic
+            if not removed then attendance,statistic=Build(id) end
+            if not removed then state.waiting[id]=not attendance and statistic or nil end
             if attendance then
                 local active=db.raidAttendance
                 if active and Canonical(active.syncRaidId)==id then
@@ -718,6 +939,7 @@ function Replica.Create(options)
     function api.Recover(id,viewEnded)
         local allowed,reason=Authorized();if not allowed then return false,reason end
         id=Canonical(id)
+        if api.IsSessionDeleted(id) then return false,"This active session was deleted. Load its saved snapshot to start a new session." end
         local active=db.raidAttendance
         -- Physical receipts cannot be replayed. Preserve their local fallback
         -- until Save has successfully included them in the journal projection.
@@ -741,6 +963,7 @@ function Replica.Create(options)
         return true
     end
     function api.Reopen(id,expected)
+        if api.IsSessionDeleted(id) then return false,"A deleted session cannot be reopened. Load its saved snapshot to start a new session." end
         local current=Record(Canonical(id),"raid:lifecycle")
         if current~="ended" then return false,"This session is no longer ended. Refresh and try again." end
         local _,record=Record(Canonical(id),"raid:lifecycle")
@@ -755,7 +978,7 @@ function Replica.Create(options)
         local blocked=id and state.aliasBlocked[Canonical(id)]
         local message=blocked and "Overlapping raid recordings: CSR is withheld until their identities are resolved." or id and state.waiting[Canonical(id)] or transport.message or "Waiting for another officer."
         local recordingGap
-        if id and options.recorderAvailable and Record(Canonical(id),"raid:lifecycle")~="ended" then
+        if id and options.recorderAvailable and not api.IsSessionDeleted(id) and Record(Canonical(id),"raid:lifecycle")~="ended" then
             local found=false
             local raid=Raid(Canonical(id))
             for key in pairs(raid and raid.records or {}) do
@@ -769,7 +992,7 @@ function Replica.Create(options)
         end
         local active=db.raidAttendance
         local localFailure=active and id and Canonical(active.syncRaidId)==Canonical(id) and active.syncLocalAuditFailure
-        local lifecycle=id and Record(Canonical(id),"raid:lifecycle")
+        local lifecycle=id and (api.IsSessionDeleted(id) and "deleted" or Record(Canonical(id),"raid:lifecycle"))
         local metadata=id and Record(Canonical(id),"raid:metadata")
         local lifecycleRevision,endedBy,savedAndEnded
         if lifecycle=="ended" then
@@ -782,6 +1005,7 @@ function Replica.Create(options)
                 message=tostring(endedBy or "An officer").." ended this raid. Updates still synchronize. Reopen it to continue recording."
             end
         end
+        if lifecycle=="deleted" then message="The active session was deleted. Its saved snapshot is preserved." end
         if localFailure then message="Needs attention: a confirmed loot change is stored only locally. Save the raid to retry synchronization. "..tostring(localFailure) end
         local syncStatus=transport.lastError and "Sync error! Send log" or (id and state.receivedRaids and state.receivedRaids[Canonical(id)] or not id and state.receivedSinceLoad) and "New data received. Please reload!"
             or (transport.pending or 0)>0 and "Syncing…" or "Up to date"
@@ -799,7 +1023,7 @@ function Replica.Create(options)
                 local metadata,record=Record(id,"raid:metadata")
                 local lifecycle=Record(id,"raid:lifecycle")
                 local saved=Record(id,"saved:snapshot")
-                if metadata and (lifecycle=="active" or lifecycle=="saved" or saved==true) then
+                if metadata and not api.IsSessionDeleted(id) and (lifecycle=="active" or lifecycle=="saved" or saved==true) then
                     local operation=record.revision and J.GetOperation(db,record.revision)
                     local lifecycle,lifecycleRecord=Record(id,"raid:lifecycle");lifecycle=lifecycle or "active"
                     local memberCount=0
@@ -849,6 +1073,7 @@ function Replica.Create(options)
 
     local function MergePlan(target,source)
         target=Canonical(target)
+        if api.IsSessionDeleted(target) or api.IsSessionDeleted(source) then return nil,"Deleted active sessions cannot be merged. Load a saved snapshot as a new session first." end
         if state.aliasBlocked[target] or state.aliasBlocked[source] then return nil,"Resolve the overlapping recording identities in Conflicts before comparing another merge." end
         if target==source or not Raid(target) or not Raid(source) then return nil,"Select two distinct known raid recordings." end
         local targetMeta=Record(target,"raid:metadata");local sourceMeta=Record(source,"raid:metadata")

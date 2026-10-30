@@ -34,6 +34,21 @@ function Audit.OwnsRecordId(id)
 end
 function Audit.Commit(record, kind, changes, detail, visible)
     if not record or IsTest() then return true end
+    local replica=Raider.Runtime and Raider.Runtime.replica
+    if record.syncRaidId and replica and replica.IsSessionDeleted and replica.IsSessionDeleted(record.syncRaidId) then
+        local historyKinds={['raid.edit']=true,['raid.metadata']=true,['raid.flags']=true,['raid.snapshot.delete']=true,['raid.statistic.delete']=true,['csr.archive']=true,['csr.activate']=true}
+        if not historyKinds[kind] then return false,"This active session was deleted. Load its saved snapshot to start a new session." end
+        local archived={}
+        for _,change in ipairs(changes) do
+            local key=change.key
+            if key=="raid:metadata" or key=="raid:loot-rules" or string.find(key,"^saved:") or string.find(key,"^csr:") then
+                local entry={key="archive:"..key,value=change.value}
+                if change.deleted then entry.value=false end
+                table.insert(archived,entry)
+            end
+        end
+        changes=archived
+    end
     if Raider.Services.RaidReplica then
         local valid,reason=Raider.Services.RaidReplica.ValidateOperation({changes=changes})
         if not valid then return false,reason end
@@ -444,6 +459,24 @@ function Audit.Save(attendance,entry,snapshot,endSession,copySource)
             for _,member in ipairs(group) do member.entitlementAuditFailure=nil end
         end
     end
+    return ok,operation
+end
+function Audit.StartFromSnapshot(attendance)
+    local changes=Audit.MemberChanges(attendance.members,attendance)
+    for _,member in ipairs(attendance.departedMembers or {}) do
+        table.insert(changes,{key="member:"..string.lower(member.name),value=Audit.MemberValue(member)})
+        table.insert(changes,{key="sr:"..string.lower(member.name),value=Audit.SRValue(member,attendance)})
+    end
+    if attendance.softReserveImport then table.insert(changes,{key="import:sr",value=Audit.ImportValue(attendance.softReserveImport)}) end
+    local prepared,reason=PrepareLiveLoot(attendance,changes)
+    if not prepared then return false,reason end
+    AppendEntitlements(changes,attendance)
+    table.insert(changes,{key="raid:metadata",value=Audit.Metadata(attendance)})
+    table.insert(changes,{key="raid:lifecycle",value="active"})
+    table.insert(changes,{key="raid:loot-rules",value=Copy(attendance.lootRules or {})})
+    table.insert(changes,Recorder("active"))
+    local ok,operation=Audit.Commit(attendance,"raid.start",changes,{subject=attendance.snapshotId})
+    if ok then PublishLootIds(prepared) end
     return ok,operation
 end
 function Audit.Leave(attendance)

@@ -42,6 +42,81 @@ local function MaskCheckbox(key,label,path,bit,updatePresets)
     end
     field.onChange=nil
 end
+local function AutoLootFields()
+    local loot=Raider.Services.AutoLoot
+    local path={"Addon UI","Raid","Loot Master Mode","LM Config"}
+    local mode=Field("lmAutoLootMode","LM Auto Loot","choice",path,nil,nil,loot.ModeChoices)
+    mode.rollbackKeys={"lmAutoLoot"}
+    mode.readLegacy=function(value,old)
+        if value~=nil then return value end
+        if old.lmAutoLoot~=nil then return old.lmAutoLoot and "auto" or "off" end
+    end
+    local rarityOptions={}
+    local rarityNames=loot.RarityNames or {"Poor","Common","Uncommon","Rare","Epic"}
+    for index,name in ipairs(rarityNames) do
+        local color
+        if GetItemQualityColor then local r,g,b=GetItemQualityColor(index-1);color={r,g,b} end
+        table.insert(rarityOptions,{text=name,value=name,color=color})
+    end
+    local rarity=Field("lmAutoLootRaritySelection","Auto Loot Rarity","multiselect",path,nil,nil,rarityOptions)
+    rarity.profile=false;rarity.persist=false;rarity.onChange=nil
+    rarity.get=function(store) return loot.MaskSelection(store.lmAutoLootRarities,rarityNames) end
+    rarity.set=function(value) Raider.Database.SetSetting("lmAutoLootRarities",loot.SelectionMask(value,rarityNames)) end
+    -- Retain the old per-bit profile keys without displaying separate checkboxes.
+    for index,name in ipairs(rarityNames) do
+        MaskCheckbox("lmAutoLootRarities",name,path,2^(index-1));fields[table.getn(fields)].profileOnly=true
+    end
+    local definitions=Field("lmAutoLootPresetDefinitions","Auto loot preset definitions","text",path)
+    definitions.profileOnly=true;definitions.onChange=nil
+    definitions.get=function(store) return loot.GetDefinitions(store) end
+    definitions.set=function(value,store)
+        local valid,reason=loot.ValidateDefinitions(value)
+        assert(valid,reason);store.lmAutoLootPresetDefinitions=valid
+    end
+    for index,name in ipairs(loot.PresetNames) do
+        MaskCheckbox("lmAutoLootPresets",name,path,2^(index-1),true);fields[table.getn(fields)].profileOnly=true
+    end
+    -- Full masks also preserve custom preset slots; legacy profiles still use the bit fields.
+    for _,key in ipairs({"lmAutoLootPresets","lmAutoLootInclusionPresets"}) do Field(key,key,"text",path).profileOnly=true end
+    Field("lmAutoLootExceptions","Auto loot exclusions","text",path).profileOnly=true
+    Field("lmAutoLootInclusions","Auto loot inclusions","text",path).profileOnly=true
+    local editorPath={path[1],path[2],path[3],path[4],"Auto Loot Presets"}
+    local draft={index=0,name="",exclusions="",inclusions="",status=""}
+    local refresh={lmPresetEditor=true,lmPresetName=true,lmPresetExclusions=true,lmPresetInclusions=true,lmPresetStatus=true}
+    local function DraftField(key,label,kind,property)
+        local field=Field(key,label,kind,editorPath)
+        field.profile=false;field.persist=false;field.onChange=nil
+        field.get=function() return draft[property] end
+        field.set=function(value) draft[property]=value end
+        return field
+    end
+    local selector=DraftField("lmPresetEditor","Preset","choice","index")
+    selector.getChoices=function(store) return loot.GetPresetChoices(store,true) end
+    selector.refreshKeys=refresh;selector.commitPending=true
+    selector.set=function(value,store)
+        local entry=loot.GetDefinitions(store)[value]
+        draft.index=value;draft.source=entry;draft.name=entry and entry.name or ""
+        draft.exclusions=entry and entry.exclusions or "";draft.inclusions=entry and entry.inclusions or "";draft.status=""
+    end
+    DraftField("lmPresetName","Preset name","text","name").maxLength=64
+    local exclusions=DraftField("lmPresetExclusions","Exclusions","text","exclusions");exclusions.maxLength=2048
+    local inclusions=DraftField("lmPresetInclusions","Inclusions","text","inclusions");inclusions.maxLength=2048
+    exclusions.tooltip="Comma-separated item names or patterns. * matches any text. Exclusions always win."
+    inclusions.tooltip="Comma-separated item names or patterns to auto loot regardless of rarity."
+    local save=Field("lmPresetSave","Save preset","action",editorPath)
+    save.profile=false;save.persist=false;save.onChange=nil;save.refreshKeys=refresh
+    save.action=function(store)
+        if draft.index~=0 and draft.source~=loot.GetDefinitions(store)[draft.index] then
+            draft.status="This preset changed. Select it again before saving.";return
+        end
+        local ok,result=loot.SavePreset(store,draft.index,draft.name,draft.exclusions,draft.inclusions)
+        if ok then
+            draft.index=result;draft.source=loot.GetDefinitions(store)[result];draft.name=draft.source.name;draft.status="Preset saved."
+            if Raider.OnSettingChanged then Raider.OnSettingChanged("lmAutoLootPresetDefinitions") end
+        else draft.status=result end
+    end
+    local status=DraftField("lmPresetStatus","Status","text","status");status.enabled=false;status.maxLength=256
+end
 local function SplitLabel(value)
     return string.gsub(string.gsub(value,"(%l)(%u)","%1 %2"),"^Show ","Show ")
 end
@@ -71,28 +146,42 @@ function Settings.Get()
     local db=Raider.Database.Ensure()
     if not fields then
         fields={}
-        Field("raidSyncEnabled","Synchronize raids and CSR with other officers","checkbox",{"Addon UI","Raid","General"},nil,nil,nil,nil,
+        Field("raidSyncEnabled","Synchronize raids and CSR with other officers","checkbox",{"Addon UI","General"},nil,nil,nil,nil,
             "Share raid changes with authorized guild officers. Only saved, ended raids appear in Raid Stats and contribute to CSR.")
         Field("raidLiveTrackingEnabled","Live tracking","checkbox",{"Addon UI","Raid","General"},nil,nil,nil,nil,
             "Refresh the physical raid roster while the Raid view or Loot Master window is visible. Session loot recording remains active until the session is paused or ended.")
         Field("raidHideSectionHeader","Hide section header","checkbox",{"Addon UI","Raid","General"})
         Field("raidClassColors","Use class colors","checkbox",{"Addon UI","Raid","General"})
         Field("raidStatsHideSectionHeader","Hide section header","checkbox",{"Addon UI","Raid Stats","General"})
+        local statsColors=Field("raidStatsUseClassColors","Use class colors","checkbox",{"Addon UI","Raid Stats","General"})
+        statsColors.legacyKey="raidStatsSingleUseClassColors"
+        statsColors.readLegacy=function(value,old)
+            if value~=nil then return value end
+            if old.raidStatsSingleUseClassColors~=nil then return old.raidStatsSingleUseClassColors end
+            return old.raidStatsMultiUseClassColors
+        end
+        local statsFilters={"Addon UI","Raid Stats","Layout","Filters"}
+        for _,option in ipairs({{"raidStatsShowRaidFilter","Show Raid filter"},{"raidStatsShowSearchFilter","Show Search"},
+            {"raidStatsShowFromFilter","Show From date"},{"raidStatsShowToFilter","Show To date"},{"raidStatsShowSelectAll","Show Select all"}}) do
+            Field(option[1],option[2],"checkbox",statsFilters)
+        end
         local statsPath={"Addon UI","Raid Stats","Layout","Raid List"}
         Field("raidStatsListShowId","Show Raid ID","checkbox",statsPath)
         Field("raidStatsListShowTime","Show Time","checkbox",statsPath)
         local singlePath={"Addon UI","Raid Stats","Layout","Single Raid Details"}
-        Field("raidStatsSingleUseClassColors","Use class colors","checkbox",singlePath)
         Field("raidStatsSingleShowAttendance","Show Attendance","checkbox",singlePath)
         local multiPath={"Addon UI","Raid Stats","Layout","Multi Raid Details"}
-        Field("raidStatsMultiUseClassColors","Use class colors","checkbox",multiPath)
         Field("raidStatsMultiShowAttendance","Show Attendance","checkbox",multiPath)
         Field("raidStatsMultiShowSR","Show SR","checkbox",multiPath)
         Field("raidStatsMultiShowLoot","Show Loot","checkbox",multiPath)
         Field("csrHideSectionHeader","Hide section header","checkbox",{"Addon UI","CSR","General"})
-        Field("csrShowClassIcon","Show class icon","checkbox",{"Addon UI","CSR","Display"})
-        Field("csrUseClassColors","Use class colors","checkbox",{"Addon UI","CSR","Display"})
-        local chat=Field("chatActionLogs","Show action messages in chat","checkbox",{"Addon UI","Raid","General"})
+        Field("csrUseClassColors","Use class colors","checkbox",{"Addon UI","CSR","General"})
+        Field("csrShowClassIcon","Show class icon","checkbox",{"Addon UI","CSR","Layout"})
+        for _,option in ipairs({{"csrShowRaidFilter","Show Raid filter"},{"csrShowSearchFilter","Show Search"},
+            {"csrShowGroupFilter","Show Group By"},{"csrShowArchivedFilter","Show archived CSR filter"},{"csrShowAwardedFilter","Show awarded CSR filter"}}) do
+            Field(option[1],option[2],"checkbox",{"Addon UI","CSR","Layout","Filters"})
+        end
+        local chat=Field("chatActionLogs","Show action messages in chat","checkbox",{"Addon UI","General"})
         chat.get=function() return Raider.Database.GetSetting("chatActionLogs") end
         chat.set=function(value) return Raider.Database.SetSetting("chatActionLogs",value) end
         chat.onChange=nil
@@ -123,25 +212,9 @@ function Settings.Get()
             Field("raidList"..definition[1],definition[2],"color",{"Addon UI","Raid","Layout","List view","Member tile color"})
         end
         Field("raidListOddLightness","Alternate row lightness (%)","number",{"Addon UI","Raid","Layout","List view","Member tile color"},0,100)
-        Field("lootMasterOpacity","LM opacity (%)","number",{"Addon UI","Raid","Loot Master Mode"},0,100)
-        Field("outOfFocusOpacity","Out of focus opacity (%)","number",{"Addon UI","Raid","Loot Master Mode"},0,100)
-        local mode=Field("lmAutoLootMode","Auto loot mode","choice",{"Addon UI","Raid","Loot Master Mode","Auto loot"},nil,nil,
-            {{text="Off",value="off"},{text="Shift",value="shift"},{text="Auto",value="auto"}})
-        mode.rollbackKeys={"lmAutoLoot"}
-        mode.readLegacy=function(value,old)
-            if value~=nil then return value end
-            if old.lmAutoLoot~=nil then return old.lmAutoLoot and "auto" or "off" end
-        end
-        for index,label in ipairs({"Poor","Common","Uncommon","Rare","Epic"}) do
-            MaskCheckbox("lmAutoLootRarities",label,{"Addon UI","Raid","Loot Master Mode","Auto loot","Item rarity"},2^(index-1))
-        end
-        for index,label in ipairs(Raider.Services.AutoLoot.PresetNames) do
-            MaskCheckbox("lmAutoLootPresets",label,{"Addon UI","Raid","Loot Master Mode","Auto loot","Raid presets"},2^(index-1),true)
-            fields[table.getn(fields)].profileOnly=true
-        end
-        -- Still part of named profiles; these controls live in LM Config.
-        Field("lmAutoLootExceptions","Auto loot exceptions","text",{"Addon UI","Raid","Loot Master Mode","Auto loot"}).profileOnly=true
-        Field("lmAutoLootInclusions","Auto loot inclusions","text",{"Addon UI","Raid","Loot Master Mode","Auto loot"}).profileOnly=true
+        Field("lootMasterOpacity","Opacity","number",{"Addon UI","Raid","Layout","Loot Master Mode View"},0,100)
+        Field("outOfFocusOpacity","Out of focus opacity (%)","number",{"Addon UI","Raid","Layout","Loot Master Mode View"},0,100)
+        AutoLootFields()
         for _,definition in ipairs(Raider.Services.LootMessages.Definitions) do
             local path={"Addon Messages","Loot Master",definition.group,definition[2]}
             Field(definition.enabledKey,"Send "..definition[2],"checkbox",path)
@@ -164,7 +237,7 @@ function Settings.Reset(selected)
     local schema=Settings.Get()
     local db,presetsChanged=schema.db,false
     for _,field in ipairs(schema.fields) do
-        if not selected or selected[field.key] then
+        if field.persist~=false and (not selected or selected[field.key]) then
             if field.maskBit then
                 local key,bit=field.durableKey,field.maskBit
                 local mask=tonumber(db[key]) or 0

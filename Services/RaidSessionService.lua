@@ -6,7 +6,7 @@ Raider.Services.RaidSession = RaidSession
 
 local Session = {}
 Session.__index = Session
-local presetKeys = {"lmAutoLootExceptions", "lmAutoLootPresets", "lmAutoLootInclusions"}
+local presetKeys = {"lmAutoLootExceptions", "lmAutoLootPresets", "lmAutoLootInclusions", "lmAutoLootInclusionPresets"}
 
 -- Dependencies are domain adapters, never UI objects or session flag owners.
 -- Keeping their namespaces also preserves instrumentation installed afterward.
@@ -35,7 +35,8 @@ function Session:SetRaidType(raidName, expectedAttendance)
     local database = dependencies.database
     local store = database.Ensure()
     local oldMask, oldExclusions, oldInclusions = store.lmAutoLootPresets, store.lmAutoLootExceptions, store.lmAutoLootInclusions
-    local mask, exclusions, inclusions = dependencies.autoLoot.GetRaidPreset(raidName, oldExclusions, oldInclusions)
+    local oldInclusionMask=store.lmAutoLootInclusionPresets
+    local mask, exclusions, inclusions, inclusionMask = dependencies.autoLoot.GetRaidPreset(raidName, oldExclusions, oldInclusions, store)
     local function Publish(previous, current)
         if database.onRaidAttendanceMetadataChanged then database.onRaidAttendanceMetadataChanged(previous, current) end
         database.StoreRaidAttendance(current)
@@ -45,6 +46,7 @@ function Session:SetRaidType(raidName, expectedAttendance)
     -- Preserve the loot-session owner; a failed refresh restores the same state.
     store.lmAutoLootPresets, store.lmAutoLootExceptions = mask, exclusions
     store.lmAutoLootInclusions = inclusions
+    store.lmAutoLootInclusionPresets = inclusionMask or mask
     local function PublishChange()
         Publish(attendance,replacement)
         local audit=Raider.Services.RaidAudit
@@ -57,6 +59,7 @@ function Session:SetRaidType(raidName, expectedAttendance)
     if not ok then
         store.lmAutoLootPresets, store.lmAutoLootExceptions = oldMask, oldExclusions
         store.lmAutoLootInclusions = oldInclusions
+        store.lmAutoLootInclusionPresets = oldInclusionMask
         local restored, reason = pcall(Publish, replacement, attendance)
         if not restored then return false, tostring(failure) .. " Restore failed: " .. tostring(reason) end
         return false, tostring(failure)
@@ -301,7 +304,20 @@ function Session:LoadSnapshot(snapshotId)
     local _, snapshot = dependencies.database.GetSavedRaidState(snapshotId)
     if snapshot then
         local attendance
-        if snapshot.syncRaidId and dependencies.getProjection then
+        if snapshot.syncRaidId and dependencies.isSessionDeleted and dependencies.isSessionDeleted(snapshot.syncRaidId) then
+            if dependencies.database.GetRaidAttendance() then return nil,"Save or end your current session before loading this snapshot." end
+            if dependencies.canJoinRaid then
+                local ok,failure=dependencies.canJoinRaid();if not ok then return nil,failure end
+            end
+            attendance=dependencies.raidRes.RestoreSnapshot(snapshot,true)
+            local stem=string.sub(snapshot.id,1,100).." (restored)";local name,index=stem,2
+            while dependencies.database.GetSavedRaidState(name) do name=stem.." "..index;index=index+1 end
+            attendance.snapshotId=name;attendance._loadedSnapshotId=nil;attendance.syncRaidId=nil
+            attendance.lastSavedAt=nil;attendance.endedAt=nil;attendance.duration=nil
+            local ok,failure=Raider.Services.RaidAudit.StartFromSnapshot(attendance)
+            if not ok then return nil,failure end
+            dependencies.database.StoreRaidAttendance(attendance)
+        elseif snapshot.syncRaidId and dependencies.getProjection then
             local reason
             if dependencies.canJoinRaid then
                 local ok,failure=dependencies.canJoinRaid(snapshot.syncRaidId)

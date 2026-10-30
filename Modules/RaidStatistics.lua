@@ -4,6 +4,7 @@ local UI = Raider.UI.Components
 Raider.Modules = Raider.Modules or {}
 local RaidStatistics = {}
 Raider.Modules.RaidStatistics = RaidStatistics
+local FILTER_SETTINGS={"raidStatsShowRaidFilter","raidStatsShowSearchFilter","raidStatsShowFromFilter","raidStatsShowToFilter","raidStatsShowSelectAll"}
 local function CanManageHistory()
     return Raider.Services.RankPolicy.CanManageHistory()
 end
@@ -366,7 +367,8 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.selectAll.label:SetPoint("LEFT",controller.selectAll,"RIGHT",2,0);controller.selectAll.label:SetText("Select all");controller.selectAll.label:SetJustifyH("LEFT")
     UI.BindCheckboxLabel(controller.selectAll,function(check) controller:SetFilteredSelection(check:GetChecked()) end)
     UI.AttachTooltip(controller.selectAll,"Select all","Select or deselect every raid currently shown by these filters.")
-    controller.flow={controller.raidFilter,controller.searchGroup,controller.fromGroup,controller.toGroup,controller.selectAllGroup}
+    controller.filterControls={controller.raidFilter,controller.searchGroup,controller.fromGroup,controller.toGroup,controller.selectAllGroup}
+    controller.flow={}
     for _,dialog in ipairs({controller.removeDialog,controller.editDialog}) do
         dialog:SetWidth(320)
         if not dialog.close then dialog.close=UI.CreateWindowButton(dialog,nil,"close");dialog.close:SetPoint("TOPRIGHT",dialog,"TOPRIGHT",-6,-6);dialog.close:SetScript("OnClick",function() this:GetParent():Hide() end) end
@@ -401,19 +403,37 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.visibleHeaders={}
     local function LayoutContent(width,height,self)
         local available=math.max(80,width-16)
-        local filterTop=(BootyRaiderDB or {}).raidStatsHideSectionHeader and 8 or 38
+        local settings=BootyRaiderDB or {}
+        local hideHeader=settings.raidStatsHideSectionHeader
+        local filterTop=hideHeader and 0 or 38
         self.title:ClearAllPoints();self.title:SetPoint("TOPLEFT",page,"TOPLEFT",8,-8);UI.FitButtonLabel(self.title,available)
-        if filterTop==8 then self.title:Hide() else self.title:Show() end
+        if hideHeader then self.title:Hide() else self.title:Show() end
+        for index=table.getn(self.flow),1,-1 do table.remove(self.flow,index) end
+        for index,control in ipairs(self.filterControls) do
+            if settings[FILTER_SETTINGS[index]]~=false then control:Show();table.insert(self.flow,control) else control:Hide() end
+        end
+        if settings.raidStatsShowFromFilter~=false then self.fromLabel:Show() else self.fromLabel:Hide() end
+        if settings.raidStatsShowToFilter~=false then self.toLabel:Show() else self.toLabel:Hide() end
+        if settings.raidStatsShowRaidFilter==false then self.raidPanel:Hide() end
+        if (settings.raidStatsShowFromFilter==false and self.datePicker.target==self.fromDate)
+            or (settings.raidStatsShowToFilter==false and self.datePicker.target==self.toDate) then CloseDatePicker() end
+        local hasFilters=table.getn(self.flow)>0
+        local borderTop=hasFilters and not hideHeader
+        if self.filterPanel.bootyBorderTop~=borderTop or self.filterPanel.bootyBorderBottom~=hasFilters then
+            UI.SetSurfaceHorizontalBorders(self.filterPanel,borderTop,hasFilters)
+        end
         self.filterPanel:ClearAllPoints();self.filterPanel:SetPoint("TOPLEFT",page,"TOPLEFT",0,-filterTop);self.filterPanel:SetWidth(width)
-        local filterBottom=UI.LayoutFlow(self.filterPanel,self.flow,4,8,available,6)+8
-        self.filterPanel:SetHeight(filterBottom)
+        local filterBottom=hasFilters and (UI.LayoutFlow(self.filterPanel,self.flow,8,8,available,6)+8) or 0
+        self.filterPanel:SetHeight(math.max(1,filterBottom))
+        if hasFilters then self.filterPanel:Show() else self.filterPanel:Hide() end
         self.search:SetWidth(math.max(24,self.searchGroup:GetWidth()))
         for _,key in ipairs({"from","to"}) do
             self[key.."Date"]:SetWidth(math.max(24,self[key.."Group"]:GetWidth()-(key=="from" and 54 or 38)))
         end
-        local top=filterTop+filterBottom+8
+        local top=hasFilters and (filterTop+filterBottom+8) or (hideHeader and 8 or 38)
         local stacked=available<650
-        local historyWidth=stacked and available or math.min(270,available*0.34)
+        local historyShare=(34+(settings.raidStatsListShowId~=false and 38 or 0)+(settings.raidStatsListShowTime~=false and 28 or 0))/100
+        local historyWidth=(stacked and available or math.min(270,available*0.34))*historyShare
         local remaining=math.max(96,height-top-8)
         local historyHeight=stacked and math.max(56,math.min(84,math.floor((remaining-100)/28)*28)) or remaining-44
         self.listTitle:ClearAllPoints();self.listTitle:SetPoint("TOPLEFT",page,"TOPLEFT",8,-top);self.listTitle:SetWidth(historyWidth);self.listTitle:SetJustifyH("LEFT")
@@ -458,7 +478,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         self.showAttendance=self.editMode or (single and settings.raidStatsSingleShowAttendance~=false) or (not single and settings.raidStatsMultiShowAttendance~=false)
         self.showSR=self.editMode or single or settings.raidStatsMultiShowSR~=false
         self.showLoot=not self.editMode and (single or settings.raidStatsMultiShowLoot~=false)
-        self.useClassColors=(single and settings.raidStatsSingleUseClassColors~=false) or (not single and settings.raidStatsMultiUseClassColors~=false)
+        self.useClassColors=settings.raidStatsUseClassColors~=false
         local lootWidth=self.showLoot and 32 or 0
         local weight=30+(self.showAttendance and 23 or 0)+(self.showSR and 47 or 0)
         local nameWidth=math.floor((width-lootWidth)*30/weight)
@@ -473,7 +493,11 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
             if widths[i]>0 then header:Show();table.insert(self.visibleHeaders,header) else header:Hide() end
         end
         self.attendanceHeader.label:SetText(width<420 and "Raids" or "Attendance")
-        UI.Table.FitHeaders(self.visibleHeaders,12)
+        local font,size,flags=self.historyHeaders[2]:GetFont()
+        for _,header in ipairs(self.visibleHeaders) do
+            header.label:SetFont(font,size,flags);header.label:SetTextColor(unpack(UI.TextColors.gold))
+            UI.Table.Cell(header.label,header,0,header:GetWidth(),header:GetHeight())
+        end
         for _,row in ipairs(self.rows) do
             UI.Table.Cell(row.name,row,4,nameWidth-6,23);UI.Table.Cell(row.attendance,row,nameWidth,math.max(1,attendanceWidth-4),23)
             row.nameEdit:ClearAllPoints();row.nameEdit:SetPoint("LEFT",row,"LEFT",2,0);row.nameEdit:SetWidth(math.max(20,nameWidth-4))

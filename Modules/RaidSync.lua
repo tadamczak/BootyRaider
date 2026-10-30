@@ -70,11 +70,18 @@ local function Field(text)
     return string.format("|cff%02x%02x%02x",math.floor(c[1]*255),math.floor(c[2]*255),math.floor(c[3]*255))..text.."|r "
 end
 function Sync.FormatRecord(key,value,deleted)
+    if string.sub(key or "",1,8)=="archive:" then key=string.sub(key,9) end
     if deleted or type(value)~="table" then return Sync.FormatValue(value,deleted) end
     if string.sub(key or "",1,3)=="sr:" then
         return Field("Player:")..tostring(value.name or string.sub(key,4)).."\n\n"..Field("Reserved item:")..Item(value.items and value.items[1]).."\n\n"..Field("Loot rights exception:")..(value.exception and "Yes" or "No")
     elseif string.sub(key or "",1,5)=="loot:" then
         return Field("Recipient:")..tostring(value.recipient or "Unknown").."\n\n"..Field("Item:")..Item(value.item).."\n\n"..Field("Quantity:")..tostring(value.count or 1)..(value.historyKey and ("\nAward reference: "..tostring(value.historyKey)) or "")
+    elseif string.find(key or "","^saved:member:") then
+        local reserves,loot={},{}
+        for _,entry in ipairs(value.srItems or {}) do table.insert(reserves,Item(entry.itemId or entry.name)) end
+        for _,entry in ipairs(value.lootItems or {}) do table.insert(loot,Item(entry.itemId or entry.name).." x"..tostring(entry.count or 1)) end
+        return Field("Player:")..tostring(value.name or string.sub(key,14)).."\n\n"..Field("Soft Reserve:")..(table.getn(reserves)>0 and table.concat(reserves,", ") or "None")
+            .."\n\n"..Field("Loot received:")..(table.getn(loot)>0 and table.concat(loot,", ") or "None").."\n\n"..Field("Attendance:")..tostring(value.attendance or 0)
     end
     local labels={name="Player",raidName="Raid",id="Raid ID",startedAt="Started",savedAt="Last saved",endedAt="Ended",exception="Loot rights exception",online="Online",subgroup="Group",raidRank="Raid role",level="Level",class="Class",guildRank="Guild rank"}
     local lines={}
@@ -98,11 +105,13 @@ function Sync.FormatRecord(key,value,deleted)
 end
 local function RecordName(record)
     local key=record.key or "Raid data"
+    if string.sub(key,1,8)=="archive:" then key=string.sub(key,9) end
     local value=record.variant and record.variant.value or record.base and record.base.value or record.targetValue or record.sourceValue
     if string.sub(key,1,3)=="sr:" then return "Soft Reserve: "..tostring(type(value)=="table" and value.name or string.sub(key,4)) end
     if string.sub(key,1,5)=="loot:" then return "Loot: "..Item(type(value)=="table" and value.item).." - "..tostring(type(value)=="table" and value.recipient or "Unknown") end
     local names={["raid:metadata"]="Raid details",["raid:lifecycle"]="Raid session status",["raid:rules"]="Loot rules",["import:sr"]="SR import"}
     if string.find(key,"^member:") then return "Raid member: "..tostring(type(value)=="table" and value.name or string.sub(key,8)) end
+    if string.find(key,"^saved:member:") then return "Saved raid member: "..tostring(type(value)=="table" and value.name or string.sub(key,14)) end
     if string.find(key,"^entitlement:") then return "Loot eligibility: "..string.sub(key,13) end
     return names[key] or "Raid record: "..key
 end

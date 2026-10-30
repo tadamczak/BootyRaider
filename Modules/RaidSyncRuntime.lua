@@ -39,7 +39,7 @@ function SyncRuntime.CanJoinRaid(id)
             if not id and peer.available and peer.name==name and peer.syncState=="pending" then return false,"Checking the active session with "..name.."." end
             if peer.available and peer.name==name and peer.activeRaidId and peer.activeRaidId~=id then
                 local status=runtime.replica.GetStatus(peer.activeRaidId)
-                if status.lifecycle~="ended" then return false,"Join the active raid session shared by "..name.."." end
+                if status.lifecycle~="ended" and status.lifecycle~="deleted" then return false,"Join the active raid session shared by "..name.."." end
             end
         end
     end
@@ -154,6 +154,7 @@ function SyncRuntime.Initialize(owner)
                 return false
             end,
             restore=Restore,onChanged=function(id) changed=true;QueueMaintenance(id) end,
+            onSessionDeleted=function(previous,id) runtime.OnSessionDeleted(previous,id) end,
             onAttendance=function(previous,attendance)
                 Raider.Services.Raid.PreserveLootSession(previous,attendance)
                 if attendance.syncEnded then

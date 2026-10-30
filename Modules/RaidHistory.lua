@@ -71,6 +71,24 @@ local function ActiveSessions(page,controls,width,y)
             row.sync=UI.CreateGoldToolbarButton(row,"refresh");row.sync:SetWidth(24);row.sync:SetHeight(24)
             UI.AttachTooltip(row.sync,"Raid sync","Toggle synchronization on this character. Stopping does not remove copies already shared with other officers.")
             row.sync:SetScript("OnClick",function() RaidManagement.ToggleRaidSync(row.raidId) end)
+            row.delete=UI.CreateGoldToolbarButton(row,"trash");row.delete:SetWidth(24);row.delete:SetHeight(24)
+            UI.AttachTooltip(row.delete,"Delete active session","Remove this active session for synchronizing officers. Saved snapshots are preserved.")
+            row.delete:SetScript("OnClick",function()
+                local api=Raider.Runtime.replica;local id=row.raidId
+                if not id or not Raider.Services.RankPolicy.CanManageHistory() then return end
+                local token=api.GetDeleteSessionToken(id)
+                if not controls.deleteActiveDialog then
+                    controls.deleteActiveDialog=UI.Window.CreateProjectConfirmation("BootyRaiderDeleteActiveSession","Delete active session","Delete","trash")
+                    controls.deleteActiveDialog:SetWidth(390)
+                end
+                local dialog=controls.deleteActiveDialog
+                if UI.WindowStack then UI.WindowStack.SetOwner(dialog,page) end
+                dialog:Open("Delete '"..tostring(row.name:GetText()).."' for all synchronizing officers? Unsaved session changes will be discarded. Saved snapshots will stay.",function()
+                    local ok,reason=api.DeleteSession(id,token)
+                    if not ok then Raider.Runtime.Print(reason) end
+                    Raider.Runtime.RefreshViews()
+                end)
+            end)
             controls.activeRows[index]=row
         end
         controls.activeEmpty=UI.CreateLabel(page,nil,"OVERLAY","GameFontHighlightSmall");controls.activeEmpty:SetText("No active raid sessions")
@@ -89,7 +107,11 @@ local function ActiveSessions(page,controls,width,y)
     UI.SetButtonEnabled(controls.activePrevious,controls.activeOffset>0);UI.SetButtonEnabled(controls.activeNext,controls.activeOffset+4<total)
     local values={}
     for index,entry in ipairs(list) do local info=api.GetRaidInfo(entry.id);values[index]={tostring(controls.activeOffset+index),entry.name,ShortRaid(entry.raidType),tostring(entry.memberCount or 0).."/"..tostring(entry.memberLimit or "?"),entry.createdAt and date("%Y-%m-%d %H:%M",entry.createdAt) or "Unknown",info.storage,Stamp(info.lastSave),""} end
-    local widths=FitColumns(page,controls,controls.activeHeaders,values,width,58)
+    local widths=FitColumns(page,controls,controls.activeHeaders,values,width,84)
+    local dataWidth=0;for index=1,7 do dataWidth=dataWidth+widths[index] end
+    local dataLimit=math.max(1,width-84)
+    if dataWidth>dataLimit then for index=1,7 do widths[index]=widths[index]*dataLimit/dataWidth end end
+    widths[8]=84
     local x=8
     for index,label in ipairs(controls.activeHeaders) do label:ClearAllPoints();label:SetPoint("TOPLEFT",page,"TOPLEFT",x,y-58);label:SetWidth(widths[index]-6);label:SetJustifyH("LEFT");label:Show();x=x+widths[index] end
     local rowY=y-82
@@ -104,6 +126,8 @@ local function ActiveSessions(page,controls,width,y)
             for column,label in ipairs(labels) do label:ClearAllPoints();label:SetPoint("LEFT",row,"LEFT",cellX,0);label:SetWidth(widths[column]-4);label:SetJustifyH("LEFT");label:SetJustifyV("MIDDLE");label:SetText(values[column]);label:SetHeight(0);rowHeight=math.max(rowHeight,UI.MeasureTextHeight(label,widths[column]-4,true)+10);cellX=cellX+widths[column] end
             row.join:ClearAllPoints();row.join:SetPoint("LEFT",row,"LEFT",cellX,0)
             row.sync:ClearAllPoints();row.sync:SetPoint("LEFT",row.join,"RIGHT",2,0);SyncButtonState(row.sync,api.IsRaidSyncEnabled(entry.id))
+            row.delete:ClearAllPoints();row.delete:SetPoint("LEFT",row.sync,"RIGHT",2,0)
+            UI.SetButtonEnabled(row.delete,Raider.Services.RankPolicy.CanManageHistory())
             UI.StyleSelectableTableRow(row,math.mod(index,2)==0,false);UI.SetAlternatingRowColor(row,nil,index);row:SetHeight(rowHeight);row:Show();rowY=rowY-rowHeight-2
         else row:Hide() end
     end
@@ -113,6 +137,7 @@ local function ActiveSessions(page,controls,width,y)
 end
 
 function RaidManagement.HideRaidHistoryControls(controls)
+    if controls.deleteActiveDialog then controls.deleteActiveDialog:Hide() end
     for _,key in ipairs({"activeTitle","activeEmpty","activePrevious","activeNext","syncStatus","historyToolbar"}) do if controls[key] then controls[key]:Hide() end end
     for _,row in ipairs(controls.activeRows or {}) do row:Hide() end
     for _,label in ipairs(controls.activeHeaders or {}) do label:Hide() end
@@ -143,7 +168,7 @@ local function MeasureHistory(width, controls)
         local created,modified,duration=Raider.Services.RaidRes.GetSnapshotTimes(snapshot)
         local api=Raider.Runtime and Raider.Runtime.replica;local info=api and api.GetRaidInfo and api.GetRaidInfo(snapshot.syncRaidId) or {}
         modified=info.modifiedAt or modified
-        values[index]={index,snapshot.id,ShortRaid(snapshot.raidName),Raider.Services.RaidRes.FormatDuration(duration),created and date("%Y-%m-%d %H:%M",created) or "Unknown",modified and date("%Y-%m-%d %H:%M",modified) or "Unknown",info.storage or "In memory",info.lastAuthor or "Unknown",info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended",""}
+        values[index]={index,snapshot.id,ShortRaid(snapshot.raidName),Raider.Services.RaidRes.FormatDuration(duration),created and date("%Y-%m-%d %H:%M",created) or "Unknown",modified and date("%Y-%m-%d %H:%M",modified) or "Unknown",info.storage or "In memory",info.lastAuthor or "Unknown",info.lifecycle=="deleted" and "Archived" or info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended",""}
     end
     if not controls.historyHeaders[10] then controls.historyHeaders[10]=UI.CreateColumnLabel(page,"Actions","gold") end
     local widths=FitColumns(page,controls,controls.historyHeaders,values,width,canEdit and 134 or 108)
@@ -186,7 +211,7 @@ local function MeasureHistory(width, controls)
                 Cell(button.savedAt, button, durationX + durationWidth + createdWidth, modifiedWidth, modifiedAt and date("%Y-%m-%d %H:%M", modifiedAt) or "Unknown"),
                 Cell(button.storage,button,dataWidth-storageWidth-authorWidth-statusWidth,storageWidth,info.storage),
                 Cell(button.author,button,dataWidth-authorWidth-statusWidth,authorWidth,info.lastAuthor or "Unknown"),
-                Cell(button.status,button,dataWidth-statusWidth,statusWidth,info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended"))
+                Cell(button.status,button,dataWidth-statusWidth,statusWidth,info.lifecycle=="deleted" and "Archived" or info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended"))
             button:SetHeight(height); button:Show()
             Raider.UI.Components.StyleSelectableTableRow(button, math.mod(index, 2) == 0, page.selectedRaidHistoryId == snapshot.id)
             load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(24); deleteButton:SetHeight(24)

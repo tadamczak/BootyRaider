@@ -822,7 +822,7 @@ function RaidManagement.CreateListHeaders(page, onSort)
     local index
     for index = 1, table.getn(listHeaderSpecs) do
         local spec = listHeaderSpecs[index]
-        local label = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontNormal")
+        local label = Raider.UI.Components.CreateColumnLabel(page, spec[1], "gold")
         label:SetPoint("TOPLEFT", page, "TOPLEFT", spec[3], -110)
         label:SetWidth(spec[4]); label:SetJustifyH("LEFT"); label:SetText(spec[1]); label:Hide()
         local button = Raider.UI.Components.CreateControl(nil, page)
@@ -835,7 +835,7 @@ function RaidManagement.CreateListHeaders(page, onSort)
     ui.name = ui.buttons[1].label; ui.group = ui.buttons[2].label; ui.class = ui.buttons[3].label
     ui.rank = ui.buttons[4].label; ui.sr = ui.buttons[5].label; ui.level = ui.buttons[6].label; ui.levelButton = ui.buttons[6]
 
-    ui.online = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontNormal")
+    ui.online = Raider.UI.Components.CreateColumnLabel(page, "Status", "gold")
     ui.online:SetWidth(62); ui.online:SetJustifyH("LEFT"); ui.online:SetText("Status"); ui.online:Hide()
     ui.onlineButton = Raider.UI.Components.CreateControl(nil, page)
     ui.onlineButton:SetWidth(62); ui.onlineButton:SetHeight(22); ui.onlineButton.label = ui.online; ui.onlineButton.baseText = "Status"
@@ -854,7 +854,8 @@ function RaidManagement.CreateListHeaders(page, onSort)
     }
     page.listEnabled = {}; page.listPositions = {}; page.listWidths = {}
     page.headerLabels = { ui.name, ui.group, ui.class, ui.rank, ui.sr }
-    local _, headerBaseSize = ui.name:GetFont()
+    local headerFont, headerBaseSize, headerFlags = ui.name:GetFont()
+    page.bootyHeaderFont, page.bootyHeaderFlags = headerFont, headerFlags
     page.bootyHeaderBaseSize = headerBaseSize
     page.listHeaderUI = ui
     return ui
@@ -1957,6 +1958,15 @@ function RaidManagement.MeasureListHeight(width, page)
 end
 
 function RaidManagement.FitListHeaders(page, headerButtons, lootMasterMode)
+    if not lootMasterMode then
+        for _,column in ipairs(page.listColumns) do
+            local label=column.button.label
+            label:SetFont(page.bootyHeaderFont,page.bootyHeaderBaseSize,page.bootyHeaderFlags)
+            label:SetTextColor(unpack(Raider.UI.Components.TextColors.gold))
+            label:SetWidth(math.max(1,column.button:GetWidth()-3));label:SetHeight(page.bootyHeaderBaseSize+3)
+        end
+        return
+    end
     local scale = 1
     local baseSize = lootMasterMode and 10 or (page.bootyHeaderBaseSize or 12)
     local count = lootMasterMode and table.getn(headerButtons) or table.getn(page.listColumns)
@@ -4476,7 +4486,8 @@ end
 function RaidManagement.CreateAutoLootControls(page, view)
     local UI = Raider.UI.Components
     local panel = view.lmConfigPanel
-    local names = { "Poor", "Common", "Uncommon", "Rare", "Epic" }
+    local autoLoot=Raider.Services.AutoLoot
+    local names = autoLoot.RarityNames
     local selected = {}
     local function Apply()
         if Raider.Modules.MasterLootWindow and Raider.Modules.MasterLootWindow.ApplyAutoLootSetting then Raider.Modules.MasterLootWindow.ApplyAutoLootSetting() end
@@ -4484,7 +4495,7 @@ function RaidManagement.CreateAutoLootControls(page, view)
     local modeLabel, mode = UI.CreateChoiceField({ parent = panel, x = 8, y = -34,
         label = "LM Auto Loot:", buttonOffset = 134, width = 184, height = 76,
         initialText = "Off", firstY = -8, step = 20,
-        choices = { { text = "Auto Loot", value = "auto" }, { text = "Shift Loot", value = "shift" }, { text = "Off", value = "off" } },
+        choices = autoLoot.ModeChoices,
         getValue = function() return Raider.Database.GetSetting("lmAutoLootMode") end,
         onSelect = function(value)
             Raider.Database.SetSetting("lmAutoLootMode", value)
@@ -4568,11 +4579,17 @@ function RaidManagement.CreateAutoLootControls(page, view)
     presets:SetPoint("LEFT", presetLabel, "LEFT", 134, 0)
     local presetPanel = UI.CreateDropdownPanel(panel, presets, 184, 138, 20)
     presets.panel = presetPanel; view.lmExceptionPresets = presets
+    local inclusionPresetLabel=UI.CreateComponentLabel(panel,"Add Inclusion Preset:","white")
+    inclusionPresetLabel:SetFont(font,size,flags);table.insert(view.lmConfigLabels,inclusionPresetLabel)
+    local inclusionPresets=UI.CreateDropdownButton(panel,nil,"None",184)
+    local inclusionPresetPanel=UI.CreateDropdownPanel(panel,inclusionPresets,184,138,20)
+    inclusionPresets.panel=inclusionPresetPanel;view.lmInclusionPresets=inclusionPresets
     local function StylePanels()
-        UI.Window.ApplyProjectSurface(presetPanel); UI.Window.ApplyProjectSurface(mode.panel)
+        UI.Window.ApplyProjectSurface(presetPanel); UI.Window.ApplyProjectSurface(inclusionPresetPanel); UI.Window.ApplyProjectSurface(mode.panel)
     end
     StylePanels(); UI.RegisterSkinCallback(StylePanels)
     presetPanel.contentPadding = 4
+    inclusionPresetPanel.contentPadding=4
     local optionIndex
     mode.panel:SetHeight(70)
     for optionIndex = 1, table.getn(mode.panel.options) do
@@ -4585,62 +4602,80 @@ function RaidManagement.CreateAutoLootControls(page, view)
         mode:ClearAllPoints(); mode:SetPoint("TOPLEFT", panel, "TOPLEFT", 142, -34)
         mode:SetWidth(width); rarity:SetWidth(width); presets:SetWidth(width)
         presets:ClearAllPoints(); presets:SetPoint("TOPLEFT", panel, "TOPLEFT", 160, -94); presets:SetWidth(math.max(84,panel:GetWidth()-168))
-        for _, pair in ipairs({{modeLabel,mode},{label,rarity},{presetLabel,presets}}) do
+        local areaHeight = math.max(64, (panel:GetHeight() - 218) / 2)
+        inclusionPresets:ClearAllPoints();inclusionPresets:SetPoint("TOPLEFT",panel,"TOPLEFT",160,-154-areaHeight)
+        inclusionPresets:SetWidth(math.max(84,panel:GetWidth()-168))
+        for _, pair in ipairs({{modeLabel,mode},{label,rarity},{presetLabel,presets},{inclusionPresetLabel,inclusionPresets}}) do
             local caption,field=pair[1],pair[2]
             caption:ClearAllPoints();caption:SetPoint("RIGHT",field,"LEFT",-8,0)
-            caption:SetWidth(pair[1]==presetLabel and 144 or 126);caption:SetHeight(field:GetHeight());caption:SetJustifyH("LEFT");caption:SetJustifyV("MIDDLE")
+            caption:SetWidth((pair[1]==presetLabel or pair[1]==inclusionPresetLabel) and 144 or 126);caption:SetHeight(field:GetHeight());caption:SetJustifyH("LEFT");caption:SetJustifyV("MIDDLE")
         end
         exceptionsLabel:ClearAllPoints(); exceptionsLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -124)
-        local areaHeight = math.max(64, (panel:GetHeight() - 188) / 2)
         exclusionsArea:ClearAllPoints(); exclusionsArea:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -144)
         exclusionsArea:SetWidth(math.max(1,panel:GetWidth()-16)); exclusionsArea:SetHeight(areaHeight)
-        inclusionsLabel:ClearAllPoints(); inclusionsLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -154-areaHeight)
-        inclusionsArea:ClearAllPoints(); inclusionsArea:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -174-areaHeight)
+        inclusionsLabel:ClearAllPoints(); inclusionsLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -184-areaHeight)
+        inclusionsArea:ClearAllPoints(); inclusionsArea:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -204-areaHeight)
         inclusionsArea:SetWidth(math.max(1,panel:GetWidth()-16)); inclusionsArea:SetHeight(areaHeight)
         exceptions.LayoutScroll(); inclusions.LayoutScroll()
     end
     panel:SetScript("OnSizeChanged", LayoutConfig)
     LayoutConfig()
-    local presetNames, presetSelected = Raider.Services.AutoLoot.PresetNames, {}
+    local presetNames, presetSelected, inclusionSelected = {}, {}, {}
     local function RefreshPresets()
-        local mask = Raider.Database.GetSetting("lmAutoLootPresets")
-        local index
-        for index = 1, table.getn(presetNames) do
-            presetSelected[presetNames[index]] = math.mod(math.floor(mask / 2 ^ (index - 1)), 2) == 1
-        end
+        presetNames=autoLoot.GetPresetNames(Raider.Database.Ensure())
+        autoLoot.MaskSelection(Raider.Database.GetSetting("lmAutoLootPresets"),presetNames,presetSelected)
+        autoLoot.MaskSelection(Raider.Database.GetSetting("lmAutoLootInclusionPresets"),presetNames,inclusionSelected)
         UI.FilterPanel.SetCaption(presets,presetNames,presetSelected)
+        UI.FilterPanel.SetCaption(inclusionPresets,presetNames,inclusionSelected)
     end
     local function SavePresets()
-        local mask, index = 0, nil
-        for index = 1, table.getn(presetNames) do if presetSelected[presetNames[index]] then mask = mask + 2 ^ (index - 1) end end
+        local mask = autoLoot.SelectionMask(presetSelected,presetNames)
         Raider.Database.SetSetting("lmAutoLootPresets", mask)
         local text = Raider.Services.AutoLoot.ApplyPresets(exceptions:GetText(), mask)
         Raider.Database.SetSetting("lmAutoLootExceptions", text); exceptions:SetText(text)
         RefreshPresets(); Apply()
     end
+    local function SaveInclusionPresets()
+        local mask=autoLoot.SelectionMask(inclusionSelected,presetNames)
+        Raider.Database.SetSetting("lmAutoLootInclusionPresets",mask)
+        local text=autoLoot.ApplyInclusionPresets(inclusions:GetText(),mask)
+        Raider.Database.SetSetting("lmAutoLootInclusions",text);inclusions:SetText(text)
+        RefreshPresets();Apply()
+    end
     presets:SetScript("OnClick", function()
         ClearTextFocus()
         if presetPanel:IsVisible() then presetPanel:Hide() else
-            mode.panel:Hide(); choices:Hide(); RefreshPresets()
+            mode.panel:Hide(); choices:Hide(); inclusionPresetPanel:Hide(); RefreshPresets()
             UI.FilterPanel.Refresh(presetPanel, presetNames, presetSelected, SavePresets, false, true); presetPanel:Show()
         end
     end)
+    inclusionPresets:SetScript("OnClick",function()
+        ClearTextFocus()
+        if inclusionPresetPanel:IsVisible() then inclusionPresetPanel:Hide() else
+            mode.panel:Hide();choices:Hide();presetPanel:Hide();RefreshPresets()
+            UI.FilterPanel.Refresh(inclusionPresetPanel,presetNames,inclusionSelected,SaveInclusionPresets,false,true);inclusionPresetPanel:Show()
+        end
+    end)
     local modeClick, rarityClick = mode:GetScript("OnClick"), rarity:GetScript("OnClick")
-    mode:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); modeClick() end)
-    rarity:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); rarityClick() end)
-    local shownPresetMask, shownExclusions, shownInclusions
+    mode:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); inclusionPresetPanel:Hide(); modeClick() end)
+    rarity:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); inclusionPresetPanel:Hide(); rarityClick() end)
+    local shownPresetMask, shownExclusions, shownInclusions, shownInclusionMask, shownDefinitions
     page.RefreshAutoLootConfig = function(force)
         local mask=Raider.Database.GetSetting("lmAutoLootPresets")
         local text=Raider.Database.GetSetting("lmAutoLootExceptions")
         local included=Raider.Database.GetSetting("lmAutoLootInclusions")
+        local inclusionMask=Raider.Database.GetSetting("lmAutoLootInclusionPresets")
+        local definitions=autoLoot.GetDefinitions(Raider.Database.Ensure())
         if force or included~=shownInclusions then
             shownInclusions=included
             if inclusions:GetText()~=included then inclusions:SetText(included) end
         end
-        if force or mask~=shownPresetMask or text~=shownExclusions then
+        if force or mask~=shownPresetMask or text~=shownExclusions or inclusionMask~=shownInclusionMask or definitions~=shownDefinitions then
             shownPresetMask,shownExclusions=mask,text
+            shownInclusionMask,shownDefinitions=inclusionMask,definitions
             RefreshPresets()
             if presetPanel:IsShown() then UI.FilterPanel.Refresh(presetPanel, presetNames, presetSelected, SavePresets, false, true) end
+            if inclusionPresetPanel:IsShown() then UI.FilterPanel.Refresh(inclusionPresetPanel,presetNames,inclusionSelected,SaveInclusionPresets,false,true) end
             if exceptions:GetText()~=text then exceptions:SetText(text) end
         end
     end
@@ -4658,11 +4693,12 @@ function RaidManagement.CreateAutoLootControls(page, view)
         inclusionTooltip:SetFrameStrata(strata); inclusionTooltip:SetFrameLevel(level)
         tooltipHit:SetFrameStrata(strata); tooltipHit:SetFrameLevel(level)
         presets:SetFrameStrata(strata); presets:SetFrameLevel(level)
+        inclusionPresets:SetFrameStrata(strata);inclusionPresets:SetFrameLevel(level)
         page.RefreshAutoLootConfig(true)
         local value = Raider.Database.GetSetting("lmAutoLootMode")
         mode:SetText(value == "auto" and "Auto Loot" or value == "shift" and "Shift Loot" or "Off")
         RefreshRarity(); exceptions:SetText(Raider.Database.GetSetting("lmAutoLootExceptions"))
         inclusions:SetText(Raider.Database.GetSetting("lmAutoLootInclusions"))
     end)
-    panel:SetScript("OnHide", function() mode.panel:Hide(); choices:Hide(); presetPanel:Hide(); ClearTextFocus() end)
+    panel:SetScript("OnHide", function() mode.panel:Hide(); choices:Hide(); presetPanel:Hide(); inclusionPresetPanel:Hide(); ClearTextFocus() end)
 end

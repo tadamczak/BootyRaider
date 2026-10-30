@@ -8,6 +8,7 @@ local captions = {
     ["raid.leave"]="Left session", ["raid.reopen"]="Reopened raid", ["raid.start"]="Started raid", ["raid.save"]="Saved raid", ["raid.end"]="Ended raid",
     ["raid.metadata"]="Changed raid details", ["raid.edit"]="Edited saved raid", ["raid.delete"]="Deleted raid",
     ["raid.snapshot.delete"]="Deleted raid snapshot", ["raid.statistic.delete"]="Deleted raid statistics",
+    ["raid.session.delete"]="Deleted active raid session",
     ["sr.edit"]="Changed SR", ["sr.assign"]="Assigned SR", ["sr.clear"]="Removed SR",
     ["sr.link"]="Changed SR link", ["sr.import"]="Imported SR", ["sr.reapply"]="Reapplied custom SR changes",
     ["loot.award"]="Recorded loot", ["loot.correct"]="Corrected loot", ["loot.reset"]="Reset loot history",
@@ -62,7 +63,7 @@ end
 local fieldNames={id="Raid ID",raidName="Raid type",name="Player",items="Soft Reserve",exception="Loot rights exception",recipient="Recipient",item="Item",count="Quantity",raidRank="Raid role",subgroup="Group",level="Level",online="Online",guildRank="Guild rank",savedAt="Saved at",endedAt="Ended at",startedAt="Started at",saveCSR="CSR",saveRaidStatistics="Raid statistics"}
 local function Value(value,key)
     if value==nil then return "None" end
-    if key=="item" then return Item(value) end
+    if key=="item" or key=="itemId" then return Item(value) end
     if key=="items" and type(value)=="table" then local names={};for _,item in ipairs(value) do table.insert(names,Item(item)) end;return table.getn(names)>0 and table.concat(names,", ") or "None" end
     if type(value)=="boolean" then return value and "Yes" or "No" end
     if type(value)=="table" then return "Nested values" end
@@ -74,6 +75,7 @@ local function Field(value,key)
 end
 function Log.FormatChange(change)
     local key=change.key or "";local before=change.before;local after=change.value
+    if string.sub(key,1,8)=="archive:" then key=string.sub(key,9) end
     if change.beforeDeleted then before=nil end
     if change.deleted then after=nil end
     local subject=string.sub(key,1,3)=="sr:" and ("Soft Reserve: "..tostring(type(after)=="table" and after.name or type(before)=="table" and before.name or string.sub(key,4)))

@@ -1,6 +1,6 @@
 local Raider=BootyRaider
 Raider.Services=Raider.Services or {}
-local Sync={PREFIX="BRSYNC1",protocol=2,policy=1}
+local Sync={PREFIX="BRSYNC1",protocol=2,policy=2}
 Raider.Services.RaidSync=Sync
 -- Accommodate one incoming stream per supported peer while retaining the
 -- aggregate byte cap and incremental single-job codec budget.
