@@ -762,6 +762,7 @@ local function CopyLootRecords(source)
             local value = original[key]
             if type(value) == "string" or type(value) == "number" or type(value) == "boolean" then record[key] = value end
         end
+        record.timestamp=tonumber(original.timestamp or original.time)
         if original.rollHistory and table.getn(original.rollHistory) > 0 then
             record.rollHistory = {}
             local historyIndex

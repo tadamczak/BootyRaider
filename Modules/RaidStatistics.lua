@@ -5,6 +5,15 @@ Raider.Modules = Raider.Modules or {}
 local RaidStatistics = {}
 Raider.Modules.RaidStatistics = RaidStatistics
 local FILTER_SETTINGS={"raidStatsShowRaidFilter","raidStatsShowSearchFilter","raidStatsShowFromFilter","raidStatsShowToFilter","raidStatsShowSelectAll"}
+local function ContentTopInset(host)
+    if host.bootyContentTopInset then return host.bootyContentTopInset end
+    local owner=host.bootyContentPanel
+    if owner and host.GetPoint then
+        local point,relative,relativePoint,_,y=host:GetPoint()
+        if point=="TOPLEFT" and relative==(owner.bootyPageHost or owner) and relativePoint=="TOPLEFT" then return math.max(0,-(y or 0)) end
+    end
+    return 0
+end
 local function CanManageHistory()
     return Raider.Services.RankPolicy.CanManageHistory()
 end
@@ -56,7 +65,7 @@ local function OnItemsClick()
     local dialog=this.statisticsController.itemDialog
     if dialog:IsShown() and dialog.sourcePlayer==player.name and dialog.sourceKind==this.itemKind then dialog:Hide();return end
     dialog.sourcePlayer=player.name;dialog.sourceKind=this.itemKind
-    dialog:Open(kind .. " - " .. tostring(player.name or "Player"), items)
+    dialog:Open(kind .. " - " .. tostring(player.name or "Player"), items,this.itemKind)
 end
 
 local function OnDirectItemEnter()
@@ -69,7 +78,21 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     local controller = { page = page, getEntries = getEntries, deleteEntry = deleteEntry, updateEntry = updateEntry, selectedHistoryIds = {}, raidButtons = {}, rows = {}, filteredEntries = {}, selectedRaids = {}, visibleHistoryIds = {}, availableHistoryIds = {}, modelDirty = true, summaryDirty = true, emptySummary = { players = {} } }
     page.statisticsController = controller
     host.statisticsController = controller
-    controller.itemDialog = Raider.UI.Components.CreateItemListDialog("BootyRaiderRaidStatisticsItems")
+    controller.itemDialog = Raider.UI.Components.CreateItemListDialog("BootyRaiderRaidStatisticsItems",{
+        getSize=function(kind)
+            local sizes=Raider.Database.Ensure().raidStatsItemWindowSizes
+            local size=type(sizes)=="table" and sizes[kind]
+            if type(size)~="table" then size=nil end
+            return size and size.width or (kind=="loot" and 380 or 430),size and size.height or 350
+        end,
+        saveSize=function(kind,width,height)
+            local db=Raider.Database.Ensure()
+            if type(db.raidStatsItemWindowSizes)~="table" then db.raidStatsItemWindowSizes={} end
+            local size=db.raidStatsItemWindowSizes[kind]
+            if type(size)~="table" then size={};db.raidStatsItemWindowSizes[kind]=size end
+            size.width=width;size.height=height
+        end,
+    })
     controller.title = Raider.UI.Components.CreateHeading(page, "", 1, "gold", "raid_stats"); controller.title:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -10); controller.title:SetText("Raid Statistics")
     local raidNames = Raider.Services.RaidStatistics.GetRaidNames(); local raidNameIndex
     for raidNameIndex = 1, table.getn(raidNames) do controller.selectedRaids[raidNames[raidNameIndex]] = true end
@@ -405,7 +428,8 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         local available=math.max(80,width-16)
         local settings=BootyRaiderDB or {}
         local hideHeader=settings.raidStatsHideSectionHeader
-        local filterTop=hideHeader and 0 or 38
+        local hiddenTopInset=hideHeader and ContentTopInset(host) or 0
+        local filterTop=hideHeader and -hiddenTopInset or 38
         self.title:ClearAllPoints();self.title:SetPoint("TOPLEFT",page,"TOPLEFT",8,-8);UI.FitButtonLabel(self.title,available)
         if hideHeader then self.title:Hide() else self.title:Show() end
         for index=table.getn(self.flow),1,-1 do table.remove(self.flow,index) end
@@ -430,7 +454,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         for _,key in ipairs({"from","to"}) do
             self[key.."Date"]:SetWidth(math.max(24,self[key.."Group"]:GetWidth()-(key=="from" and 54 or 38)))
         end
-        local top=hasFilters and (filterTop+filterBottom+8) or (hideHeader and 8 or 38)
+        local top=hasFilters and (filterTop+filterBottom+8) or (hideHeader and 8-hiddenTopInset or 38)
         local stacked=available<650
         local historyShare=(34+(settings.raidStatsListShowId~=false and 38 or 0)+(settings.raidStatsListShowTime~=false and 28 or 0))/100
         local historyWidth=(stacked and available or math.min(270,available*0.34))*historyShare

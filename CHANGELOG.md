@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0-dev.29 — 2026-10-30
+
+- Separate editable inclusion/exclusion presets with protected built-ins and custom deletion. Add section resets, restore the native raid appearance, align hidden-header filters and resize persistent loot/SR lists with gold context columns. Preserve older recorded loot times.
+
 ## 1.0.0-dev.28 — 2026-10-30
 
 - Add active-session removal while preserving saved snapshots, editable auto-loot presets and matching LM selectors. Reorganize settings, allow individual Raid Stats/CSR filters to be hidden, reclaim unused layout space and unify gold column headings.

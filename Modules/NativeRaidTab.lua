@@ -1,8 +1,8 @@
 local Raider = BootyRaider
 Raider.Modules.NativeRaidTab = {}
 local NativeRaidTab = Raider.Modules.NativeRaidTab
-local contentLeft, contentTop, contentRight, contentBottom = 20, 56, 44, 80
-local headerLeft, headerTop = 72, 37
+local contentLeft, contentTop, contentRight, contentBottom = 16, 56, 41, 80
+local headerLeft, headerTop, headerRight = 71, 37, 39
 local portraitTexture = "Interface\\AddOns\\BootyLib\\Textures\\MinimapIcon"
 local buttonArtwork = {
     normal="Interface\\Buttons\\UI-Panel-Button-Up", pushed="Interface\\Buttons\\UI-Panel-Button-Down",
@@ -21,10 +21,10 @@ function NativeRaidTab.GetContentRect(owner, toolbarHeight, showHeader)
     return math.max(1, width - contentLeft - contentRight), math.max(1, height - top - contentBottom), contentLeft, top, contentRight, contentBottom
 end
 
--- RaidFrame.xml places the native action row beside the portrait, at 72,-37.
+-- Blizzard_RaidUI.xml places three 90x21 actions at 71,-37, with 2px gaps.
 function NativeRaidTab.GetHeaderRect(owner)
     local width = Raider.UI.Components.GetFrameSpan(owner)
-    return math.max(1, width - headerLeft - contentRight), headerLeft, headerTop, contentRight
+    return math.max(1, width - headerLeft - headerRight), headerLeft, headerTop, headerRight
 end
 
 -- The original 1.12 function hides every native subframe for an unmatched
@@ -100,7 +100,7 @@ function NativeRaidTab.Create(options)
     local function LayoutToolbar(width, inRaid)
         -- Owner bounds are authoritative; native anchored button widths can
         -- still report their previous size. Budget all three actions first.
-        local gap = math.min(4, math.max(0, (width - 3) / 2))
+        local gap = math.min(2, math.max(0, (width - 3) / 2))
         local count = inRaid and 3 or 2
         local available = math.max(count, width - gap * (count - 1))
         local first = math.max(1, math.floor(available / count))
@@ -118,7 +118,18 @@ function NativeRaidTab.Create(options)
         Raider.Modules.RaidManagement.ApplyGroupViewBackground(panel, settings, true)
         Raider.Modules.RaidManagement.ApplyGroupViewBackground(panel.toolbar, settings, true)
         for index = 1, table.getn(panel.toolbarControls) do
-            UI.SetButtonArtwork(panel.toolbarControls[index], BootyRaiderDB.nativeRaidButtonStyle ~= "booty" and buttonArtwork or nil)
+            local button=panel.toolbarControls[index]
+            UI.SetButtonArtwork(button, BootyRaiderDB.nativeRaidButtonStyle ~= "booty" and buttonArtwork or nil)
+            local currentPath,currentSize,currentFlags=button.label:GetFont()
+            if not button.bootyOriginalFontPath then
+                button.bootyOriginalFontPath,button.bootyOriginalFontSize,button.bootyOriginalFontFlags=currentPath,currentSize,currentFlags
+            end
+            local path,size,flags=button.bootyOriginalFontPath,button.bootyOriginalFontSize,button.bootyOriginalFontFlags
+            if settings.raidGroupFontStyle=="game" and GameFontNormalSmall and GameFontNormalSmall.GetFont then
+                path,size,flags=GameFontNormalSmall:GetFont()
+            end
+            if path and (path~=currentPath or size~=currentSize or flags~=currentFlags) then button.label:SetFont(path,size,flags) end
+            button.bootyFitFontSize=size
         end
         panel.invite:SetText(inRaid and "Add Member" or "Convert to Raid")
         ApplyPortrait()
@@ -128,7 +139,7 @@ function NativeRaidTab.Create(options)
         panel.toolbar:SetPoint("TOPRIGHT", FriendsFrame, "TOPRIGHT", -headerRight, -headerY)
         panel.toolbar:SetWidth(headerWidth)
         LayoutToolbar(headerWidth, inRaid)
-        local toolbarHeight = 22
+        local toolbarHeight = 21
         local width, height, left, top, right, bottom = NativeRaidTab.GetContentRect(FriendsFrame, toolbarHeight, not inRaid or settings.raidGroupShowHeader ~= false)
         panel:ClearAllPoints()
         panel:SetPoint("TOPLEFT", FriendsFrame, "TOPLEFT", left, -top)
@@ -185,10 +196,10 @@ function NativeRaidTab.Create(options)
         panel:SetFrameLevel(FriendsFrame:GetFrameLevel() + 3)
         local toolbar = UI.CreateToolbarSurface(panel, false, true)
         UI.SetSurfaceTransparent(toolbar, true)
-        toolbar:SetHeight(22)
-        panel.invite = UI.CreateButton(toolbar, nil, "Add Member", 90, 22)
-        panel.ready = UI.CreateButton(toolbar, nil, "Ready Check", 90, 22)
-        panel.info = UI.CreateButton(toolbar, nil, "Raid Info", 80, 22)
+        toolbar:SetHeight(21)
+        panel.invite = UI.CreateButton(toolbar, nil, "Add Member", 90, 21)
+        panel.ready = UI.CreateButton(toolbar, nil, "Ready Check", 90, 21)
+        panel.info = UI.CreateButton(toolbar, nil, "Raid Info", 90, 21)
         UI.SetClassicButtonVariant(panel.invite, "red")
         UI.SetClassicButtonVariant(panel.ready, "red")
         UI.SetClassicButtonVariant(panel.info, "red")

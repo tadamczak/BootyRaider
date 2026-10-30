@@ -1808,6 +1808,19 @@ function RaidManagement.ApplyGroupTileAppearance(panel, header, height, settings
     header:SetTextColor(unpack(panel.headerHovered and hoverText or text))
     panel:SetBackdropBorderColor(0, 0, 0, 0)
     local UI = Raider.UI.Components
+    -- This stock image contains all five empty slots, including their native
+    -- transparent centers. A nine-slice outline discards those authored rows.
+    if settings.raidGroupEmptySlotTexture == "game" then
+        if not panel.stockSlots then
+            panel.stockSlots = UI.CreateTexture(panel, nil, "BACKGROUND")
+            panel.stockSlots:SetTexture(groupOutlineArtwork.path)
+            panel.stockSlots:SetTexCoord(unpack(groupOutlineArtwork.coords))
+        end
+        panel.stockSlots:ClearAllPoints()
+        panel.stockSlots:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -height)
+        panel.stockSlots:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0, 0)
+        panel.stockSlots:Show()
+    elseif panel.stockSlots then panel.stockSlots:Hide() end
     if settings.raidGroupBorderTexture == "game" then
         if panel.bootyProjectOutline then panel.bootyProjectOutline:Hide() end
         UI.SetAtlasOutline(panel, settings.raidGroupShowBorder, groupOutlineArtwork, settings.raidGroupBorderSize, border, height, panel.outlineLevel)
@@ -1840,6 +1853,24 @@ local function SetGroupSlotHover(slot, settings, hovered)
     end
 end
 
+local function ApplyGroupSlotAppearance(slot, settings)
+    local UI=Raider.UI.Components
+    local stockEmpty=not slot.hasMember and settings.raidGroupEmptySlotTexture=="game"
+    local style=slot.hasMember and settings.raidGroupMemberTexture=="game" and groupMemberArtwork or nil
+    if slot.bootyTransparentSurface~=stockEmpty then UI.SetSurfaceTransparent(slot,stockEmpty) end
+    UI.SetAtlasSurface(slot,style)
+    if stockEmpty or style then
+        slot.topEdge:Hide();slot.bottomEdge:Hide();slot:SetBackdropBorderColor(0,0,0,0)
+        if stockEmpty and slot.bootyRowAlpha~=0 then UI.SetRowColor(slot,settings.raidGroupBackgroundColor,0) end
+    else
+        slot.topEdge:Show();slot.bottomEdge:Show();slot:SetBackdropBorderColor(0.42,0.42,0.42,1)
+        UI.SetAlternatingRowColor(slot,settings.raidGroupBackgroundColor,slot.slotIndex,settings.raidGroupOddLightness)
+        if slot.bootyRaidHovered then UI.SetRowColor(slot,settings.raidGroupHoverColor,0.98) end
+    end
+    SetGroupSlotHover(slot,settings,slot.bootyRaidHovered)
+    UI.SetClassicRowShade(slot,math.mod(slot.slotIndex,2)==0,false)
+end
+
 local function OnGroupHeaderEnter()
     local settings = GroupSettings(this.groupPage)
     this.groupPanel.headerHovered = true
@@ -1852,25 +1883,29 @@ local function OnGroupHeaderLeave()
     this.groupLabel:SetTextColor(unpack(settings.raidGroupHeaderTextColor))
 end
 
-function RaidManagement.CalculateGroupGeometry(width, height, columns, preferredTileWidth, tileHeight, showHeader, autoTileWidth, configuredHeaderHeight, groupMargin, showBorder, fitWidth, visibleCount, autoVertical, autoHorizontal, fillHeight)
+function RaidManagement.CalculateGroupGeometry(width, height, columns, preferredTileWidth, tileHeight, showHeader, autoTileWidth, configuredHeaderHeight, groupMargin, showBorder, fitWidth, visibleCount, autoVertical, autoHorizontal, fillHeight, groupPadding, tileSpacing, columnSpacing)
     local columnCount = math.floor(math.max(1, math.min(4, tonumber(columns) or 2)))
     local availableWidth = math.max(1, tonumber(width) or 1)
     local margin = math.max(0, tonumber(groupMargin) or 0)
+    local columnGap = math.max(0, tonumber(columnSpacing) or margin)
+    local padding = math.max(0, tonumber(groupPadding) or 0)
+    local spacing = math.max(0, tonumber(tileSpacing) or 0)
     if fitWidth then
         columnCount = math.min(columnCount, math.max(1, math.floor(availableWidth)))
-        if columnCount > 1 then margin = math.min(margin, math.max(0, math.floor((availableWidth - columnCount) / (columnCount - 1)))) end
+        if columnCount > 1 then columnGap = math.min(columnGap, math.max(0, math.floor((availableWidth - columnCount) / (columnCount - 1)))) end
     end
     visibleCount = math.floor(math.max(0, math.min(8, tonumber(visibleCount) or 8)))
     local groupRows = math.ceil(visibleCount / columnCount)
-    local preferredWidth = (columnCount * (tonumber(preferredTileWidth) or 280)) + ((columnCount - 1) * margin)
+    local preferredWidth = (columnCount * (tonumber(preferredTileWidth) or 280)) + ((columnCount - 1) * columnGap)
     local layoutWidth = autoTileWidth and availableWidth or math.min(availableWidth, preferredWidth)
-    local columnWidth = math.max(1, math.floor((layoutWidth - ((columnCount - 1) * margin)) / columnCount))
+    local columnWidth = math.max(1, math.floor((layoutWidth - ((columnCount - 1) * columnGap)) / columnCount))
+    padding = math.min(padding, math.max(0, (columnWidth - 1) / 2))
     local headerHeight = showHeader and math.max(12, tonumber(configuredHeaderHeight) or 18) or 0
     local rowHeight = tonumber(tileHeight) or 22
-    local groupHeight = headerHeight + rowHeight * 5
+    local groupHeight = headerHeight + padding * 2 + rowHeight * 5 + spacing * 4
     if (autoVertical and visibleCount < 8 or fillHeight and visibleCount == 8) and visibleCount > 0 and math.mod(visibleCount, columnCount) == 0 then
         groupHeight = math.max(groupHeight, ((tonumber(height) or 1) - (groupRows - 1) * margin) / groupRows)
-        rowHeight = (groupHeight - headerHeight) / 5
+        rowHeight = (groupHeight - headerHeight - padding * 2 - spacing * 4) / 5
     end
     local contentHeight = math.max(0, (groupRows * groupHeight) + ((groupRows - 1) * margin))
     return {
@@ -1886,7 +1921,8 @@ function RaidManagement.CalculateGroupGeometry(width, height, columns, preferred
         canvasHeight = math.max(tonumber(height) or 1, contentHeight),
         maximumScroll = math.max(0, contentHeight - (tonumber(height) or 1)),
         margin = margin,
-        tileInset = 0,
+        columnSpacing = columnGap, tileSpacing = spacing,
+        tileInset = padding,
     }
 end
 
@@ -1931,6 +1967,20 @@ local function SetFontSize(fontString, size)
     if not fontString or not fontString.GetFont or not fontString.SetFont then return end
     local path, currentSize, flags = fontString:GetFont()
     if path and currentSize ~= size then fontString:SetFont(path, size, flags) end
+end
+
+local function SetGroupFont(fontString, size, settings)
+    if not fontString or not fontString.GetFont then return end
+    local path, currentSize, flags = fontString:GetFont()
+    local currentPath,currentFlags=path,flags
+    if not fontString.bootyGroupFontPath then fontString.bootyGroupFontPath, fontString.bootyGroupFontFlags = path, flags end
+    if settings.raidGroupFontStyle == "game" and GameFontNormalSmall and GameFontNormalSmall.GetFont then
+        local ignored
+        path, ignored, flags = GameFontNormalSmall:GetFont()
+    else path, flags = fontString.bootyGroupFontPath, fontString.bootyGroupFontFlags end
+    if path then
+        if path~=currentPath or size~=currentSize or flags~=currentFlags then fontString:SetFont(path,size,flags) end
+    else SetFontSize(fontString,size) end
 end
 
 function RaidManagement.FilterMembers(target, members, query, selectedClasses, selectedRanks)
@@ -2478,7 +2528,7 @@ local function OnGroupSlotEnter()
     local settings = GroupSettings(this.groupPage)
     this.bootyRaidHovered = true
     SetGroupSlotHover(this, settings, true)
-    local color = settings.raidGroupHoverColor; Raider.UI.Components.SetRowColor(this, color, 0.98)
+    local color = settings.raidGroupHoverColor; Raider.UI.Components.SetRowColor(this, color, this.bootyTransparentSurface and 0 or 0.98)
     if Raider.dragRaidIndex then Raider.raidDropSlot = this end
 end
 
@@ -2487,7 +2537,8 @@ local function OnGroupSlotLeave()
     SetGroupSlotHover(this, GroupSettings(this.groupPage), false)
     if Raider.UI.Components.IsClassicSkin() then Raider.UI.Components.SetClassicRowShade(this, math.mod(this.slotIndex or 1, 2) == 0, false) end
     local settings = GroupSettings(this.groupPage)
-    Raider.UI.Components.SetAlternatingRowColor(this, settings.raidGroupBackgroundColor, this.slotIndex, settings.raidGroupOddLightness)
+    if this.bootyTransparentSurface then Raider.UI.Components.SetRowColor(this, settings.raidGroupBackgroundColor, 0)
+    else Raider.UI.Components.SetAlternatingRowColor(this, settings.raidGroupBackgroundColor, this.slotIndex, settings.raidGroupOddLightness) end
     if Raider.raidDropSlot == this then Raider.raidDropSlot = nil end
 end
 
@@ -2510,7 +2561,8 @@ local function GroupGeometry(page, width, height)
     end
     local hidden = db.raidGroupHideEmptyGroups
     return RaidManagement.CalculateGroupGeometry(width, height, db.raidGroupColumns, db.raidGroupTileWidth, db.raidGroupTileHeight, db.raidGroupShowHeader, db.raidGroupAutoTileWidth, db.raidGroupHeaderHeight, db.raidGroupMargin, db.raidGroupShowBorder, true,
-        hidden and page.visibleGroupCount or 8, hidden and db.raidGroupAutoAdjustVertically, hidden and db.raidGroupAutoAdjustHorizontally, page.getGroupSettings ~= nil and not hidden)
+        hidden and page.visibleGroupCount or 8, hidden and db.raidGroupAutoAdjustVertically, hidden and db.raidGroupAutoAdjustHorizontally, false,
+        db.raidGroupGroupPadding, db.raidGroupTileSpacing, db.raidGroupColumnSpacing)
 end
 
 function RaidManagement.MeasureGroupHeight(width, page)
@@ -2566,7 +2618,6 @@ function RaidManagement.RefreshGroupView(page)
     page.visibleGroupCount = 0
     for index = 1, 8 do if page.groupCounts[index] > 0 then page.visibleGroupCount = page.visibleGroupCount + 1 end end
     local width, height, maximum = RaidManagement.ResolveGroupViewport(page)
-    local backgroundColor = settings.raidGroupBackgroundColor
     local textColor = settings.raidGroupTextColor
     local lootMethod, raidLootMasterIndex = renderer.getLootMasterInfo()
     local compact = page.bootyCompactGroupWidth ~= nil
@@ -2593,9 +2644,9 @@ function RaidManagement.RefreshGroupView(page)
         local row = math.floor(visibleIndex / columns)
         local rowCount = row == groupRows - 1 and geometry.visibleCount - row * columns or columns
         local panelWidth = geometry.autoHorizontal and rowCount > 0 and rowCount < columns
-            and (layoutWidth - (rowCount - 1) * geometry.margin) / rowCount or columnWidth
-        local x = math.floor(xOffset + column * (panelWidth + geometry.margin) + 0.5)
-        local right = math.floor(xOffset + (column + 1) * (panelWidth + geometry.margin) - geometry.margin + 0.5)
+            and (layoutWidth - (rowCount - 1) * geometry.columnSpacing) / rowCount or columnWidth
+        local x = math.floor(xOffset + column * (panelWidth + geometry.columnSpacing) + 0.5)
+        local right = math.floor(xOffset + (column + 1) * (panelWidth + geometry.columnSpacing) - geometry.columnSpacing + 0.5)
         if column == (geometry.autoHorizontal and rowCount < columns and rowCount or columns) - 1 then right = math.floor(xOffset + layoutWidth) end
         panelWidth = math.max(1, right - x)
         local top = math.floor(yOffset + row * (groupHeight + geometry.margin) + 0.5)
@@ -2610,7 +2661,7 @@ function RaidManagement.RefreshGroupView(page)
         for _,slot in ipairs(page.groupSlots[groupIndex]) do panel.outlineLevel=math.max(panel.outlineLevel,slot:GetFrameLevel()+2) end
         local header = page.groupHeaders[groupIndex]
         RaidManagement.ApplyGroupTileAppearance(panel, header, headerHeight, settings)
-        SetFontSize(header, headerTextSize)
+        SetGroupFont(header, headerTextSize, settings)
         local headerInset = 0
         header:ClearAllPoints(); header:SetPoint("TOPLEFT", panel, "TOPLEFT", headerInset, 0); header:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -headerInset, 0)
         header.bootyFitFontSize = headerTextSize
@@ -2622,27 +2673,18 @@ function RaidManagement.RefreshGroupView(page)
         else header:Hide(); panel.headerHit:Hide(); panel.headerBackground:Hide() end
         for slotIndex = 1, 5 do
             local slot = page.groupSlots[groupIndex][slotIndex]
-            SetFontSize(slot.name, tileTextSize); SetFontSize(slot.level, tileTextSize); SetFontSize(slot.class, tileTextSize); SetFontSize(slot.empty, tileTextSize); SetFontSize(slot.offline, tileTextSize)
-            local slotTop = math.floor(top + headerHeight + (slotIndex - 1) * slotHeight + 0.5)
-            local slotBottom = slotIndex == 5 and bottom or math.floor(top + headerHeight + slotIndex * slotHeight + 0.5)
-            slot:ClearAllPoints(); slot:SetPoint("TOPLEFT", page.groupCanvas, "TOPLEFT", x, -slotTop); slot:SetWidth(panelWidth); slot:SetHeight(math.max(1, slotBottom - slotTop))
-            Raider.UI.Components.SetAtlasSurface(slot, settings.raidGroupMemberTexture == "game" and groupMemberArtwork or nil)
-            SetGroupSlotHover(slot, settings, slot.bootyRaidHovered)
-            if settings.raidGroupMemberTexture == "game" then slot.topEdge:Hide(); slot.bottomEdge:Hide()
-            else slot.topEdge:Show(); slot.bottomEdge:Show() end
-            slot.bootyGroupWidth = panelWidth
+            SetGroupFont(slot.name, tileTextSize, settings); SetGroupFont(slot.level, tileTextSize, settings); SetGroupFont(slot.class, tileTextSize, settings); SetGroupFont(slot.empty, tileTextSize, settings); SetGroupFont(slot.offline, tileTextSize, settings)
+            local slotTop = math.floor(top + headerHeight + groupInset + (slotIndex - 1) * (slotHeight + geometry.tileSpacing) + 0.5)
+            local slotBottom = math.floor(top + headerHeight + groupInset + slotIndex * slotHeight + (slotIndex - 1) * geometry.tileSpacing + 0.5)
+            local slotWidth = math.max(1, panelWidth - groupInset * 2)
+            slot:ClearAllPoints(); slot:SetPoint("TOPLEFT", page.groupCanvas, "TOPLEFT", x + groupInset, -slotTop); slot:SetWidth(slotWidth); slot:SetHeight(math.max(1, slotBottom - slotTop))
+            slot.bootyGroupWidth = slotWidth
             if visible then slot:Show() else slot:Hide() end
             if page.getGroupSettings then
                 slot.empty.bootyFitFontSize = tileTextSize; Raider.UI.Components.FitButtonLabel(slot.empty, math.max(1, panelWidth - groupInset * 2 - 4)); slot.empty:SetJustifyH("CENTER")
             end
-            Raider.UI.Components.SetAlternatingRowColor(slot, backgroundColor, slotIndex, settings.raidGroupOddLightness)
-            if settings.raidGroupMemberTexture == "game" then slot:SetBackdropBorderColor(0,0,0,0)
-            else
-                slot:SetBackdropBorderColor(0.42,0.42,0.42,1)
-                if slot.bootyRaidHovered then Raider.UI.Components.SetRowColor(slot, settings.raidGroupHoverColor, 0.98) end
-            end
-            Raider.UI.Components.SetClassicRowShade(slot, math.mod(slotIndex, 2) == 0, false)
             slot.empty:SetTextColor(textColor[1] * 0.55, textColor[2] * 0.55, textColor[3] * 0.55); slot.offline:SetTextColor(textColor[1] * 0.55, textColor[2] * 0.55, textColor[3] * 0.55)
+            if settings.raidGroupFontStyle == "game" and GameFontDarkGraySmall and GameFontDarkGraySmall.GetTextColor then slot.empty:SetTextColor(GameFontDarkGraySmall:GetTextColor()) end
             slot.raidIndex = nil; slot.hasMember = nil; slot.displayedMember.name = nil; slot.displayedMember.raidRank = nil
             slot.name:Hide(); slot.level:Hide(); slot.class:Hide(); slot.crown:Hide(); slot.lootMasterIcon:Hide(); slot.offline:Hide(); slot.empty:Show()
         end
@@ -2742,6 +2784,9 @@ function RaidManagement.RefreshGroupView(page)
             local color = (RAID_CLASS_COLORS and RAID_CLASS_COLORS[classKey]) or Raider.UI.Components.Theme.classColors[classKey]
             if online and settings.raidGroupClassColors and color then slot.name:SetTextColor(color.r, color.g, color.b); slot.class:SetTextColor(color.r, color.g, color.b) end
         end
+    end
+    for groupIndex=1,8 do
+        for slotIndex=1,5 do ApplyGroupSlotAppearance(page.groupSlots[groupIndex][slotIndex],settings) end
     end
 end
 
@@ -4620,13 +4665,14 @@ function RaidManagement.CreateAutoLootControls(page, view)
     end
     panel:SetScript("OnSizeChanged", LayoutConfig)
     LayoutConfig()
-    local presetNames, presetSelected, inclusionSelected = {}, {}, {}
+    local presetNames, inclusionPresetNames, presetSelected, inclusionSelected = {}, {}, {}, {}
     local function RefreshPresets()
-        presetNames=autoLoot.GetPresetNames(Raider.Database.Ensure())
+        presetNames=autoLoot.GetPresetNames(Raider.Database.Ensure(),"exclusions")
+        inclusionPresetNames=autoLoot.GetPresetNames(Raider.Database.Ensure(),"inclusions")
         autoLoot.MaskSelection(Raider.Database.GetSetting("lmAutoLootPresets"),presetNames,presetSelected)
-        autoLoot.MaskSelection(Raider.Database.GetSetting("lmAutoLootInclusionPresets"),presetNames,inclusionSelected)
+        autoLoot.MaskSelection(Raider.Database.GetSetting("lmAutoLootInclusionPresets"),inclusionPresetNames,inclusionSelected)
         UI.FilterPanel.SetCaption(presets,presetNames,presetSelected)
-        UI.FilterPanel.SetCaption(inclusionPresets,presetNames,inclusionSelected)
+        UI.FilterPanel.SetCaption(inclusionPresets,inclusionPresetNames,inclusionSelected)
     end
     local function SavePresets()
         local mask = autoLoot.SelectionMask(presetSelected,presetNames)
@@ -4636,7 +4682,7 @@ function RaidManagement.CreateAutoLootControls(page, view)
         RefreshPresets(); Apply()
     end
     local function SaveInclusionPresets()
-        local mask=autoLoot.SelectionMask(inclusionSelected,presetNames)
+        local mask=autoLoot.SelectionMask(inclusionSelected,inclusionPresetNames)
         Raider.Database.SetSetting("lmAutoLootInclusionPresets",mask)
         local text=autoLoot.ApplyInclusionPresets(inclusions:GetText(),mask)
         Raider.Database.SetSetting("lmAutoLootInclusions",text);inclusions:SetText(text)
@@ -4653,29 +4699,31 @@ function RaidManagement.CreateAutoLootControls(page, view)
         ClearTextFocus()
         if inclusionPresetPanel:IsVisible() then inclusionPresetPanel:Hide() else
             mode.panel:Hide();choices:Hide();presetPanel:Hide();RefreshPresets()
-            UI.FilterPanel.Refresh(inclusionPresetPanel,presetNames,inclusionSelected,SaveInclusionPresets,false,true);inclusionPresetPanel:Show()
+            UI.FilterPanel.Refresh(inclusionPresetPanel,inclusionPresetNames,inclusionSelected,SaveInclusionPresets,false,true);inclusionPresetPanel:Show()
         end
     end)
     local modeClick, rarityClick = mode:GetScript("OnClick"), rarity:GetScript("OnClick")
     mode:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); inclusionPresetPanel:Hide(); modeClick() end)
     rarity:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); inclusionPresetPanel:Hide(); rarityClick() end)
-    local shownPresetMask, shownExclusions, shownInclusions, shownInclusionMask, shownDefinitions
+    local shownPresetMask, shownExclusions, shownInclusions, shownInclusionMask, shownDefinitions, shownInclusionDefinitions
     page.RefreshAutoLootConfig = function(force)
         local mask=Raider.Database.GetSetting("lmAutoLootPresets")
         local text=Raider.Database.GetSetting("lmAutoLootExceptions")
         local included=Raider.Database.GetSetting("lmAutoLootInclusions")
         local inclusionMask=Raider.Database.GetSetting("lmAutoLootInclusionPresets")
-        local definitions=autoLoot.GetDefinitions(Raider.Database.Ensure())
+        local definitions=autoLoot.GetDefinitions(Raider.Database.Ensure(),"exclusions")
+        local inclusionDefinitions=autoLoot.GetDefinitions(Raider.Database.Ensure(),"inclusions")
         if force or included~=shownInclusions then
             shownInclusions=included
             if inclusions:GetText()~=included then inclusions:SetText(included) end
         end
-        if force or mask~=shownPresetMask or text~=shownExclusions or inclusionMask~=shownInclusionMask or definitions~=shownDefinitions then
+        if force or mask~=shownPresetMask or text~=shownExclusions or inclusionMask~=shownInclusionMask or definitions~=shownDefinitions or inclusionDefinitions~=shownInclusionDefinitions then
             shownPresetMask,shownExclusions=mask,text
             shownInclusionMask,shownDefinitions=inclusionMask,definitions
+            shownInclusionDefinitions=inclusionDefinitions
             RefreshPresets()
             if presetPanel:IsShown() then UI.FilterPanel.Refresh(presetPanel, presetNames, presetSelected, SavePresets, false, true) end
-            if inclusionPresetPanel:IsShown() then UI.FilterPanel.Refresh(inclusionPresetPanel,presetNames,inclusionSelected,SaveInclusionPresets,false,true) end
+            if inclusionPresetPanel:IsShown() then UI.FilterPanel.Refresh(inclusionPresetPanel,inclusionPresetNames,inclusionSelected,SaveInclusionPresets,false,true) end
             if exceptions:GetText()~=text then exceptions:SetText(text) end
         end
     end

@@ -5,7 +5,8 @@ local groupLabels={Columns="Columns",ShowLevel="Show level",ShowLootMaster="Show
     HideEmptyGroups="Hide empty groups",AutoAdjustVertically="Auto adjust groups vertically",AutoAdjustHorizontally="Auto adjust groups horizontally",
     AutoTileWidth="Adjust tile width to window",TileWidth="Member tile width",TileHeight="Member tile height",HeaderHeight="Group header height",
     Margin="Margin between groups",TileTextSize="Tile text size",HeaderTextSize="Header text size",HeaderTransparency="Header transparency (%)",
-    MemberTexture="Member tile background",BorderTexture="Group border texture",ViewBackgroundTexture="View background",OddLightness="Alternate row lightness (%)"}
+    MemberTexture="Member tile background",BorderTexture="Group border texture",ViewBackgroundTexture="View background",OddLightness="Alternate row lightness (%)",
+    GroupPadding="Group padding",TileSpacing="Space between members",ColumnSpacing="Space between columns",FontStyle="Font",EmptySlotTexture="Empty member slots"}
 local textureOptions={{text="Game texture",value="game"},{text="Color",value="color"}}
 local borderOptions={{text="Game texture",value="game"},{text="Booty border",value="project"}}
 local fields
@@ -42,6 +43,74 @@ local function MaskCheckbox(key,label,path,bit,updatePresets)
     end
     field.onChange=nil
 end
+local function PresetEditor(loot,path,kind,title,prefix,definitionKey)
+    local definitions=Field(definitionKey,title,"text",path)
+    definitions.profileOnly=true;definitions.onChange=nil;definitions.legacyKey="lmAutoLootPresetDefinitions"
+    definitions.retiredKey="lmAutoLootPresetDefinitions"
+    definitions.get=function(store) return loot.GetDefinitions(store,kind) end
+    definitions.readLegacy=function(value)
+        if value==nil then return nil end
+        local valid,reason=loot.ReadCombinedDefinitions(value,kind);assert(valid,reason);return valid
+    end
+    definitions.set=function(value,store)
+        local valid,reason=loot.ValidateDefinitions(value);assert(valid,reason);store[definitionKey]=valid
+    end
+    local draft={index=0,name="",items="",status=""}
+    local refresh={}
+    for _,suffix in ipairs({"Editor","Name","Items","Status"}) do refresh[prefix..suffix]=true end
+    local function DraftField(suffix,label,fieldType,property)
+        local field=Field(prefix..suffix,label,fieldType,path)
+        field.profile=false;field.persist=false;field.onChange=nil;field.fullWidth=true
+        if property then
+            field.get=function() return draft[property] end
+            field.set=function(value) draft[property]=value end
+        end
+        return field
+    end
+    local function Select(value,store)
+        local entry=loot.GetDefinitions(store,kind)[value]
+        draft.index=value;draft.source=entry;draft.name=entry and entry.name or ""
+        draft.items=entry and entry.items or "";draft.status=""
+    end
+    local function Current(store)
+        if draft.index~=0 and draft.source~=loot.GetDefinitions(store,kind)[draft.index] then
+            draft.status="This preset changed. Select it again before saving.";return false
+        end
+        return true
+    end
+    DraftField("Heading",title,"heading")
+    local selector=DraftField("Editor","Preset","choice","index")
+    selector.getChoices=function(store) return loot.GetPresetChoices(store,kind,true) end
+    selector.refreshKeys=refresh;selector.commitPending=true;selector.set=Select
+    local name=DraftField("Name","Preset name","text","name");name.maxLength=64
+    name.enabled=function() return draft.index==0 or draft.index>5 end
+    local items=DraftField("Items",kind=="exclusions" and "Exclusions" or "Inclusions","text","items");items.maxLength=2048
+    items.tooltip="Comma-separated item names or patterns. * matches any text. Exclusions always win."
+    local function Action(suffix,label,callback)
+        local action=DraftField(suffix,label,"action")
+        action.fullWidth=nil;action.row=prefix.."Actions";action.refreshKeys=refresh;action.action=callback
+        return action
+    end
+    Action("Add","Add",function(store) Select(0,store) end)
+    Action("Save","Save",function(store)
+        if not Current(store) then return end
+        local ok,result=loot.SavePreset(store,kind,draft.index,draft.name,draft.items)
+        if ok then
+            Select(result,store);draft.status="Preset saved."
+            if Raider.OnSettingChanged then Raider.OnSettingChanged(definitionKey) end
+        else draft.status=result end
+    end)
+    local remove=Action("Delete","Delete",function(store)
+        if not Current(store) then return end
+        local ok,reason=loot.DeletePreset(store,kind,draft.index)
+        if ok then
+            Select(0,store);draft.status="Preset deleted."
+            if Raider.OnSettingChanged then Raider.OnSettingChanged(definitionKey) end
+        else draft.status=reason end
+    end)
+    remove.enabled=function() return draft.index>5 end
+    DraftField("Status","","status","status")
+end
 local function AutoLootFields()
     local loot=Raider.Services.AutoLoot
     local path={"Addon UI","Raid","Loot Master Mode","LM Config"}
@@ -66,13 +135,6 @@ local function AutoLootFields()
     for index,name in ipairs(rarityNames) do
         MaskCheckbox("lmAutoLootRarities",name,path,2^(index-1));fields[table.getn(fields)].profileOnly=true
     end
-    local definitions=Field("lmAutoLootPresetDefinitions","Auto loot preset definitions","text",path)
-    definitions.profileOnly=true;definitions.onChange=nil
-    definitions.get=function(store) return loot.GetDefinitions(store) end
-    definitions.set=function(value,store)
-        local valid,reason=loot.ValidateDefinitions(value)
-        assert(valid,reason);store.lmAutoLootPresetDefinitions=valid
-    end
     for index,name in ipairs(loot.PresetNames) do
         MaskCheckbox("lmAutoLootPresets",name,path,2^(index-1),true);fields[table.getn(fields)].profileOnly=true
     end
@@ -80,42 +142,8 @@ local function AutoLootFields()
     for _,key in ipairs({"lmAutoLootPresets","lmAutoLootInclusionPresets"}) do Field(key,key,"text",path).profileOnly=true end
     Field("lmAutoLootExceptions","Auto loot exclusions","text",path).profileOnly=true
     Field("lmAutoLootInclusions","Auto loot inclusions","text",path).profileOnly=true
-    local editorPath={path[1],path[2],path[3],path[4],"Auto Loot Presets"}
-    local draft={index=0,name="",exclusions="",inclusions="",status=""}
-    local refresh={lmPresetEditor=true,lmPresetName=true,lmPresetExclusions=true,lmPresetInclusions=true,lmPresetStatus=true}
-    local function DraftField(key,label,kind,property)
-        local field=Field(key,label,kind,editorPath)
-        field.profile=false;field.persist=false;field.onChange=nil
-        field.get=function() return draft[property] end
-        field.set=function(value) draft[property]=value end
-        return field
-    end
-    local selector=DraftField("lmPresetEditor","Preset","choice","index")
-    selector.getChoices=function(store) return loot.GetPresetChoices(store,true) end
-    selector.refreshKeys=refresh;selector.commitPending=true
-    selector.set=function(value,store)
-        local entry=loot.GetDefinitions(store)[value]
-        draft.index=value;draft.source=entry;draft.name=entry and entry.name or ""
-        draft.exclusions=entry and entry.exclusions or "";draft.inclusions=entry and entry.inclusions or "";draft.status=""
-    end
-    DraftField("lmPresetName","Preset name","text","name").maxLength=64
-    local exclusions=DraftField("lmPresetExclusions","Exclusions","text","exclusions");exclusions.maxLength=2048
-    local inclusions=DraftField("lmPresetInclusions","Inclusions","text","inclusions");inclusions.maxLength=2048
-    exclusions.tooltip="Comma-separated item names or patterns. * matches any text. Exclusions always win."
-    inclusions.tooltip="Comma-separated item names or patterns to auto loot regardless of rarity."
-    local save=Field("lmPresetSave","Save preset","action",editorPath)
-    save.profile=false;save.persist=false;save.onChange=nil;save.refreshKeys=refresh
-    save.action=function(store)
-        if draft.index~=0 and draft.source~=loot.GetDefinitions(store)[draft.index] then
-            draft.status="This preset changed. Select it again before saving.";return
-        end
-        local ok,result=loot.SavePreset(store,draft.index,draft.name,draft.exclusions,draft.inclusions)
-        if ok then
-            draft.index=result;draft.source=loot.GetDefinitions(store)[result];draft.name=draft.source.name;draft.status="Preset saved."
-            if Raider.OnSettingChanged then Raider.OnSettingChanged("lmAutoLootPresetDefinitions") end
-        else draft.status=result end
-    end
-    local status=DraftField("lmPresetStatus","Status","text","status");status.enabled=false;status.maxLength=256
+    PresetEditor(loot,path,"exclusions","Exclusion Presets","lmExclusionPreset","lmAutoLootExclusionPresetDefinitions")
+    PresetEditor(loot,path,"inclusions","Inclusion Presets","lmInclusionPreset","lmAutoLootInclusionPresetDefinitions")
 end
 local function SplitLabel(value)
     return string.gsub(string.gsub(value,"(%l)(%u)","%1 %2"),"^Show ","Show ")
@@ -125,14 +153,15 @@ local function GroupFields(prefix,path)
         local suffix,default=definition[1],definition[2]
         local section="Display"
         if string.find(suffix,"Color") or suffix=="ClassColors" or suffix=="OddLightness" then section="Member tile color"
-        elseif string.find(suffix,"Texture") or suffix=="HeaderTransparency" then section="Appearance"
+        elseif string.find(suffix,"Texture") or suffix=="HeaderTransparency" or suffix=="FontStyle" then section="Appearance"
         elseif definition[3] then section="Size" end
         local fieldPath={path[1],path[2],path[3],path[4],section}
         if path[5] then fieldPath={path[1],path[2],path[3],path[4],path[5],section} end
         local kind=type(default)=="boolean" and "checkbox" or type(default)=="table" and "color" or definition[3] and "number" or "choice"
         local minimum,maximum=definition[3],definition[4]
         if prefix=="raidGroup" and suffix=="TileHeight" then minimum=14 end
-        local options=suffix=="BorderTexture" and borderOptions or string.find(suffix,"Texture") and textureOptions or nil
+        local options=suffix=="BorderTexture" and borderOptions or string.find(suffix,"Texture") and textureOptions or
+            suffix=="FontStyle" and {{text="Game font",value="game"},{text="Booty font",value="booty"}} or nil
         local enabled
         if suffix=="AutoAdjustVertically" or suffix=="AutoAdjustHorizontally" then
             local hideKey=prefix.."HideEmptyGroups";enabled=function(db) return db[hideKey]==true end
@@ -140,6 +169,27 @@ local function GroupFields(prefix,path)
         elseif suffix=="HoverBorderSize" then local key=prefix.."ShowHoverBorder";enabled=function(db) return db[key]==true end
         elseif suffix=="TileWidth" then local key=prefix.."AutoTileWidth";enabled=function(db) return db[key]~=true end end
         Field(prefix..suffix,groupLabels[suffix] or SplitLabel(suffix),kind,fieldPath,minimum,maximum,options,enabled)
+    end
+end
+local function AddSectionResets()
+    local sections,order={},{}
+    for _,field in ipairs(fields) do
+        local path=field.path or {}
+        local eligible=path[1]=="Addon UI" and ((path[2]=="Raid" and path[3]=="Layout" and (path[4]=="Group view" or path[4]=="List view")) or
+            (path[2]=="Raid Stats" or path[2]=="CSR") and path[3]=="Layout") or
+            path[1]=="Game UI" and path[2]=="Raid" and path[3]=="Layout" or path[1]=="Addon Messages" and path[2]=="Loot Master"
+        if eligible and field.persist~=false and not field.profileOnly then
+            local id=table.concat(path,"/")
+            if not sections[id] then sections[id]={path=path,keys={}};table.insert(order,id) end
+            sections[id].keys[field.key]=true
+        end
+    end
+    for index,id in ipairs(order) do
+        local section=sections[id]
+        local field=Field("resetLayoutSection"..index,"Reset","action",section.path)
+        field.profile=false;field.persist=false;field.onChange=nil
+        field.row=field.key;field.resetKeys=section.keys;field.resetCaption=section.path[table.getn(section.path)]
+        field.tooltip="Reset only this section to defaults. Other settings and saved raid data are retained."
     end
 end
 function Settings.Get()
@@ -176,7 +226,7 @@ function Settings.Get()
         Field("raidStatsMultiShowLoot","Show Loot","checkbox",multiPath)
         Field("csrHideSectionHeader","Hide section header","checkbox",{"Addon UI","CSR","General"})
         Field("csrUseClassColors","Use class colors","checkbox",{"Addon UI","CSR","General"})
-        Field("csrShowClassIcon","Show class icon","checkbox",{"Addon UI","CSR","Layout"})
+        Field("csrShowClassIcon","Show class icon","checkbox",{"Addon UI","CSR","Layout","General"})
         for _,option in ipairs({{"csrShowRaidFilter","Show Raid filter"},{"csrShowSearchFilter","Show Search"},
             {"csrShowGroupFilter","Show Group By"},{"csrShowArchivedFilter","Show archived CSR filter"},{"csrShowAwardedFilter","Show awarded CSR filter"}}) do
             Field(option[1],option[2],"checkbox",{"Addon UI","CSR","Layout","Filters"})
@@ -227,6 +277,7 @@ function Settings.Get()
                 function(store) return store[enabledKey]~=false end,"Available variables: "..(definition[4]~="" and definition[4] or "none")..". Variables are optional.")
             message.preview=function(store,drafts) return Raider.Services.LootMessages.Preview(messageKey,store,drafts) end
         end
+        AddSectionResets()
     end
     return {id="raider",label="Raid",db=db,fields=fields,onChange=Raider.OnSettingChanged}
 end

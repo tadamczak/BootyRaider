@@ -195,7 +195,7 @@ function Audit.Start(attendance)
 end
 function Audit.LootValue(member,loot)
     return {recipient=member.name,item=tonumber(loot.itemId) or loot.itemId or loot.name,name=loot.name,link=loot.link,count=loot.count or 1,
-        ordinary=loot.ordinaryReceipt==true,historyKey=loot.awardHistoryKey,timestamp=loot.timestamp}
+        ordinary=loot.ordinaryReceipt==true,historyKey=loot.awardHistoryKey,timestamp=tonumber(loot.timestamp or loot.time)}
 end
 local function Copy(value)
     if type(value)~="table" then return value end

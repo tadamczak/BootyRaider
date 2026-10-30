@@ -76,9 +76,10 @@ local function AppendItems(target, source, raid, receivedLoot)
             target[table.getn(target) + 1] = {
                 itemId = itemId, name = item.name, count = tonumber(item.count) or 1,
                 raidId = raid.id, savedAt = raid.savedAt, timestamp=timestamp,
-                context = receivedLoot and (timestamp and date("%Y-%m-%d %H:%M:%S",timestamp) or "Unknown time")
-                    or (tostring(raid.id or "-") .. " | " .. date("%Y-%m-%d", tonumber(raid.savedAt) or 0)),
-                contextColor = receivedLoot and "gold" or nil,
+                context = receivedLoot and (timestamp and date("%Y-%m-%d %H:%M:%S",timestamp) or "Time not recorded") or tostring(raid.id or "-"),
+                context2 = not receivedLoot and (raid.savedAt and date("%Y-%m-%d",raid.savedAt) or "Date not recorded") or nil,
+                contextColor = "gold",context2Color="gold",
+                contextHint = receivedLoot and not timestamp and "This saved receipt has no recorded award time. The raid save time is not the award time." or nil,
             }
         end
     end
@@ -87,7 +88,8 @@ end
 local function AppendMissingReserve(target, raid)
     target[table.getn(target) + 1] = {
         missing = true, raidId = raid.id, savedAt = raid.savedAt,
-        context = tostring(raid.id or "-") .. " | " .. date("%Y-%m-%d", tonumber(raid.savedAt) or 0),
+        context = tostring(raid.id or "-"),contextColor="gold",context2Color="gold",
+        context2=raid.savedAt and date("%Y-%m-%d",raid.savedAt) or "Date not recorded",
     }
 end
 

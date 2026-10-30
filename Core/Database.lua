@@ -39,15 +39,16 @@ end
 -- addon layout. Compact defaults fit all eight groups in the stock raid panel.
 local nativeRaidGroupFields = {
     { "Columns", 2, 1, 4, true },
-    { "ShowClass", true }, { "ShowLevel", true }, { "ShowHeader", true }, { "ShowBorder", true },
+    { "ShowClass", true }, { "ShowLevel", true }, { "ShowHeader", true }, { "ShowBorder", false },
     { "BorderSize", 1, 1, 6, true }, { "ShowHoverBorder", true }, { "HoverBorderSize", 1, 1, 6, true }, { "HoverBorderColor", { 1, 1, 1 } },
     { "HeaderTextColor", { 1, 0.82, 0 } }, { "HeaderBackgroundColor", { 0.025, 0.025, 0.025 } },
     { "HeaderHoverTextColor", { 1, 1, 1 } }, { "HeaderTransparency", 100, 0, 100 },
-    { "MemberTexture", "game" }, { "BorderTexture", "game" }, { "ViewBackgroundTexture", "game" },
+    { "MemberTexture", "game" }, { "EmptySlotTexture", "game" }, { "BorderTexture", "game" }, { "ViewBackgroundTexture", "game" }, { "FontStyle", "game" },
     { "ViewBackgroundColor", { 0.025, 0.025, 0.025 } }, { "BorderColor", { 1, 1, 1 } },
-    { "ShowLootMaster", true }, { "ShowRoleIcon", true }, { "ClassColors", true }, { "AutoTileWidth", true },
-    { "TileWidth", 160, 160, 340 }, { "TileHeight", 16, 13, 28 }, { "HeaderHeight", 14, 12, 40 },
-    { "Margin", 0, 0, 32 }, { "TileTextSize", 10, 8, 16 }, { "HeaderTextSize", 9, 8, 16 },
+    { "ShowLootMaster", false }, { "ShowRoleIcon", true }, { "ClassColors", true }, { "AutoTileWidth", true },
+    { "TileWidth", 162, 160, 340 }, { "TileHeight", 14, 13, 28 }, { "HeaderHeight", 14, 12, 40 },
+    { "Margin", 0, 0, 32 }, { "GroupPadding", 3, 0, 12 }, { "TileSpacing", 1, 0, 8 }, { "ColumnSpacing", 3, 0, 32 },
+    { "TileTextSize", 10, 8, 16 }, { "HeaderTextSize", 10, 8, 16 },
     { "HideEmptyGroups", false }, { "AutoAdjustVertically", false }, { "AutoAdjustHorizontally", false },
     { "BackgroundColor", { 0.025, 0.025, 0.025 } }, { "TextColor", { 1, 1, 1 } },
     { "HoverColor", { 0.12, 0.09, 0.025 } }, { "PressedColor", { 0.20, 0.14, 0.03 } },
@@ -78,7 +79,7 @@ local function EnsureNativeRaidGroupSettings()
                 BootyRaiderDB[key] = { default[1], default[2], default[3] }
             end
         elseif type(default) == "string" then
-            local alternative = field[1] == "BorderTexture" and "project" or "color"
+            local alternative = field[1] == "BorderTexture" and "project" or field[1] == "FontStyle" and "booty" or "color"
             if value ~= "game" and value ~= alternative then BootyRaiderDB[key] = default end
         elseif value == nil then BootyRaiderDB[key] = default end
     end
@@ -177,6 +178,13 @@ local function InitializeDefaults(store)
         if type(color) ~= "table" or color[1] == 0.48 and color[2] == 0.38 and color[3] == 0.20 then BootyRaiderDB.nativeRaidGroupBorderColor = {1,1,1} end
         BootyRaiderDB.groupLayoutVersion = 4
     end
+    if BootyRaiderDB.nativeRaidVisualVersion ~= 1 then
+        -- Requested once for the integrated client Raid tab; other layouts,
+        -- profiles and raid data retain their independent values.
+        for _,key in ipairs(Database.NativeRaidGroupKeys) do BootyRaiderDB[key]=nil end
+        BootyRaiderDB.useBootyRaidLogo=false
+        BootyRaiderDB.nativeRaidVisualVersion=1
+    end
     EnsureRaidGroupDefaults()
     for _, prefix in ipairs(borderPrefixes) do
         if BootyRaiderDB[prefix .. "ShowHoverBorder"] == nil then BootyRaiderDB[prefix .. "ShowHoverBorder"] = false end
@@ -217,7 +225,7 @@ local function InitializeDefaults(store)
     BootyRaiderDB.raidListOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidListOddLightness) or 5))
     if BootyRaiderDB.raidHideSectionHeader == nil then BootyRaiderDB.raidHideSectionHeader = false end
     if BootyRaiderDB.useBootyRaidTab == nil then BootyRaiderDB.useBootyRaidTab = false end
-    if BootyRaiderDB.useBootyRaidLogo == nil then BootyRaiderDB.useBootyRaidLogo = true end
+    if BootyRaiderDB.useBootyRaidLogo == nil then BootyRaiderDB.useBootyRaidLogo = false end
     if BootyRaiderDB.nativeRaidButtonStyle ~= "booty" then BootyRaiderDB.nativeRaidButtonStyle = "game" end
     EnsureNativeRaidGroupSettings()
     if BootyRaiderDB.raidLiveTrackingEnabled == nil then BootyRaiderDB.raidLiveTrackingEnabled = true end
