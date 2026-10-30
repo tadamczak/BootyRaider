@@ -71,28 +71,42 @@ function Settings.Get()
     local db=Raider.Database.Ensure()
     if not fields then
         fields={}
+        Field("raidSyncEnabled","Synchronize raids and CSR with other officers","checkbox",{"Addon UI","Raid","General"},nil,nil,nil,nil,
+            "Share raid changes with authorized guild officers. Only saved, ended raids appear in Raid Stats and contribute to CSR.")
         Field("raidLiveTrackingEnabled","Live tracking","checkbox",{"Addon UI","Raid","General"},nil,nil,nil,nil,
             "Refresh the physical raid roster while the Raid view or Loot Master window is visible. Session loot recording remains active until the session is paused or ended.")
         Field("raidHideSectionHeader","Hide section header","checkbox",{"Addon UI","Raid","General"})
         Field("raidClassColors","Use class colors","checkbox",{"Addon UI","Raid","General"})
+        Field("raidStatsHideSectionHeader","Hide section header","checkbox",{"Addon UI","Raid Stats","General"})
+        local statsPath={"Addon UI","Raid Stats","Layout","Raid List"}
+        Field("raidStatsListShowId","Show Raid ID","checkbox",statsPath)
+        Field("raidStatsListShowTime","Show Time","checkbox",statsPath)
+        local singlePath={"Addon UI","Raid Stats","Layout","Single Raid Details"}
+        Field("raidStatsSingleUseClassColors","Use class colors","checkbox",singlePath)
+        Field("raidStatsSingleShowAttendance","Show Attendance","checkbox",singlePath)
+        local multiPath={"Addon UI","Raid Stats","Layout","Multi Raid Details"}
+        Field("raidStatsMultiUseClassColors","Use class colors","checkbox",multiPath)
+        Field("raidStatsMultiShowAttendance","Show Attendance","checkbox",multiPath)
+        Field("raidStatsMultiShowSR","Show SR","checkbox",multiPath)
+        Field("raidStatsMultiShowLoot","Show Loot","checkbox",multiPath)
+        Field("csrHideSectionHeader","Hide section header","checkbox",{"Addon UI","CSR","General"})
         Field("csrShowClassIcon","Show class icon","checkbox",{"Addon UI","CSR","Display"})
         Field("csrUseClassColors","Use class colors","checkbox",{"Addon UI","CSR","Display"})
         local chat=Field("chatActionLogs","Show action messages in chat","checkbox",{"Addon UI","Raid","General"})
         chat.get=function() return Raider.Database.GetSetting("chatActionLogs") end
         chat.set=function(value) return Raider.Database.SetSetting("chatActionLogs",value) end
         chat.onChange=nil
-        Field("lootMasterOpacity","LM opacity (%)","number",{"Addon UI","Raid","Loot Master Mode"},0,100)
-        Field("outOfFocusOpacity","Out of focus opacity (%)","number",{"Addon UI","Raid","Loot Master Mode"},0,100)
         GroupFields("raidGroup",{"Addon UI","Raid","Layout","Group view"})
-        GroupFields("nativeRaidGroup",{"Game UI","Layout","Raid","Group view"})
-        local nativeTab=Field("useBootyRaidTab","Use BootyRaider as default Raid tab","checkbox",{"Game UI","Interface"})
+        local nativeTab=Field("useBootyRaidTab","Use BootyRaider as default Raid tab","checkbox",{"Game UI","Raid","Interface"})
         nativeTab.legacyKey=Raider.Database.GetLegacyPreferenceKey(nativeTab.key)
         nativeTab.retiredKey=nativeTab.legacyKey
-        local nativeLogo=Field("useBootyRaidLogo","Use Booty logo","checkbox",{"Game UI","Interface"},nil,nil,nil,function(store) return store.useBootyRaidTab==true end)
+        local nativeLogo=Field("useBootyRaidLogo","Use Booty logo","checkbox",{"Game UI","Raid","Interface"},nil,nil,nil,function(store) return store.useBootyRaidTab==true end)
         nativeLogo.legacyKey=Raider.Database.GetLegacyPreferenceKey(nativeLogo.key)
         nativeLogo.retiredKey=nativeLogo.legacyKey
-        local buttonStyle=Field("nativeRaidButtonStyle","Action button style","choice",{"Game UI","Layout","Raid","Appearance"},nil,nil,
+        GroupFields("nativeRaidGroup",{"Game UI","Raid","Layout","Group view"})
+        local buttonStyle=Field("nativeRaidButtonStyle","Action button style","choice",{"Game UI","Raid","Interface"},nil,nil,
             {{text="Game texture",value="game"},{text="Booty red",value="booty"}})
+        buttonStyle.profileOnly=true
         buttonStyle.readSaved=Raider.Database.NormalizeNativeRaidButtonStyle
         local listPath={"Addon UI","Raid","Layout","List view","Display"}
         for _,definition in ipairs({{"Name","Show name"},{"Level","Show level"},{"Status","Show status"},{"Group","Show group"},
@@ -109,6 +123,8 @@ function Settings.Get()
             Field("raidList"..definition[1],definition[2],"color",{"Addon UI","Raid","Layout","List view","Member tile color"})
         end
         Field("raidListOddLightness","Alternate row lightness (%)","number",{"Addon UI","Raid","Layout","List view","Member tile color"},0,100)
+        Field("lootMasterOpacity","LM opacity (%)","number",{"Addon UI","Raid","Loot Master Mode"},0,100)
+        Field("outOfFocusOpacity","Out of focus opacity (%)","number",{"Addon UI","Raid","Loot Master Mode"},0,100)
         local mode=Field("lmAutoLootMode","Auto loot mode","choice",{"Addon UI","Raid","Loot Master Mode","Auto loot"},nil,nil,
             {{text="Off",value="off"},{text="Shift",value="shift"},{text="Auto",value="auto"}})
         mode.rollbackKeys={"lmAutoLoot"}
@@ -121,9 +137,11 @@ function Settings.Get()
         end
         for index,label in ipairs(Raider.Services.AutoLoot.PresetNames) do
             MaskCheckbox("lmAutoLootPresets",label,{"Addon UI","Raid","Loot Master Mode","Auto loot","Raid presets"},2^(index-1),true)
+            fields[table.getn(fields)].profileOnly=true
         end
-        Field("lmAutoLootExceptions","Auto loot exceptions","text",{"Addon UI","Raid","Loot Master Mode","Auto loot"})
-        Field("lmAutoLootInclusions","Auto loot inclusions","text",{"Addon UI","Raid","Loot Master Mode","Auto loot"})
+        -- Still part of named profiles; these controls live in LM Config.
+        Field("lmAutoLootExceptions","Auto loot exceptions","text",{"Addon UI","Raid","Loot Master Mode","Auto loot"}).profileOnly=true
+        Field("lmAutoLootInclusions","Auto loot inclusions","text",{"Addon UI","Raid","Loot Master Mode","Auto loot"}).profileOnly=true
         for _,definition in ipairs(Raider.Services.LootMessages.Definitions) do
             local path={"Addon Messages","Loot Master",definition.group,definition[2]}
             Field(definition.enabledKey,"Send "..definition[2],"checkbox",path)

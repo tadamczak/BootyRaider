@@ -2,7 +2,18 @@ local Raider = BootyRaider
 Raider.Modules.RaidManagement = Raider.Modules.RaidManagement or {}
 local RaidManagement = Raider.Modules.RaidManagement
 
-local function ShowItemTooltip() Raider.UI.Components.ShowItemTooltip(this) end
+function RaidManagement.ReportSoftReserveFailure(reason)
+    local message=reason or "Soft Reserves could not be changed. Reopen the raid and try again."
+    if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print(message)
+    elseif DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("[BootyRaider] "..message) end
+end
+
+local function ShowItemTooltip()
+    if this.itemId then Raider.UI.Components.ShowItemTooltip(this)
+    elseif this.itemName then
+        Raider.UI.Components.AnchorTooltip(this); GameTooltip:SetText(this.itemName); GameTooltip:Show()
+    end
+end
 local function HideItemTooltip() GameTooltip:Hide() end
 local function HandleItemClick() Raider.UI.Components.HandleItemClick(this) end
 local warningRowColor = {0.10, 0.085, 0.055}
@@ -32,6 +43,7 @@ function RaidManagement.CreateSoftReserveImportDialog(options)
         local result, importError = options.importData(value, dialog.url:GetText() or "")
         if not result then dialog:SetMessage(importError or "The Soft Reserve import failed.", true); return false end
         options.refresh()
+        if options.page and options.page.OpenSRReview then options.page.OpenSRReview() end
         options.printMessage("Soft Reserves imported. Matched: " .. result.matched .. ", outside raid: " .. result.unmatched .. ", raid members without SR: " .. result.missing .. ".")
         return true
     end)
@@ -66,6 +78,11 @@ function RaidManagement.CreateSoftReserveImportDialog(options)
         if testMode then self.url:SetFocus() end
     end
     dialog.cancel:ClearAllPoints(); dialog.cancel:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -86, 8)
+    dialog.review = Raider.UI.Components.CreateButton(dialog, nil, "Review custom changes", 180, 22)
+    dialog.review:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 8, 8)
+    dialog.review:SetScript("OnClick", function()
+        if options.page and options.page.OpenSRReview and not options.page.OpenSRReview() then dialog:SetMessage("No custom changes are awaiting review.", false) end
+    end)
     dialog.save:ClearAllPoints(); dialog.save:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -8, 8)
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(dialog, options.page) end
     return dialog
@@ -222,7 +239,11 @@ function RaidManagement.CreateSoftReserveWarnings(page, clearUnmatched, refresh,
     page.softReserveWarning.fix:SetPoint("TOPRIGHT", page.softReserveWarning, "TOPRIGHT", -8, -6); page.softReserveWarning.fix:SetHeight(20); page.softReserveWarning.fix:SetFrameLevel(page.softReserveWarning:GetFrameLevel() + 2)
     StaticPopupDialogs["BOOTY_RAIDER_CLEAR_UNMATCHED_SR"] = {
         text = "Remove every unassigned Soft Reserve from the current import? Assigned raid members will not be changed.", button1 = "Remove", button2 = "Cancel",
-        OnAccept = function() if clearUnmatched(page.listRenderer.getData()) then refresh() end end,
+        OnAccept = function()
+            local ok,reason=clearUnmatched(page.listRenderer.getData())
+            if not ok then RaidManagement.ReportSoftReserveFailure(reason);return end
+            refresh()
+        end,
         timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
     local confirmBOOTY_RAIDER_CLEAR_UNMATCHED_SR = Raider.UI.Components.Window.CreateProjectConfirmation("BOOTY_RAIDER_CLEAR_UNMATCHED_SRDialog", "Fix Soft Reserves", "Remove", "fix")
@@ -257,7 +278,9 @@ function RaidManagement.CreateSoftReserveWarnings(page, clearUnmatched, refresh,
     StaticPopupDialogs["BOOTY_RAIDER_CLEAR_INVALID_SR"] = {
         text = "Remove invalid Soft Reserves from raid members?", button1 = "Remove SR", button2 = "Cancel",
         OnAccept = function()
-            if Raider.Services.RaidRes.ClearInvalidMemberReservations(getAttendance(), page.getSoftReserveRules and page.getSoftReserveRules()) > 0 then refresh() end
+            local count,reason=Raider.Services.RaidRes.ClearInvalidMemberReservations(getAttendance(), page.getSoftReserveRules and page.getSoftReserveRules())
+            if count==false or count==nil then RaidManagement.ReportSoftReserveFailure(reason);return end
+            if count>0 then refresh() end
         end,
         timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
@@ -327,6 +350,9 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
         dialog.leftRows[rowIndex] = left; dialog.rightRows[rowIndex] = right
     end
     dialog.save = Raider.UI.Components.CreateButton(dialog, nil, "Save", 78, 22); dialog.save:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -94, 8)
+    dialog.message=Raider.UI.Components.CreateLabel(dialog,nil,"OVERLAY","GameFontHighlightSmall")
+    dialog.message:SetPoint("TOPLEFT",dialog,"TOPLEFT",8,-374);dialog.message:SetWidth(684);dialog.message:SetHeight(24)
+    dialog.message:SetJustifyH("LEFT");dialog.message:SetTextColor(1,0.3,0.3)
     dialog.close = Raider.UI.Components.CreateButton(dialog, nil, "Close", 78, 22); dialog.close:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -8, 8)
     dialog.ghost = Raider.UI.Components.CreateContainer(nil, UIParent); dialog.ghost:SetWidth(260); dialog.ghost:SetHeight(22)
     dialog.ghost:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 8, edgeSize = 8, insets = { left = 2, right = 2, top = 2, bottom = 2 } }); dialog.ghost:SetBackdropColor(0.12, 0.09, 0.03, 0.98)
@@ -353,15 +379,17 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
             if memberName then local assigned = dialog.assignments[memberName]; left.label:SetText(RaidManagement.SoftReservePlayerLabel(memberName, dialog.attendance) .. (assigned and ("  <-  " .. RaidManagement.SoftReservePlayerLabel(assigned, dialog.attendance, dialog.reservationByName and dialog.reservationByName[string.lower(assigned)])) or "")); left:Show() else left:Hide() end
             local reservation = dialog.available[dialog.rightOffset + index]; local right = dialog.rightRows[index]; right.reservation = reservation
             if reservation then
-                right.itemId = reservation.itemIds and reservation.itemIds[1] or nil
+                local reference = reservation.itemIds and reservation.itemIds[1] or nil
+                right.itemId = tonumber(reference)
                 right.labelPrefix = RaidManagement.SoftReservePlayerLabel(reservation.name, dialog.attendance, reservation) .. "  -  "
                 right.label:SetText(right.labelPrefix)
                 local inset = math.min(260, right.label:GetStringWidth()) + 6
-                local itemText = right.itemId and Raider.UI.Components.GetItemLabel(right.itemId) or "No item"
+                local itemText = right.itemId and Raider.UI.Components.GetItemLabel(right.itemId) or reference or "No item"
                 right.label:SetText(itemText)
                 local itemWidth = math.min(306 - inset, right.label:GetStringWidth())
                 right.label:SetText(right.labelPrefix .. itemText)
                 right.itemHit.itemId = right.itemId
+                right.itemHit.itemName = reference and Raider.Services.ItemReference.Name(reference)
                 right.itemHit:ClearAllPoints(); right.itemHit:SetPoint("LEFT", right, "LEFT", inset, 0)
                 right.itemHit:SetWidth(math.max(1,itemWidth)); right.itemHit:Show(); right:Show()
             else right.itemId = nil; right.labelPrefix = nil; right:Hide() end
@@ -389,8 +417,13 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
         end
     end
     dismiss:SetScript("OnClick", CloseDialog); dialog.close:SetScript("OnClick", CloseDialog)
-    dialog.save:SetScript("OnClick", function() if applyAssignments(dialog.attendance, dialog.assignments) then CloseDialog(); refresh() end end)
+    dialog.save:SetScript("OnClick", function()
+        local ok,reason=applyAssignments(dialog.attendance, dialog.assignments)
+        if not ok then dialog.message:SetText(reason or "SR assignments could not be saved.");return end
+        CloseDialog();refresh()
+    end)
     dialog.Open = function(self, attendance)
+        self.message:SetText("")
         local importInfo = attendance and attendance.softReserveImport
         if not importInfo or not importInfo.missingNames or not importInfo.unmatchedReservations then return end
         self.attendance = attendance; self.importInfo = importInfo; self.missing = importInfo.missingNames; self.assignments = {}; self.leftOffset = 0; self.rightOffset = 0

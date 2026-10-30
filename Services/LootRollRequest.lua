@@ -4,6 +4,7 @@ local Request = Raider.Services.LootRollRequest
 local aliases = { tmog=98, mog=98, transmog=98, os=99, ms=100, rc=101, reycoin=101, sr=102 }
 Request.CategoryNames = { [98]="Tmog", [99]="OS", [100]="MS", [101]="RC", [102]="SR" }
 local transmogSlots = {
+    INVTYPE_CLOAK=true,
     INVTYPE_HEAD=true, INVTYPE_SHOULDER=true, INVTYPE_CHEST=true, INVTYPE_ROBE=true, INVTYPE_BODY=true,
     INVTYPE_WRIST=true, INVTYPE_HAND=true, INVTYPE_WAIST=true, INVTYPE_LEGS=true, INVTYPE_FEET=true,
     INVTYPE_WEAPON=true, INVTYPE_2HWEAPON=true, INVTYPE_WEAPONMAINHAND=true, INVTYPE_WEAPONOFFHAND=true,
@@ -50,10 +51,13 @@ function Request.CanOrganize()
 end
 
 function Request.Normalize(request)
-    if type(request) ~= "table" or type(request.link) ~= "string" then return nil, "Link an item first." end
+    if type(request) ~= "table" or type(request.link) ~= "string" then return nil, "Link an item or type its name." end
     local link = request.link
     if not string.find(link, "^|c%x+|Hitem:[^|]+|h%[[^%]]+%]|h|r$")
-        and not string.find(link, "^|Hitem:[^|]+|h%[[^%]]+%]|h$") then return nil, "Use a complete item link." end
+        and not string.find(link, "^|Hitem:[^|]+|h%[[^%]]+%]|h$") then
+        link = Raider.Services.ItemReference.NormalizeName(link)
+        if not link then return nil, "Enter an item name (up to 120 characters) or a complete item link." end
+    end
     local types, count = {}, 0
     if request.types == nil then types, count = Defaults(link)
     elseif type(request.types) ~= "table" then return nil, "Choose at least one roll type."

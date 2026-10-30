@@ -1,6 +1,16 @@
 local Raider = BootyRaider
 local UI = Raider.UI.Components
 
+local function ItemLabel(reference, name)
+    if type(reference) == "number" then return UI.GetItemLabel(reference) end
+    return name or reference or "Unknown item"
+end
+
+local function ItemTooltip()
+    if this.itemId then UI.ShowItemTooltip(this)
+    elseif this.itemName then UI.AnchorTooltip(this); GameTooltip:SetText(this.itemName); GameTooltip:Show() end
+end
+
 Raider.Modules = Raider.Modules or {}
 local CSR = {}
 Raider.Modules.CSR = CSR
@@ -146,6 +156,9 @@ local function CreateTestLab(owner, onChanged, onExit)
         if onChanged then onChanged() end
     end
     function dialog:Open() self:Show(); self:Refresh() end
+    function dialog:Toggle()
+        if self:IsShown() then Exit() else self:Open() end
+    end
     dialog:SetScript("OnHide", function() dialog.playerPanel:Hide() end)
     dialog:Hide()
     if UI.WindowStack then UI.WindowStack.Register(dialog, {owner = owner}) end
@@ -193,7 +206,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     controller.description:SetText(controller.descriptionText)
     controller.testButton = UI.CreateButton(page, nil, "CSR Test Lab", 96, 22)
     UI.StyleActionButton(controller.testButton)
-    controller.testButton:SetScript("OnClick", function() controller.testLab:Open() end)
+    controller.testButton:SetScript("OnClick", function() controller.testLab:Toggle() end)
     controller.raidFilter = UI.CreateDropdownButton(page, nil, "Raid", 130)
     controller.raidFilter.bootyFlowWidth = 130; controller.raidFilter:SetHeight(26)
     controller.raidPanel = UI.CreateDropdownPanel(page, controller.raidFilter, 190, 178, 20)
@@ -268,7 +281,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     end
     local function ItemText(player)
         local count = (tonumber(player.items) or 0) + (tonumber(player.archivedItems) or 0)
-        return UI.GetItemLabel(player.itemId) .. (count > 1 and (" x " .. count) or "")
+        return ItemLabel(player.itemId, player.itemName) .. (count > 1 and (" x " .. count) or "")
     end
     local function KeyValue(node, field)
         local player = node.player
@@ -276,7 +289,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         if field == "count" then return table.getn(node.children or {}) end
         if field == "item" then
             local itemId = player and player.itemId or node.itemId
-            local itemName = GetItemInfo(itemId)
+            local itemName = type(itemId) == "number" and GetItemInfo(itemId) or itemId
             return string.lower(itemName or ("Item " .. tostring(itemId)))
         end
         return string.lower(player and player.name or node.name or "")
@@ -326,7 +339,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                 local raidText = SourceLabel(raid)
                 local days = math.max(0, math.ceil(((tonumber(raid.expiresAt) or 0) - (self.summary.now or time())) / 86400))
                 node.sources[index] = { no = index, raid = raid, sortRaid = string.lower(raidText),
-                    texts = { tostring(index), raidText, date("%Y-%m-%d", tonumber(raid.savedAt) or 0), tostring(days) .. "d", raid.status or "ACTIVE" } }
+                    texts = { tostring(index), raidText, date("%Y-%m-%d", tonumber(raid.savedAt) or 0), tostring(days) .. "d", (raid.status or "ACTIVE") .. (raid.provisional and " *" or "") } }
             end
             table.insert(self.pairs, node)
             if self.groupMode == "default" then table.insert(self.nodes, node)
@@ -334,10 +347,10 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                 local key = self.groupMode .. ":" .. (self.groupMode == "player" and string.lower(player.name or "") or tostring(player.itemId))
                 local group = self.groups[key]
                 if not group then
-                    group = { kind = "group", key = key, name = player.name, class = player.class, itemId = player.itemId, children = {}, csr = 0 }
+                    group = { kind = "group", key = key, name = player.name, class = player.class, itemId = player.itemId, itemName = player.itemName, children = {}, csr = 0 }
                     self.groups[key] = group; table.insert(self.nodes, group)
                 end
-                group.csr = group.csr + player.csr; table.insert(group.children, node)
+                group.csr = group.csr + player.csr; group.provisional = group.provisional or player.provisional; table.insert(group.children, node)
             end
         end
         self:SortNodes()
@@ -375,7 +388,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         row.classIcon = UI.CreateClassIcon(row.heading, 16)
         row.iconRegion = UI.CreateTexture(row.heading, nil, "ARTWORK"); row.iconRegion:SetWidth(19); row.iconRegion:SetHeight(19)
         row.itemHit = UI.CreateControl(nil, row.heading); row.itemHit.ownerRow = row
-        row.itemHit:SetScript("OnEnter", function() UI.ShowItemTooltip(this) end)
+        row.itemHit:SetScript("OnEnter", ItemTooltip)
         row.itemHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row.itemHit:SetScript("OnClick", function() if this.ownerRow.node then controller:Toggle(this.ownerRow.node) end end)
         row:SetScript("OnClick", OnRowClick); self.rows[index] = row
@@ -396,7 +409,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         row.classIcon = UI.CreateClassIcon(row, 16)
         row.iconRegion = UI.CreateTexture(row, nil, "ARTWORK"); row.iconRegion:SetWidth(19); row.iconRegion:SetHeight(19)
         row.itemHit = UI.CreateControl(nil, row); row.itemHit.ownerRow = row
-        row.itemHit:SetScript("OnEnter", function() UI.ShowItemTooltip(this) end)
+        row.itemHit:SetScript("OnEnter", ItemTooltip)
         row.itemHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row.itemHit:SetScript("OnClick", function() if this.ownerRow.node then controller:Toggle(this.ownerRow.node) end end)
         row.view = UI.CreateIconButton(row, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\view.tga", 20, 2, UI.Theme.colors.goldIcon)
@@ -479,10 +492,14 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         local available = math.max(80, width - 16)
         self.title:ClearAllPoints(); self.title:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -8)
         UI.FitButtonLabel(self.title, math.max(1, available - 104))
+        local hideTitle=(BootyRaiderDB or {}).csrHideSectionHeader
+        if hideTitle then self.title:Hide() else self.title:Show() end
         self.testButton:ClearAllPoints(); self.testButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, -8)
-        self.description:ClearAllPoints(); self.description:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -42)
-        self.description:SetWidth(available); self.description:SetHeight(0)
-        local top = 42 + math.max(24, UI.MeasureTextHeight(self.description, available)) + 8
+        local descriptionTop=hideTitle and 8 or 42
+        local descriptionWidth=hideTitle and math.max(1,available-104) or available
+        self.description:ClearAllPoints(); self.description:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -descriptionTop)
+        self.description:SetWidth(descriptionWidth); self.description:SetHeight(0)
+        local top = descriptionTop + math.max(24, UI.MeasureTextHeight(self.description, descriptionWidth)) + 8
         top = UI.LayoutFlow(page, self.flow, 8, top, available, 8) + 8
         self.search:SetWidth(math.max(24, self.searchGroup:GetWidth()))
         self.groupBy:SetWidth(math.max(24, self.groupBox:GetWidth() - 62))
@@ -510,8 +527,9 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     local function ItemIcon(row, itemId, x)
         local owner = row.heading or row
         row.itemId = itemId; row.iconRegion:ClearAllPoints(); row.iconRegion:SetPoint("TOPLEFT", owner, "TOPLEFT", x, -2)
-        row.itemHit.itemId, row.itemHit.iconRegion = itemId, row.iconRegion
-        row.iconRegion:SetTexture(type(GetItemIcon) == "function" and GetItemIcon(itemId) or "Interface\\Icons\\INV_Misc_QuestionMark")
+        row.itemHit.itemId, row.itemHit.iconRegion = tonumber(itemId), row.iconRegion
+        row.itemHit.itemName = type(itemId) == "string" and itemId or nil
+        row.iconRegion:SetTexture(tonumber(itemId) and type(GetItemIcon) == "function" and GetItemIcon(itemId) or "Interface\\Icons\\INV_Misc_QuestionMark")
         row.iconRegion:Show(); row.itemHit:Show()
     end
     local function PlayerColor(label, class)
@@ -581,7 +599,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
             local columnsWidth = math.min(720, width)
             UI.Table.Cell(row.labels[1], row, textX, columnsWidth - textX - 64, 24, itemMode and ItemText(player) or player.name); row.labels[1]:Show()
             PlayerColor(row.labels[1], itemMode and "" or player.class)
-            UI.Table.Cell(row.labels[2], row, columnsWidth - 48, 40, 24, tostring(player.csr)); row.labels[2]:Show()
+            UI.Table.Cell(row.labels[2], row, columnsWidth - 48, 40, 24, tostring(player.csr) .. (player.provisional and " *" or "")); row.labels[2]:Show()
             row.labels[2]:SetTextColor(1, 1, 1)
             if itemMode then
                 row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row, "TOPLEFT", 20, 0)
@@ -641,16 +659,16 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                 if node.player then
                     UI.Table.Cell(row.name, row.heading, textX, nameWidth - textX - 8, 24, node.player.name)
                     UI.Table.Cell(row.label, row.heading, nameWidth + 32, itemWidth - 40, 24, ItemText(node.player))
-                    UI.Table.Cell(row.csr, row.heading, columnsWidth - csrWidth, csrWidth - 8, 24, tostring(node.player.csr))
+                    UI.Table.Cell(row.csr, row.heading, columnsWidth - csrWidth, csrWidth - 8, 24, tostring(node.player.csr) .. (node.player.provisional and " *" or ""))
                     ItemIcon(row, node.player.itemId, nameWidth + 8)
                     row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row.heading, "TOPLEFT", nameWidth, 0)
                     row.itemHit:SetWidth(itemWidth); row.itemHit:SetHeight(24)
                 else
                     local itemMode = self.groupMode == "item"
                     UI.Table.Cell(row.name, row.heading, textX, nameWidth - textX - 8, 24,
-                        itemMode and UI.GetItemLabel(node.itemId) or node.name)
+                        itemMode and ItemLabel(node.itemId, node.itemName) or node.name)
                     UI.Table.Cell(row.label, row.heading, nameWidth + 8, itemWidth - 16, 24, tostring(table.getn(node.children)))
-                    UI.Table.Cell(row.csr, row.heading, columnsWidth - csrWidth, csrWidth - 8, 24, tostring(node.csr))
+                    UI.Table.Cell(row.csr, row.heading, columnsWidth - csrWidth, csrWidth - 8, 24, tostring(node.csr) .. (node.provisional and " *" or ""))
                     if itemMode then
                         row.itemHit:ClearAllPoints(); row.itemHit:SetPoint("TOPLEFT", row.heading, "TOPLEFT", 20, 0)
                         row.itemHit:SetWidth(math.max(1, nameWidth - 20)); row.itemHit:SetHeight(24)
@@ -686,13 +704,15 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     end
     function controller:Refresh()
         if not host:IsShown() then return end
-        self.description:SetText(self.descriptionText .. (self.actionError and ("\n|cffff5555" .. tostring(self.actionError) .. "|r") or ""))
         if self.testMode then
             local state = self.testLab.state
             Raider.Services.CSR.BuildSummary(state.entries, nil, state.now, self.summary, nil, nil, self.search:GetText(), self.showArchived)
         else
-            Raider.Services.CSR.BuildSummary(getEntries(), nil, time(), self.summary, getRosterData(), self.selectedRaids, self.search:GetText(), self.showArchived)
+            local service = Raider.Services.RaidCSR or Raider.Services.CSR
+            service.BuildSummary(getEntries(), nil, time(), self.summary, getRosterData(), self.selectedRaids, self.search:GetText(), self.showArchived)
         end
+        self.description:SetText(self.descriptionText .. (self.summary.provisional and "\n* Provisional: unresolved raid changes may affect these points." or "")
+            .. (self.actionError and ("\n|cffff5555" .. tostring(self.actionError) .. "|r") or ""))
         self:BuildNodes(); self:RefreshLayout()
     end
     controller.scroll:SetScript("OnVerticalScroll", function() this:SetVerticalScroll(arg1 or 0); controller:Render() end)

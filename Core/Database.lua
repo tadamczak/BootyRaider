@@ -3,6 +3,20 @@ local Raider = BootyRaider
 Raider.Database = Raider.Database or {}
 local Database = Raider.Database
 
+local function SameValue(left, right)
+    if type(left) ~= type(right) then return false end
+    if type(left) ~= "table" then return left == right end
+    for key, value in pairs(left) do if not SameValue(value, right[key]) then return false end end
+    for key in pairs(right) do if left[key] == nil then return false end end
+    return true
+end
+
+local function CommitAudit(record, kind, changes, detail)
+    local audit = Raider.Services and Raider.Services.RaidAudit
+    if not audit then return true end -- Isolated legacy service tests do not compose the product.
+    return audit.Commit(record, kind, changes, detail)
+end
+
 -- Read the previous durable spellings only at the owner initialization boundary.
 -- A canonical value, including false, always wins over an older preference.
 local legacyPreferenceKeys = {useBootyRaidTab = "useMOSRaidTab", useBootyRaidLogo = "useMOSRaidLogo"}
@@ -70,6 +84,17 @@ local function EnsureNativeRaidGroupSettings()
     end
 end
 
+local function EnsureRaidGroupDefaults()
+    -- Both presentations start from the stock layout, but own their values.
+    for _,field in ipairs(nativeRaidGroupFields) do
+        local key,value="raidGroup"..field[1],field[2]
+        if BootyRaiderDB[key]==nil then
+            if type(value)=="table" then value={value[1],value[2],value[3]} end
+            BootyRaiderDB[key]=value
+        end
+    end
+end
+
 local borderPrefixes = {"raidGroup", "raidList"}
 local function BorderSize(value)
     value = tonumber(value)
@@ -116,7 +141,14 @@ end
 
 local function InitializeDefaults(store)
     BootyRaiderDB = store
+    if store.raidJournalDataVersion ~= 1 then
+        -- These pre-journal raid/CSR records are disposable test data by request.
+        -- Settings/profile preferences are deliberately outside this reset.
+        store.raidAttendance, store.raidStatistics, store.softReserveHistory, store.raidJournal = nil, nil, nil, nil
+        store.raidJournalDataVersion = 1
+    end
     MigratePreferenceNames(store)
+    if store.raidSyncEnabled==nil then store.raidSyncEnabled=true end
     FreezeLegacyLootRules(store)
     if Raider.Services and Raider.Services.LootMessages then Raider.Services.LootMessages.EnsureDefaults(BootyRaiderDB) end
     if (tonumber(BootyRaiderDB.groupLayoutVersion) or 0) < 2 then
@@ -130,7 +162,8 @@ local function InitializeDefaults(store)
         BootyRaiderDB.groupLayoutVersion = 2
     end
     if (tonumber(BootyRaiderDB.groupLayoutVersion) or 0) < 3 then
-        BootyRaiderDB.raidGroupShowBorder = false; BootyRaiderDB.nativeRaidGroupShowBorder = false
+        if BootyRaiderDB.raidGroupShowBorder~=nil then BootyRaiderDB.raidGroupShowBorder = false end
+        BootyRaiderDB.nativeRaidGroupShowBorder = false
         BootyRaiderDB.groupLayoutVersion = 3
     end
     if (tonumber(BootyRaiderDB.groupLayoutVersion) or 0) < 4 then
@@ -144,6 +177,7 @@ local function InitializeDefaults(store)
         if type(color) ~= "table" or color[1] == 0.48 and color[2] == 0.38 and color[3] == 0.20 then BootyRaiderDB.nativeRaidGroupBorderColor = {1,1,1} end
         BootyRaiderDB.groupLayoutVersion = 4
     end
+    EnsureRaidGroupDefaults()
     for _, prefix in ipairs(borderPrefixes) do
         if BootyRaiderDB[prefix .. "ShowHoverBorder"] == nil then BootyRaiderDB[prefix .. "ShowHoverBorder"] = false end
         BootyRaiderDB[prefix .. "HoverBorderSize"] = BorderSize(BootyRaiderDB[prefix .. "HoverBorderSize"])
@@ -163,6 +197,13 @@ local function InitializeDefaults(store)
     if BootyRaiderDB.raidClassColors == nil then BootyRaiderDB.raidClassColors = true end
     if BootyRaiderDB.csrShowClassIcon == nil then BootyRaiderDB.csrShowClassIcon = true end
     if BootyRaiderDB.csrUseClassColors == nil then BootyRaiderDB.csrUseClassColors = true end
+    if BootyRaiderDB.csrHideSectionHeader == nil then BootyRaiderDB.csrHideSectionHeader = false end
+    if BootyRaiderDB.raidStatsHideSectionHeader == nil then BootyRaiderDB.raidStatsHideSectionHeader = false end
+    for _,key in ipairs({"raidStatsListShowId","raidStatsListShowTime","raidStatsSingleUseClassColors",
+        "raidStatsSingleShowAttendance","raidStatsMultiUseClassColors","raidStatsMultiShowAttendance",
+        "raidStatsMultiShowSR","raidStatsMultiShowLoot"}) do
+        if BootyRaiderDB[key]==nil then BootyRaiderDB[key]=true end
+    end
     BootyRaiderDB.raidGroupOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidGroupOddLightness) or 5))
     BootyRaiderDB.raidListOddLightness = math.max(0,math.min(100,tonumber(BootyRaiderDB.raidListOddLightness) or 5))
     if BootyRaiderDB.raidHideSectionHeader == nil then BootyRaiderDB.raidHideSectionHeader = false end
@@ -170,7 +211,7 @@ local function InitializeDefaults(store)
     if BootyRaiderDB.useBootyRaidLogo == nil then BootyRaiderDB.useBootyRaidLogo = true end
     if BootyRaiderDB.nativeRaidButtonStyle ~= "booty" then BootyRaiderDB.nativeRaidButtonStyle = "game" end
     EnsureNativeRaidGroupSettings()
-    if BootyRaiderDB.raidLiveTrackingEnabled == nil then BootyRaiderDB.raidLiveTrackingEnabled = false end
+    if BootyRaiderDB.raidLiveTrackingEnabled == nil then BootyRaiderDB.raidLiveTrackingEnabled = true end
     local raidGroupColumns = tonumber(BootyRaiderDB.raidGroupColumns) or 2
     BootyRaiderDB.raidGroupColumns = math.max(1, math.min(4, math.floor(raidGroupColumns)))
     if BootyRaiderDB.raidGroupShowClass == nil then BootyRaiderDB.raidGroupShowClass = true end
@@ -312,7 +353,13 @@ function Database.SaveLootRules(rules)
     Database.Ensure()
     local saved = Database.CopyLootRules(rules)
     local attendance = BootyRaiderDB.raidAttendance
-    if attendance then attendance.lootRules = saved else BootyRaiderDB.lootRulesByRank = saved end
+    if attendance then
+        if SameValue(attendance.lootRules, saved) then return true end
+        local ok, reason = CommitAudit(attendance, "raid.rules", {{key="raid:loot-rules",value=saved}}, {subject=attendance.snapshotId})
+        if not ok then return false, reason end
+        attendance.lootRules = saved
+    else BootyRaiderDB.lootRulesByRank = saved end
+    return true
 end
 
 local defaultHighlyContestedItems = {
@@ -393,6 +440,8 @@ function Database.DeleteSoftReserveSnapshot(snapshotId)
     Database.Ensure()
     local history = BootyRaiderDB.softReserveHistory
     if not snapshotId or not history or type(history.order) ~= "table" or type(history.raids) ~= "table" or not history.raids[snapshotId] then return false end
+    local ok, reason = CommitAudit(history.raids[snapshotId], "raid.snapshot.delete", {{key="saved:snapshot",deleted=true}}, {subject=snapshotId})
+    if not ok then return false, reason end
     history.raids[snapshotId] = nil
     local index
     for index = table.getn(history.order), 1, -1 do if history.order[index] == snapshotId then table.remove(history.order, index) end end
@@ -436,7 +485,19 @@ function Database.GetRaidStatistics()
     local index, defaults = nil, BootyRaiderDB.lootRulesByRank
     for index = 1, table.getn(history.order) do
         local entry = history.raids[history.order[index]]
-        if entry then FreezeLootRules(entry, defaults); result[table.getn(result) + 1] = entry end
+        if entry then
+            local lifecycle,saved
+            if entry.syncRaidId and BootyRaiderDB.raidJournal and BootyRaiderDB.raidJournal.raids[entry.syncRaidId] then
+                local records=BootyRaiderDB.raidJournal.raids[entry.syncRaidId].records
+                local record,stored=records["raid:lifecycle"],records["saved:statistic"]
+                lifecycle=record and not record.deleted and not record.pendingCheckpoint and record.value or false
+                saved=stored and not stored.deleted and not stored.pendingCheckpoint and stored.value==true or false
+                entry.syncLifecycle,entry.syncSaved=lifecycle,saved
+            end
+            if Raider.Services.CSR.IsSavedAndEnded(entry,lifecycle,saved) then
+                FreezeLootRules(entry, defaults);result[table.getn(result)+1]=entry
+            end
+        end
     end
     return result
 end
@@ -473,7 +534,12 @@ end
 function Database.DeleteRaidStatistic(raidId)
     local allowed, reason = Database.CanManageHistory()
     if not allowed then return false, reason end
-    return RemoveRaidStatistic(raidId)
+    Database.Ensure()
+    local canonical, entry = FindSavedRaid(BootyRaiderDB.raidStatistics, raidId)
+    if not entry then return false end
+    local ok, failure = CommitAudit(entry, "raid.statistic.delete", {{key="saved:statistic",deleted=true}}, {subject=canonical})
+    if not ok then return false, failure end
+    return RemoveRaidStatistic(canonical)
 end
 
 -- This operation is reserved for the session controller after it validates the
@@ -489,23 +555,21 @@ function Database.SetCSRSourceArchived(raidId, playerName, itemId, archived, sel
     if not allowed then return false, reason end
     if type(archived) ~= "boolean" then return false, "Choose Archive or Activate." end
     if selectedRaids ~= nil and type(selectedRaids) ~= "table" then return false, "Invalid raid filter." end
-    itemId = tonumber(itemId)
-    if not itemId or itemId < 1 or itemId > 2147483647 or itemId ~= math.floor(itemId) then
-        return false, "A valid item ID is required."
-    end
+    local service = Raider.Services and Raider.Services.CSR
+    if not service then return false, "CSR history is unavailable." end
+    itemId = service.NormalizeItemReference(itemId)
+    if not itemId then return false, "A valid item ID or full item name is required." end
     Database.Ensure()
     local canonical, entry = FindSavedRaid(BootyRaiderDB.raidStatistics, raidId)
     if not entry then return false, "This saved raid no longer exists." end
-    local service = Raider.Services and Raider.Services.CSR
-    if not service then return false, "CSR history is unavailable." end
     -- The visible CSR ledger is scoped by raid-type filters, including receipt
     -- resets. Recheck the same context rather than rejecting a visible source
     -- because an award outside that selected ledger cleared the global view.
     local summary = service.BuildSummary(Database.GetRaidStatistics(), nil, time(), nil, nil, selectedRaids, nil, true)
     local wanted, source = string.lower(tostring(playerName or "")), nil
     for _, player in ipairs(summary.players) do
-        if string.lower(tostring(player.name or "")) == wanted and player.itemId == itemId then
-            for _, candidate in ipairs(player.raids) do if candidate.id == canonical then source = candidate end end
+        if string.lower(tostring(player.name or "")) == wanted then
+            for _, candidate in ipairs(player.raids) do if candidate.id == canonical and candidate.itemId == itemId then source = candidate end end
         end
     end
     if not source then return false, "This CSR source is no longer available." end
@@ -513,6 +577,10 @@ function Database.SetCSRSourceArchived(raidId, playerName, itemId, archived, sel
     if not archived and (source.status ~= "ARCHIVED" or source.expired or not source.manuallyArchived) then
         return false, "Only unexpired manually archived CSR can be activated."
     end
+    local ok, failure = CommitAudit(entry, archived and "csr.archive" or "csr.activate",
+        {{key="csr:"..wanted..":"..tostring(itemId),value={player=source.playerName or playerName,item=itemId,archived=archived}}},
+        {subject=source.playerName or playerName,item=itemId})
+    if not ok then return false, failure end
     local records = entry.csrArchived
     if archived then
         if type(records) ~= "table" then records = {}; entry.csrArchived = records end
@@ -557,6 +625,11 @@ function Database.UpdateRaidStatisticFlags(raidId, attendanceEnabled, csrEnabled
     local history = BootyRaiderDB.raidStatistics
     local entry = history and history.raids and history.raids[raidId]
     if not entry then return false end
+    attendanceEnabled, csrEnabled = attendanceEnabled and true or false, csrEnabled and true or false
+    if entry.attendanceEnabled == attendanceEnabled and entry.csrEnabled == csrEnabled then return true end
+    local ok, failure = CommitAudit(entry, "raid.flags",
+        {{key="saved:flags",value={attendanceEnabled=attendanceEnabled,csrEnabled=csrEnabled}}}, {subject=raidId})
+    if not ok then return false, failure end
     entry.attendanceEnabled = attendanceEnabled and true or false
     entry.csrEnabled = csrEnabled and true or false
     return true
@@ -582,7 +655,7 @@ end
 
 -- Metadata edits rename one saved identity. They never load a session, copy a
 -- raid, or rewrite its source timestamps, rules and contribution choices.
-function Database.UpdateRaidMetadata(raidId, metadata)
+function Database.UpdateRaidMetadata(raidId, metadata, auditChanges, auditKind)
     local allowed, reason = Database.CanManageHistory()
     if not allowed then return false, reason end
     Database.Ensure()
@@ -610,6 +683,10 @@ function Database.UpdateRaidMetadata(raidId, metadata)
             return false, "This raid ID already exists. Choose a different ID."
         end
     end
+    local sourceRecord = statistic or snapshot
+    local changed = id ~= (statisticId or snapshotId) or sourceRecord.raidName ~= metadata.raidName
+        or editDisplayName and (sourceRecord.displayName or "") ~= displayName
+    if not changed and table.getn(auditChanges or {}) == 0 then return true, statisticId or snapshotId end
     local now = time()
     local sources = {{BootyRaiderDB.softReserveHistory, snapshotId, snapshot}, {BootyRaiderDB.raidStatistics, statisticId, statistic}}
     local replacements = {}
@@ -631,8 +708,19 @@ function Database.UpdateRaidMetadata(raidId, metadata)
         for key, value in pairs(active) do activeReplacement[key] = value end
         activeReplacement.raidName = metadata.raidName
         if editDisplayName then activeReplacement.displayName = displayName ~= "" and displayName or nil end
-        if Database.onRaidAttendanceMetadataChanged then Database.onRaidAttendanceMetadataChanged(active, activeReplacement) end
     end
+    local audit = Raider.Services and Raider.Services.RaidAudit
+    if audit then
+        local record = replacements[2] or replacements[1]
+        local changes = auditChanges or {}
+        table.insert(changes, {key="raid:metadata",value=audit.Metadata(record)})
+        local ok, failure = CommitAudit(sourceRecord, auditKind or "raid.metadata", changes, {subject=id})
+        if not ok then return false, failure end
+        -- All saved representations and a loaded session retain one stable identity.
+        for index = 1, 2 do if replacements[index] then replacements[index].syncRaidId = sourceRecord.syncRaidId end end
+        if activeReplacement then activeReplacement.syncRaidId = sourceRecord.syncRaidId end
+    end
+    if activeReplacement and Database.onRaidAttendanceMetadataChanged then Database.onRaidAttendanceMetadataChanged(active, activeReplacement) end
     for index = 1, 2 do
         local source, replacement = sources[index], replacements[index]
         if replacement then
@@ -647,61 +735,71 @@ function Database.UpdateRaidMetadata(raidId, metadata)
     return true, id
 end
 
-function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnabled,raidName)
+function Database.UpdateRaidStatistic(raidId,members,attendanceEnabled,csrEnabled,raidName,lootRules)
     local allowed, reason = Database.CanManageHistory()
     if not allowed then return false, reason end
     Database.Ensure()
     local history=BootyRaiderDB.raidStatistics
     local canonical,entry=FindSavedRaid(history,raidId)
     if not entry or type(members)~="table" then return false end
+    if raidName and not IsRaidType(raidName) then return false, "Choose a valid raid type." end
+    if lootRules~=nil and type(lootRules)~="table" then return false, "Loot rules are required." end
+    local savedRules=lootRules and Database.CopyLootRules(lootRules)
+    local rulesChanged=savedRules and not SameValue(entry.lootRules,savedRules)
+    attendanceEnabled, csrEnabled = attendanceEnabled and true or false, csrEnabled and true or false
+    local changes, current, included = {}, {}, {}
+    local audit = Raider.Services and Raider.Services.RaidAudit
+    if audit and audit.PrepareSavedMemberChanges then
+        local prepared,failure = audit.PrepareSavedMemberChanges(entry,members,changes)
+        if not prepared then return false,failure end
+        members=prepared
+    end
+    for _, member in ipairs(entry.members or {}) do current[string.lower(member.name or "")] = member end
+    for _, member in ipairs(members) do
+        local key = string.lower(member.name or "")
+        if key == "" or included[key] then return false, "Saved raid members need unique names." end
+        included[key] = true
+        if not SameValue(member, current[key]) then
+            table.insert(changes, {key="saved:member:"..key,value={name=member.name,class=member.class,guildRank=member.guildRank,
+                lootRank=member.lootRank,attendance=member.attendance,srItems=member.srItems,lootItems=member.lootItems}})
+        end
+    end
+    for key in pairs(current) do if not included[key] then table.insert(changes, {key="saved:member:"..key,deleted=true}) end end
+    if entry.attendanceEnabled ~= attendanceEnabled or entry.csrEnabled ~= csrEnabled then
+        table.insert(changes, {key="saved:flags",value={attendanceEnabled=attendanceEnabled,csrEnabled=csrEnabled}})
+    end
+    if rulesChanged then table.insert(changes,{key="raid:loot-rules",value=savedRules}) end
+    if table.getn(changes) == 0 and (not raidName or raidName == entry.raidName) then return true end
     if raidName then
-        local updated, reason = Database.UpdateRaidMetadata(canonical, {id=canonical,raidName=raidName})
+        local updated, reason = Database.UpdateRaidMetadata(canonical, {id=canonical,raidName=raidName}, changes, "raid.edit")
         if not updated then return false, reason end
         entry=history.raids[canonical]
+    else
+        local ok, failure = CommitAudit(entry, "raid.edit", changes, {subject=canonical})
+        if not ok then return false, failure end
     end
     entry.members=members;entry.attendanceEnabled=attendanceEnabled and true or false;entry.csrEnabled=csrEnabled and true or false
     entry.modifiedAt=time()
+    if rulesChanged then
+        -- Publish the draft only after the complete edit commits. All local
+        -- representations of this identity use the same rules as its peers.
+        entry.lootRules=savedRules
+        local _,snapshot=FindSavedRaid(BootyRaiderDB.softReserveHistory,canonical)
+        if snapshot and snapshot.syncRaidId==entry.syncRaidId then
+            snapshot.lootRules=Database.CopyLootRules(savedRules);snapshot.modifiedAt=entry.modifiedAt
+        end
+        local active=BootyRaiderDB.raidAttendance
+        if active and entry.syncRaidId and active.syncRaidId==entry.syncRaidId then
+            active.lootRules=Database.CopyLootRules(savedRules)
+        end
+    end
     return true
 end
 
 function Database.ResetRaidGroupView()
     Database.Ensure()
-    BootyRaiderDB.raidGroupOddLightness = 5
-    BootyRaiderDB.raidGroupColumns = 2
-    BootyRaiderDB.raidGroupHideEmptyGroups = false
-    BootyRaiderDB.raidGroupAutoAdjustVertically = false
-    BootyRaiderDB.raidGroupAutoAdjustHorizontally = false
-    BootyRaiderDB.raidGroupShowClass = true
-    BootyRaiderDB.raidGroupShowLevel = true
-    BootyRaiderDB.raidGroupShowHeader = true
-    BootyRaiderDB.raidGroupShowBorder = false
-    BootyRaiderDB.raidGroupBorderSize = 1
-    BootyRaiderDB.raidGroupShowHoverBorder = false
-    BootyRaiderDB.raidGroupHoverBorderSize = 1
-    BootyRaiderDB.raidGroupHoverBorderColor = {1, 0.78, 0.2}
-    BootyRaiderDB.raidGroupHeaderTextColor = { 1, 0.82, 0 }
-    BootyRaiderDB.raidGroupHeaderBackgroundColor = { 0.025, 0.025, 0.025 }
-    BootyRaiderDB.raidGroupHeaderHoverTextColor = {1,1,1}
-    BootyRaiderDB.raidGroupHeaderTransparency = 0
-    BootyRaiderDB.raidGroupMemberTexture = "color"
-    BootyRaiderDB.raidGroupBorderTexture = "project"
-    BootyRaiderDB.raidGroupViewBackgroundTexture = "color"
-    BootyRaiderDB.raidGroupViewBackgroundColor = {0.025,0.025,0.025}
-    BootyRaiderDB.raidGroupBorderColor = { 0.48, 0.38, 0.20 }
-    BootyRaiderDB.raidGroupClassColors = true
-    BootyRaiderDB.raidGroupShowLootMaster = true
-    BootyRaiderDB.raidGroupShowRoleIcon = true
-    BootyRaiderDB.raidGroupAutoTileWidth = true
-    BootyRaiderDB.raidGroupTileWidth = 280
-    BootyRaiderDB.raidGroupTileHeight = 22
-    BootyRaiderDB.raidGroupHeaderHeight = 18
-    BootyRaiderDB.raidGroupMargin = 0
-    BootyRaiderDB.raidGroupTileTextSize = 10
-    BootyRaiderDB.raidGroupHeaderTextSize = 9
-    BootyRaiderDB.raidGroupBackgroundColor = { 0.025, 0.025, 0.025 }
-    BootyRaiderDB.raidGroupTextColor = { 1, 1, 1 }
-    BootyRaiderDB.raidGroupHoverColor = { 0.12, 0.09, 0.025 }
-    BootyRaiderDB.raidGroupPressedColor = { 0.20, 0.14, 0.03 }
+    for _,field in ipairs(nativeRaidGroupFields) do BootyRaiderDB["raidGroup"..field[1]]=nil end
+    EnsureRaidGroupDefaults()
 end
 
 function Database.ResetNativeRaidGroupView()

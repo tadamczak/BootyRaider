@@ -25,13 +25,16 @@ function RaidSessionController.Create(dependencies)
 
     function controller:CompletePendingRaidScan()
         local count, failure = session:CapturePendingRaid(PendingId, PendingName)
-        if count == nil or count <= 0 then return nil, failure or "The physical raid roster is not ready. Retry or cancel the new session." end
-        local live = dependencies.isLiveTrackingWanted()
+        if count == nil then return nil, failure or "The physical raid roster is not ready. Retry or cancel the new session." end
+        if session.CommitPendingRaid then
+            local ok,reason=session:CommitPendingRaid()
+            if ok==false then return nil,reason end
+        end
+        local live = count > 0 and dependencies.isLiveTrackingWanted()
         state.pendingRaidSessionId = nil
         state.pendingRaidName = nil
         state.raidScanReady = true
         state.raidLiveTracking = live
-        if session.CommitPendingRaid then session:CommitPendingRaid() end
         pendingState = nil
         return count
     end
@@ -58,15 +61,18 @@ function RaidSessionController.Create(dependencies)
         session:BeginDraft()
     end
 
-    function controller:StartNew(raidId, raidName)
-        if dependencies.canStartNewRaid and not dependencies.canStartNewRaid() then return false end
+    function controller:StartNew(raidId, raidName, syncEnabled)
+        if dependencies.canStartNewRaid then
+            local allowed,reason=dependencies.canStartNewRaid()
+            if not allowed then return false,reason end
+        end
         pendingState = {historical = dependencies.getHistoricalLoaded and dependencies.getHistoricalLoaded() or false}
         local index
         for index = 1, table.getn(pendingFields) do pendingState[pendingFields[index]] = state[pendingFields[index]] end
         state.pendingRaidSessionId = raidId; state.pendingRaidName = raidName
         local previousThis, previousEvent, previousArg = this, event, arg1
         local ok, reason = pcall(function()
-            if session.BeginPendingRaid then session:BeginPendingRaid() else session:ClearAttendance() end
+            if session.BeginPendingRaid then session:BeginPendingRaid(syncEnabled) else session:ClearAttendance() end
             dependencies.setHistoricalLoaded(false)
             state.raidSessionPaused = false; state.raidSessionDraft = true
             state.raidScanReady = false; state.raidLiveTracking = false
@@ -112,9 +118,10 @@ function RaidSessionController.Create(dependencies)
         return true
     end
 
-    function controller:Quit()
+    function controller:Quit(leaveOnly)
         if dependencies.cancelRaidScan then dependencies.cancelRaidScan() end
-        session:Quit()
+        local ok,reason=session:Quit(leaveOnly)
+        if ok==false then return false,reason end
         if session.CommitPendingRaid then session:CommitPendingRaid() end
         pendingState = nil
         state.pendingRaidSessionId = nil; state.pendingRaidName = nil
@@ -124,6 +131,7 @@ function RaidSessionController.Create(dependencies)
         state.raidSessionTransitionPending = false; state.raidSessionMismatchContext = nil
         state.raidPhysicalRosterReady = nil; state.raidSessionAwaitingPhysicalAcceptance = nil
         if session.ResetPhysicalRaid then session:ResetPhysicalRaid() end
+        return true
     end
 
     function controller:Continue(contextKey)
@@ -200,7 +208,9 @@ function RaidSessionController.Create(dependencies)
         state.raidSessionTransitionPending = false; state.raidSessionMismatchContext = nil
         state.raidPhysicalRosterReady = nil; state.raidSessionAwaitingPhysicalAcceptance = nil
         if session.ResetPhysicalRaid then session:ResetPhysicalRaid() end
-        dependencies.setHistoricalLoaded(false)
+        -- Keep recovered attendance accessible even when logging in solo, and
+        -- require the existing explicit refresh before replacing its roster.
+        dependencies.setHistoricalLoaded(ready and draft)
     end
     function controller:RestoreActive()
         return session:RestoreActive(RestoreState)

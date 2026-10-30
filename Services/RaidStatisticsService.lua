@@ -21,11 +21,13 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
     local now = time()
     local startedAt, endedAt = tonumber(attendance.sessionStartedAt), tonumber(attendance.endedAt)
     local entry = {
-        id = raidId, displayName = attendance.displayName, raidName = attendance.raidName or "Unknown zone", savedAt = now, members = {},
+        id = raidId, syncRaidId = attendance.syncRaidId, displayName = attendance.displayName, raidName = attendance.raidName or "Unknown zone", savedAt = now, members = {},
         startedAt = attendance.sessionStartedAt,
         endedAt = endedAt,
         createdAt = attendance.createdAt or startedAt or attendance.lastSavedAt or now,
         modifiedAt = attendance.modifiedAt or attendance.lastSavedAt or now,
+        syncLifecycle = (saveOptions.endSession or attendance.syncEnded) and "ended" or "active",
+        syncSaved = true,
         duration = startedAt and endedAt and endedAt >= startedAt and endedAt - startedAt or nil,
         statisticsEnabled = saveOptions.saveRaidStatistics ~= false,
         attendanceEnabled = saveOptions.saveAttendance ~= false,
@@ -49,13 +51,12 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
         }
         for itemIndex = 1, table.getn(member.srItemIds or {}) do
             local itemId = tonumber(member.srItemIds[itemIndex])
-            local itemName
-            if itemId and type(GetItemInfo) == "function" then itemName = GetItemInfo(itemId) end
+            local itemName = Raider.Services.ItemReference.Name(member.srItemIds[itemIndex])
             savedMember.srItems[itemIndex] = { itemId = itemId, name = itemName, count = 1 }
         end
         for lootIndex = 1, table.getn(member.loot or {}) do
             local loot = member.loot[lootIndex]
-            savedMember.lootItems[lootIndex] = { itemId = tonumber(loot.itemId), name = loot.name, count = tonumber(loot.count) or 1 }
+            savedMember.lootItems[lootIndex] = { itemId = tonumber(loot.itemId), name = loot.name, count = tonumber(loot.count) or 1, syncRecordId = loot.syncRecordId, timestamp = tonumber(loot.timestamp or loot.time) }
         end
         table.insert(entry.members, savedMember)
         includedNames[key] = true
@@ -65,16 +66,19 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
     return entry
 end
 
-local function AppendItems(target, source, raid)
+local function AppendItems(target, source, raid, receivedLoot)
     local index
     for index = 1, table.getn(source or {}) do
         local item = source[index]
         local itemId = tonumber(item.itemId)
-        if itemId then
+        if itemId or (type(item.name) == "string" and item.name ~= "") then
+            local timestamp=tonumber(item.timestamp or item.time)
             target[table.getn(target) + 1] = {
                 itemId = itemId, name = item.name, count = tonumber(item.count) or 1,
-                raidId = raid.id, savedAt = raid.savedAt,
-                context = tostring(raid.id or "-") .. " | " .. date("%Y-%m-%d", tonumber(raid.savedAt) or 0),
+                raidId = raid.id, savedAt = raid.savedAt, timestamp=timestamp,
+                context = receivedLoot and (timestamp and date("%Y-%m-%d %H:%M:%S",timestamp) or "Unknown time")
+                    or (tostring(raid.id or "-") .. " | " .. date("%Y-%m-%d", tonumber(raid.savedAt) or 0)),
+                contextColor = receivedLoot and "gold" or nil,
             }
         end
     end
@@ -109,7 +113,7 @@ function RaidStatistics.BuildSummary(entries, selectedRaids)
                 elseif selectedRaids then player.attendanceOff = true end
                 player.sr = player.sr + (tonumber(member.srCount) or 0); player.loot = player.loot + (tonumber(member.lootCount) or 0)
                 if table.getn(member.srItems or {}) > 0 then AppendItems(player.srItems, member.srItems, raid) else AppendMissingReserve(player.srItems, raid) end
-                AppendItems(player.lootItems, member.lootItems, raid)
+                AppendItems(player.lootItems, member.lootItems, raid, true)
                 if raid.attendanceEnabled ~= false then summary.participations = summary.participations + attendanceValue end
                 summary.sr = summary.sr + (tonumber(member.srCount) or 0); summary.loot = summary.loot + (tonumber(member.lootCount) or 0)
             end

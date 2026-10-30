@@ -8,9 +8,15 @@ local function CanManageHistory()
     return Raider.Services.RankPolicy.CanManageHistory()
 end
 
+local function ClearEditDraft(controller)
+    controller.editMode=false;controller.editMembers=nil;controller.editBase=nil;controller.editRules=nil
+    if controller.lootRulesDialog then controller.lootRulesDialog:Close() end
+    if controller.editDialog then controller.editDialog:Hide() end
+end
+
 local function OnRaidSelect()
     local controller = this.statisticsController
-    controller.editMode=false;controller.editMembers=nil
+    ClearEditDraft(controller)
     if controller.selectedHistoryIds[this.raidId] then controller.selectedHistoryIds[this.raidId] = nil
     else controller.selectedHistoryIds[this.raidId] = true end
     controller.summaryDirty = true
@@ -46,7 +52,10 @@ local function OnItemsClick()
     local player = this.ownerRow.player
     local items = this.itemKind == "sr" and player.srItems or player.lootItems
     local kind = this.itemKind == "sr" and "Soft Reserves" or "Loot received"
-    this.statisticsController.itemDialog:Open(kind .. " - " .. tostring(player.name or "Player"), items)
+    local dialog=this.statisticsController.itemDialog
+    if dialog:IsShown() and dialog.sourcePlayer==player.name and dialog.sourceKind==this.itemKind then dialog:Hide();return end
+    dialog.sourcePlayer=player.name;dialog.sourceKind=this.itemKind
+    dialog:Open(kind .. " - " .. tostring(player.name or "Player"), items)
 end
 
 local function OnDirectItemEnter()
@@ -115,9 +124,20 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     Raider.UI.Components.AttachTooltip(controller.fromPicker, "Choose From date", "Open the calendar."); Raider.UI.Components.AttachTooltip(controller.toPicker, "Choose To date", "Open the calendar.")
     controller.filterStatus = Raider.UI.Components.CreateHeading(page, "", 1, "gold", "raid_stats"); controller.filterStatus:SetPoint("TOPLEFT", page, "TOPLEFT", 260, -120); controller.filterStatus:SetPoint("TOPRIGHT", page, "TOPRIGHT", -72, -120); controller.filterStatus:SetJustifyH("LEFT")
     controller.headerRemove = Raider.UI.Components.CreateDeleteButton(page, nil, 22, 2); controller.headerRemove:SetPoint("TOPRIGHT", page, "TOPRIGHT", -6, -115); controller.headerRemove.statisticsController = controller; Raider.UI.Components.AttachGoldHoverBorder(controller.headerRemove, 0.35, 0.35, 0.35, 1); Raider.UI.Components.AttachTooltip(controller.headerRemove, "Remove raid", "Remove the selected raid from Raid Statistics and CSR history."); controller.headerRemove:Hide()
-    controller.headerEdit = Raider.UI.Components.CreateIconButton(page, nil, "Interface\\Icons\\INV_Misc_Note_01", 22, 2); controller.headerEdit:SetPoint("RIGHT", controller.headerRemove, "LEFT", -5, 0); controller.headerEdit.statisticsController = controller; Raider.UI.Components.AttachGoldHoverBorder(controller.headerEdit, 0.35, 0.35, 0.35, 1); Raider.UI.Components.AttachTooltip(controller.headerEdit, "Edit raid", "Edit statistics options for the selected raid."); controller.headerEdit:Hide()
-    controller.editAdd=UI.CreateButton(page,nil,"Add Entry",82,22);controller.editSave=UI.CreateButton(page,nil,"Save",62,22);controller.editCancel=UI.CreateButton(page,nil,"Cancel",68,22)
-    for _,button in ipairs({controller.editAdd,controller.editSave,controller.editCancel}) do UI.StyleActionButton(button);button:Hide() end
+    controller.headerEdit = Raider.UI.Components.CreateGoldToolbarButton(page, "fix"); controller.headerEdit:SetPoint("RIGHT", controller.headerRemove, "LEFT", -5, 0); controller.headerEdit.statisticsController = controller; Raider.UI.Components.AttachGoldHoverBorder(controller.headerEdit, 0.35, 0.35, 0.35, 1); Raider.UI.Components.AttachTooltip(controller.headerEdit, "Edit raid", "Edit statistics options for the selected raid."); controller.headerEdit:Hide()
+    controller.editToolbar=UI.CreateToolbarSurface(page,true,true);controller.editToolbar:Hide()
+    controller.editAdd=UI.CreateGoldToolbarButton(controller.editToolbar,"plus");controller.editAdd:SetText("Add Entry")
+    UI.SetClassicButtonCompact(controller.editAdd,false)
+    controller.editAdd.symbol:ClearAllPoints();controller.editAdd.symbol:SetPoint("LEFT",controller.editAdd,"LEFT",8,0)
+    controller.editLootRules=UI.CreateButton(controller.editToolbar,nil,"Loot Rules",110,26)
+    controller.editSave=UI.CreateButton(controller.editToolbar,nil,"Save",74,26)
+    controller.editCancel=UI.CreateButton(controller.editToolbar,nil,"Cancel",82,26)
+    UI.SetClassicButtonIcon(controller.editLootRules,"rules");UI.SetClassicButtonIcon(controller.editSave,"save");UI.SetClassicButtonIcon(controller.editCancel,"close")
+    controller.editActions={controller.editAdd,controller.editLootRules,controller.editCancel,controller.editSave}
+    for _,button in ipairs(controller.editActions) do
+        UI.StyleActionButton(button);UI.SetButtonLabelInsets(button,26,6)
+        button.bootyFlowWidth=math.max(74,button.label:GetStringWidth()+34);button.bootyFlowLabelPadding=34;button:Hide()
+    end
     controller.editError=UI.CreateLabel(page,nil,"OVERLAY","GameFontHighlightSmall");controller.editError:SetTextColor(1,0.35,0.30);controller.editError:SetJustifyH("RIGHT");controller.editError:Hide()
     controller.raidScroll = Raider.UI.Components.CreateScrollFrame("BootyRaiderRaidStatisticsHistoryScroll", page, "FauxScrollFrameTemplate"); controller.raidScroll:SetPoint("TOPLEFT", page, "TOPLEFT", 2, -140); controller.raidScroll:SetPoint("BOTTOMRIGHT", page, "BOTTOMLEFT", 246, 5)
     Raider.UI.Components.RegisterSkinnedScrollBar(getglobal("BootyRaiderRaidStatisticsHistoryScrollScrollBar"))
@@ -172,9 +192,28 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     Raider.Modules.RaidEdit.AttachRaidSelector(controller.editDialog, -150, -169)
     controller.editDialog.cancel = Raider.UI.Components.CreateButton(controller.editDialog, nil, "Cancel", 86, 24); controller.editDialog.cancel:SetPoint("BOTTOMLEFT", controller.editDialog, "BOTTOMLEFT", 72, 18)
     controller.editDialog.save = Raider.UI.Components.CreateButton(controller.editDialog, nil, "Save", 86, 24); controller.editDialog.save:SetPoint("BOTTOMRIGHT", controller.editDialog, "BOTTOMRIGHT", -72, 18)
+    local function LayoutEditDialog()
+        local dialog=controller.editDialog
+        local width=dialog:GetWidth()-16
+        local messageHeight=math.max(28,UI.MeasureTextHeight(dialog.message,width))
+        dialog.message:ClearAllPoints();dialog.message:SetPoint("TOPLEFT",dialog,"TOPLEFT",8,-36)
+        dialog.message:SetWidth(width);dialog.message:SetHeight(messageHeight)
+        local y=36+messageHeight+10
+        dialog.attendance:ClearAllPoints();dialog.attendance:SetPoint("TOPLEFT",dialog,"TOPLEFT",8,-y)
+        dialog.csr:ClearAllPoints();dialog.csr:SetPoint("TOPLEFT",dialog,"TOPLEFT",8,-y-30)
+        dialog.raidLabel:ClearAllPoints();dialog.raidLabel:SetPoint("TOPLEFT",dialog,"TOPLEFT",8,-y-62)
+        dialog.raidSelect:ClearAllPoints();dialog.raidSelect:SetPoint("TOPLEFT",dialog,"TOPLEFT",8,-y-81)
+        dialog.raidSelect:SetWidth(math.min(220,width))
+        dialog:SetHeight(y+81+dialog.raidSelect:GetHeight()+44)
+    end
     controller.editDialog.cancel:SetScript("OnClick", function() controller.editDialog:Hide() end)
     controller.editDialog.save:SetScript("OnClick", function()
-        if not CanManageHistory() then controller.editDialog:Hide(); controller.editMode=false; controller.editMembers=nil; controller:Refresh(); return end
+        if not CanManageHistory() then ClearEditDraft(controller); controller:Refresh(); return end
+        local audit=Raider.Services.RaidAudit
+        if audit and audit.CheckEditBase then
+            local current,reason=audit.CheckEditBase(controller.editBase)
+            if not current then controller.editDialog.message:SetText(reason);LayoutEditDialog();return end
+        end
         local raidId = controller.editDialog.raidId
         local attendanceEnabled = controller.editDialog.attendance:GetChecked() and true or false
         local csrEnabled = controller.editDialog.csr:GetChecked() and true or false
@@ -185,14 +224,14 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
                 member.attendanceText = nil; member.srItemText = nil
                 members[memberIndex] = member
             end
-            local saved, reason = controller.updateEntry(raidId,members,attendanceEnabled,csrEnabled,controller.editDialog.selectedRaidName)
+            local saved, reason = controller.updateEntry(raidId,members,attendanceEnabled,csrEnabled,controller.editDialog.selectedRaidName,controller.editRules)
             if saved then
-                controller.editDialog:Hide();controller.editMode=false;controller.editMembers=nil;controller:Refresh()
+                ClearEditDraft(controller);controller:Refresh()
                 if StaticPopupDialogs and StaticPopupDialogs["BOOTY_RAIDER_ATTENDANCE_RELOAD"] then
                     local popup = UI.ShowOpaquePopup("BOOTY_RAIDER_ATTENDANCE_RELOAD")
                     if popup and UI.WindowStack then UI.WindowStack.Raise(popup, page) end
                 end
-            else controller.editDialog.message:SetText(reason or "Unable to save this raid.") end
+            else controller.editDialog.message:SetText(reason or "Unable to save this raid.");LayoutEditDialog() end
         end
     end)
     local function OnEditRaid()
@@ -203,6 +242,9 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         for entryIndex = 1, table.getn(entries) do if entries[entryIndex].id == raidId then entry = entries[entryIndex]; break end end
         if not entry then return end
         controller.editingEntry=entry;controller.editingRaidId=raidId;controller.editMembers={}
+        controller.editRules=Raider.Database.CopyLootRules(entry.lootRules or Raider.Database.GetDefaultLootRules())
+        local audit=Raider.Services.RaidAudit
+        controller.editBase=audit and audit.CaptureEditBase and audit.CaptureEditBase(entry) or nil
         for entryIndex=1,table.getn(entry.members or {}) do controller.editMembers[entryIndex]=CopyEditableMember(entry.members[entryIndex]) end
         controller.editMode=true;controller.editError:Hide();controller:Render()
     end
@@ -215,26 +257,58 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         controller.removeDialog:Show()
     end
     controller.headerEdit:SetScript("OnClick", OnEditRaid); controller.headerRemove:SetScript("OnClick", OnRemoveRaid)
-    controller.editCancel:SetScript("OnClick",function() controller.editMode=false;controller.editMembers=nil;controller.editError:Hide();controller:Render() end)
+    local function EditFailure(message)
+        controller.editError:SetText(message);controller.editError:Show();controller:Render()
+    end
+    controller.editCancel:SetScript("OnClick",function() ClearEditDraft(controller);controller.editError:Hide();controller:Render() end)
+    controller.editLootRules:SetScript("OnClick",function()
+        if not controller.editMode or not CanManageHistory() then return end
+        if not controller.lootRulesDialog then
+            controller.lootRulesDialog=Raider.Modules.RaidManagement.CreateLootRulesDialog({
+                name="BootyRaiderSavedLootRulesDialog",page=page,
+                getRules=function() return controller.editRules end,
+                saveRules=function(rules)
+                    if not controller.editMode or not CanManageHistory() then return false,"This raid is no longer being edited." end
+                    local audit=Raider.Services.RaidAudit
+                    if audit and audit.CheckEditBase then
+                        local current,reason=audit.CheckEditBase(controller.editBase)
+                        if not current then return false,reason end
+                    end
+                    controller.editRules=Raider.Database.CopyLootRules(rules);return true
+                end,
+                refresh=function() controller:Render() end,
+                printMessage=function() end,
+            })
+            controller.lootRulesDialog.title:SetText("Loot Rules - saved raid")
+            controller.lootRulesDialog.save:SetText("Apply")
+            UI.AttachTooltip(controller.lootRulesDialog.save,"Apply to draft","Apply these rules to the edited raid. Save raid changes to keep them.")
+        end
+        controller.lootRulesDialog:Open()
+    end)
     controller.editAdd:SetScript("OnClick",function()
         if not CanManageHistory() then return end
         local member={name="",class="",guildRank="Guest",lootRank="Guest",attendance=1,attendanceText="1",srItemText="",srCount=0,lootCount=0,srItems={},lootItems={}}
         table.insert(controller.editMembers,member);controller.scroll.offset=math.max(0,table.getn(controller.editMembers)-table.getn(controller.rows));controller:Render()
     end)
     controller.editSave:SetScript("OnClick",function()
-        if not CanManageHistory() then controller.editMode=false;controller.editMembers=nil;controller:Refresh();return end
+        if not CanManageHistory() then ClearEditDraft(controller);controller:Refresh();return end
+        local audit=Raider.Services.RaidAudit
+        if audit and audit.CheckEditBase then
+            local current=audit.CheckEditBase(controller.editBase)
+            if not current then EditFailure("Raid changed. Close and reopen the editor.");return end
+        end
         local rowIndex
         for rowIndex=1,table.getn(controller.rows) do UpdateEditMember(controller.rows[rowIndex]) end
         for rowIndex=1,table.getn(controller.editMembers or {}) do
             local member=controller.editMembers[rowIndex];local name=string.gsub(tostring(member.name or ""),"^%s+","");name=string.gsub(name,"%s+$","")
             local attendance=tonumber(member.attendanceText or member.attendance);local itemText=string.gsub(tostring(member.srItemText or ""),"%s","");local itemId=itemText~="" and tonumber(itemText) or nil
-            if name=="" then controller.editError:SetText("Player name is required.");controller.editError:Show();return end
-            if not attendance or attendance<0 then controller.editError:SetText("Attendance must be a non-negative number.");controller.editError:Show();return end
-            if itemText~="" and not itemId then controller.editError:SetText("SR must contain a numeric Item ID.");controller.editError:Show();return end
+            if name=="" then EditFailure("Player name is required.");return end
+            if not attendance or attendance<0 then EditFailure("Attendance must be a non-negative number.");return end
+            if itemText~="" and not itemId then EditFailure("SR must contain a numeric Item ID.");return end
             member.name=name;member.attendance=attendance;member.attendanceText=tostring(attendance);member.srItemText=itemId and tostring(itemId) or "";member.srItems=itemId and {{itemId=itemId,count=1}} or {};member.srCount=itemId and 1 or 0
         end
         controller.editError:Hide();controller.editDialog.raidId=controller.editingRaidId;controller.editDialog.attendance:SetChecked(controller.editingEntry.attendanceEnabled~=false and 1 or nil);controller.editDialog.csr:SetChecked(controller.editingEntry.csrEnabled~=false and 1 or nil)
-        controller.editDialog:SetRaidType(controller.editingEntry.raidName);controller.editDialog.message:SetText("Save the edited attendance and Soft Reserve values for this raid?");controller.editDialog:Show()
+        controller.editDialog:SetRaidType(controller.editingEntry.raidName);controller.editDialog.message:SetText("Save changes to this raid, its attendance, Soft Reserves and loot rules?");LayoutEditDialog();controller.editDialog:Show()
     end)
     UI.Window.StyleProjectDialog(controller.removeDialog); UI.Window.StyleProjectDialog(controller.editDialog)
     controller.playerHeader = Raider.UI.Components.Table.CreateHeader(page, nil, "Player", 264, -150, 120, nil, false)
@@ -306,7 +380,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.editDialog.attendance:ClearAllPoints();controller.editDialog.attendance:SetPoint("TOPLEFT",controller.editDialog,"TOPLEFT",8,-84)
     controller.editDialog.csr:ClearAllPoints();controller.editDialog.csr:SetPoint("TOPLEFT",controller.editDialog,"TOPLEFT",8,-114)
     UI.BindCheckboxLabel(controller.editDialog.attendance,function() end);UI.BindCheckboxLabel(controller.editDialog.csr,function() end)
-    controller.editDialog:SetHeight(178)
+    LayoutEditDialog()
     controller.datePicker:SetHeight(236)
     controller.datePicker.clear=UI.CreateButton(controller.datePicker,nil,"Clear date",100,26)
     UI.StyleActionButton(controller.datePicker.clear)
@@ -323,17 +397,21 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     controller.emptyPlayers=UI.CreateLabel(page,nil,"OVERLAY","GameFontDisableSmall");controller.emptyPlayers:SetText("No matching players.")
     UI.AttachLabelTooltip(page,controller.filterStatus,"Selected raids",function() return controller.filterStatus:GetText() end)
     controller.headers={controller.playerHeader,controller.attendanceHeader,controller.srHeader,controller.lootHeader}
+    controller.editHeaders={controller.playerHeader,controller.attendanceHeader,controller.srHeader}
+    controller.visibleHeaders={}
     local function LayoutContent(width,height,self)
         local available=math.max(80,width-16)
+        local filterTop=(BootyRaiderDB or {}).raidStatsHideSectionHeader and 8 or 38
         self.title:ClearAllPoints();self.title:SetPoint("TOPLEFT",page,"TOPLEFT",8,-8);UI.FitButtonLabel(self.title,available)
-        self.filterPanel:ClearAllPoints();self.filterPanel:SetPoint("TOPLEFT",page,"TOPLEFT",0,-38);self.filterPanel:SetWidth(width)
+        if filterTop==8 then self.title:Hide() else self.title:Show() end
+        self.filterPanel:ClearAllPoints();self.filterPanel:SetPoint("TOPLEFT",page,"TOPLEFT",0,-filterTop);self.filterPanel:SetWidth(width)
         local filterBottom=UI.LayoutFlow(self.filterPanel,self.flow,4,8,available,6)+8
         self.filterPanel:SetHeight(filterBottom)
         self.search:SetWidth(math.max(24,self.searchGroup:GetWidth()))
         for _,key in ipairs({"from","to"}) do
             self[key.."Date"]:SetWidth(math.max(24,self[key.."Group"]:GetWidth()-(key=="from" and 54 or 38)))
         end
-        local top=38+filterBottom+8
+        local top=filterTop+filterBottom+8
         local stacked=available<650
         local historyWidth=stacked and available or math.min(270,available*0.34)
         local remaining=math.max(96,height-top-8)
@@ -350,40 +428,60 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
             for index=1,3 do self.historyHeaders[index]:Hide() end
         else self.listTitle:Show();for index=1,3 do self.historyHeaders[index]:Show() end end
         local statusHeight=self.showResultStatus and 22 or 0
-        local editReserve=self.editMode and math.min(playerWidth*0.58,226) or 54
+        local editReserve=self.editMode and 0 or 54
         self.filterStatus:ClearAllPoints();self.filterStatus:SetPoint("TOPLEFT",page,"TOPLEFT",playerX,-playerTop);self.filterStatus:SetWidth(math.max(1,playerWidth-editReserve))
         local font,_,flags=self.filterStatus:GetFont();self.filterStatus:SetFont(font,12,flags);self.filterStatus:SetHeight(18)
         if self.filterStatus.SetWordWrap then self.filterStatus:SetWordWrap(false) end
         self.headerRemove:ClearAllPoints();self.headerRemove:SetPoint("TOPLEFT",page,"TOPLEFT",playerX+playerWidth-18,-playerTop);self.headerRemove:SetWidth(16);self.headerRemove:SetHeight(16)
         self.headerEdit:SetWidth(18);self.headerEdit:SetHeight(18)
-        local editScale=self.editMode and math.min(1,math.max(1,playerWidth-8)/220) or 1
-        UI.SizeClassicButton(self.editSave,62*editScale,22,editScale);UI.SizeClassicButton(self.editCancel,68*editScale,22,editScale);UI.SizeClassicButton(self.editAdd,82*editScale,22,editScale)
-        self.editSave:ClearAllPoints();self.editSave:SetPoint("TOPRIGHT",page,"TOPLEFT",playerX+playerWidth,-playerTop)
-        self.editCancel:ClearAllPoints();self.editCancel:SetPoint("RIGHT",self.editSave,"LEFT",-4,0)
-        self.editAdd:ClearAllPoints();self.editAdd:SetPoint("RIGHT",self.editCancel,"LEFT",-4,0)
-        self.editError:ClearAllPoints();self.editError:SetPoint("TOPRIGHT",page,"TOPLEFT",playerX+playerWidth,-playerTop-24);self.editError:SetWidth(playerWidth)
+        local rowsTop=playerTop+statusHeight
+        if self.editMode then
+            self.editToolbar:ClearAllPoints();self.editToolbar:SetPoint("TOPLEFT",page,"TOPLEFT",playerX,-rowsTop)
+            self.editToolbar:SetWidth(playerWidth)
+            for _,button in ipairs(self.editActions) do UI.SizeClassicButton(button,button.bootyFlowWidth,26,1) end
+            local toolbarHeight=UI.LayoutFlow(self.editToolbar,self.editActions,6,6,math.max(1,playerWidth-12),6)+6
+            self.editToolbar:SetHeight(toolbarHeight);rowsTop=rowsTop+toolbarHeight+6
+            if self.editError:IsShown() then
+                local errorHeight=math.max(16,UI.MeasureTextHeight(self.editError,playerWidth))
+                self.editError:ClearAllPoints();self.editError:SetPoint("TOPLEFT",page,"TOPLEFT",playerX,-rowsTop)
+                self.editError:SetWidth(playerWidth);self.editError:SetHeight(errorHeight);rowsTop=rowsTop+errorHeight+4
+            end
+        end
         self.playerRect=self.playerRect or {}
-        self.playerRect.x=playerX;self.playerRect.y=playerTop+statusHeight+22;self.playerRect.width=playerWidth;self.playerRect.height=math.max(48,height-playerTop-statusHeight-30)
+        self.playerRect.x=playerX;self.playerRect.y=rowsTop+22;self.playerRect.width=playerWidth;self.playerRect.height=math.max(48,height-rowsTop-30)
         return self.playerRect.y+self.playerRect.height+8
     end
     function controller:Layout() UI.LayoutResponsiveCanvas(page,LayoutContent,self) end
     function controller:LayoutColumns(width)
-        local nameWidth=math.floor(width*0.30);local attendanceWidth=math.floor(width*0.23);local lootWidth=self.editMode and 0 or 32
-        local srX=nameWidth+attendanceWidth;local srWidth=math.max(24,width-srX-lootWidth)
+        local settings=BootyRaiderDB or {}
+        local single=self.singleRaid~=nil
+        self.showAttendance=self.editMode or (single and settings.raidStatsSingleShowAttendance~=false) or (not single and settings.raidStatsMultiShowAttendance~=false)
+        self.showSR=self.editMode or single or settings.raidStatsMultiShowSR~=false
+        self.showLoot=not self.editMode and (single or settings.raidStatsMultiShowLoot~=false)
+        self.useClassColors=(single and settings.raidStatsSingleUseClassColors~=false) or (not single and settings.raidStatsMultiUseClassColors~=false)
+        local lootWidth=self.showLoot and 32 or 0
+        local weight=30+(self.showAttendance and 23 or 0)+(self.showSR and 47 or 0)
+        local nameWidth=math.floor((width-lootWidth)*30/weight)
+        local attendanceWidth=self.showAttendance and math.floor((width-lootWidth)*23/weight) or 0
+        local srX=nameWidth+attendanceWidth;local srWidth=self.showSR and math.max(24,width-srX-lootWidth) or 0
+        if not self.showSR then nameWidth=width-attendanceWidth-lootWidth;srX=nameWidth+attendanceWidth end
         self.directItemLabel=srWidth>=90
         local starts={0,nameWidth,srX,width-lootWidth};local widths={nameWidth,attendanceWidth,srWidth,lootWidth}
-        for i=1,4 do local header=self.headers[i];header:ClearAllPoints();header:SetPoint("TOPLEFT",page,"TOPLEFT",self.playerRect.x+starts[i],-self.playerRect.y+22);header:SetWidth(widths[i]);header:SetHeight(20) end
-        if self.editMode then self.lootHeader:Hide() else self.lootHeader:Show() end
+        for index=table.getn(self.visibleHeaders),1,-1 do self.visibleHeaders[index]=nil end
+        for i=1,4 do
+            local header=self.headers[i];header:ClearAllPoints();header:SetPoint("TOPLEFT",page,"TOPLEFT",self.playerRect.x+starts[i],-self.playerRect.y+22);header:SetWidth(math.max(1,widths[i]));header:SetHeight(20)
+            if widths[i]>0 then header:Show();table.insert(self.visibleHeaders,header) else header:Hide() end
+        end
         self.attendanceHeader.label:SetText(width<420 and "Raids" or "Attendance")
-        UI.Table.FitHeaders(self.headers,12)
+        UI.Table.FitHeaders(self.visibleHeaders,12)
         for _,row in ipairs(self.rows) do
-            UI.Table.Cell(row.name,row,4,nameWidth-6,23);UI.Table.Cell(row.attendance,row,nameWidth,attendanceWidth-4,23)
+            UI.Table.Cell(row.name,row,4,nameWidth-6,23);UI.Table.Cell(row.attendance,row,nameWidth,math.max(1,attendanceWidth-4),23)
             row.nameEdit:ClearAllPoints();row.nameEdit:SetPoint("LEFT",row,"LEFT",2,0);row.nameEdit:SetWidth(math.max(20,nameWidth-4))
             row.attendanceEdit:ClearAllPoints();row.attendanceEdit:SetPoint("LEFT",row,"LEFT",nameWidth,0);row.attendanceEdit:SetWidth(math.max(20,attendanceWidth-4))
             row.srEdit:ClearAllPoints();row.srEdit:SetPoint("LEFT",row,"LEFT",srX,0);row.srEdit:SetWidth(math.max(20,srWidth-4))
             row.sr:ClearAllPoints();row.sr:SetPoint("LEFT",row,"LEFT",srX,0)
-            row.srDirect:ClearAllPoints();row.srDirect:SetPoint("LEFT",row,"LEFT",srX,0);row.srDirect:SetWidth(srWidth-4)
-            UI.Table.Cell(row.srMissing,row,srX,srWidth-4,23)
+            row.srDirect:ClearAllPoints();row.srDirect:SetPoint("LEFT",row,"LEFT",srX,0);row.srDirect:SetWidth(math.max(1,srWidth-4))
+            UI.Table.Cell(row.srMissing,row,srX,math.max(1,srWidth-4),23)
             row.loot:ClearAllPoints();row.loot:SetPoint("LEFT",row,"LEFT",width-lootWidth+4,0)
         end
     end
@@ -425,7 +523,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     function controller:SetFilteredSelection(selected)
         if self.modelDirty then self:RebuildModel() end
         if table.getn(self.filteredEntries) == 0 then self.selectAll:SetChecked(false);return end
-        self.editMode=false;self.editMembers=nil
+        ClearEditDraft(self)
         for index=1,table.getn(self.filteredEntries) do
             self.selectedHistoryIds[self.filteredEntries[index].id]=selected and true or nil
         end
@@ -434,7 +532,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     function controller:RenderHeader()
         local canManage = CanManageHistory()
         if not canManage then
-            self.editMode=false;self.editMembers=nil;self.editingEntry=nil;self.editingRaidId=nil
+            ClearEditDraft(self);self.editingEntry=nil;self.editingRaidId=nil
             self.editDialog:Hide();self.removeDialog:Hide()
         end
         local filterError, selectedCount, singleRaid = self.filterError, self.selectedCount, self.singleRaid
@@ -444,8 +542,13 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         elseif selectedCount > 1 then self.filterStatus:SetText("|cffffd147Selected:|r |cffffffff" .. selectedCount .. "|r");self.filterStatus:Show();self.headerEdit:Hide();self.headerRemove:Hide()
         else self.filterStatus:SetText("");self.filterStatus:Hide(); self.headerEdit:Hide(); self.headerRemove:Hide() end
         if not canManage then self.headerEdit:Hide(); self.headerRemove:Hide() end
-        if self.editMode then self.headerEdit:Hide();self.headerRemove:Hide();self.editAdd:Show();self.editSave:Show();self.editCancel:Show()
-        else self.editAdd:Hide();self.editSave:Hide();self.editCancel:Hide();self.editError:Hide() end
+        if self.editMode then
+            self.headerEdit:Hide();self.headerRemove:Hide();self.editToolbar:Show()
+            for _,button in ipairs(self.editActions) do button:Show() end
+        else
+            self.editToolbar:Hide();self.editError:Hide()
+            for _,button in ipairs(self.editActions) do button:Hide() end
+        end
     end
     function controller:BindHistory()
         local entries = self.filteredEntries
@@ -454,12 +557,18 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         if self.historyCollapsed then
             self.raidScroll:Hide();UI.SetScrollBarVisible(getglobal("BootyRaiderRaidStatisticsHistoryScrollScrollBar"),false)
         else raidOffset,visibleRaids,historyWidth=UI.Table.LayoutViewport(self.raidScroll,page,rect.x,rect.y,rect.width,rect.height,table.getn(entries),28,table.getn(self.raidButtons)) end
-        local nameWidth=math.floor(historyWidth*0.38);local raidWidth=math.floor(historyWidth*0.34)
-        local starts={6,nameWidth,nameWidth+raidWidth};local widths={nameWidth-8,raidWidth-4,historyWidth-nameWidth-raidWidth-4}
+        local settings=BootyRaiderDB or {}
+        local showId=settings.raidStatsListShowId~=false;local showTime=settings.raidStatsListShowTime~=false
+        local weight=(showId and 38 or 0)+34+(showTime and 28 or 0)
+        local nameWidth=showId and math.floor(historyWidth*38/weight) or 0
+        local timeWidth=showTime and math.floor(historyWidth*28/weight) or 0
+        local raidWidth=historyWidth-nameWidth-timeWidth
+        local starts={6,nameWidth+6,nameWidth+raidWidth};local widths={nameWidth-8,raidWidth-8,timeWidth-4}
         for index=1,3 do
             local header=self.historyHeaders[index]
             header:ClearAllPoints();header:SetPoint("TOPLEFT",page,"TOPLEFT",rect.x+starts[index],-rect.y+20)
             header:SetWidth(math.max(1,widths[index]));header:SetHeight(18);header:SetJustifyH("LEFT")
+            if not self.historyCollapsed and (index==2 or (index==1 and showId) or (index==3 and showTime)) then header:Show() else header:Hide() end
         end
         for index = 1, table.getn(self.raidButtons) do
             local button, logicalIndex = self.raidButtons[index], raidOffset + index
@@ -467,10 +576,11 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
             if raid and index <= visibleRaids then
                 button:ClearAllPoints();button:SetPoint("TOPLEFT",page,"TOPLEFT",rect.x,-rect.y-(index-1)*28);button:SetWidth(historyWidth)
                 button.raidId = raid.id
-                local nameWidth=math.floor(historyWidth*0.38);local raidWidth=math.floor(historyWidth*0.34);local timeWidth=historyWidth-nameWidth-raidWidth
-                button.idText:ClearAllPoints();button.idText:SetPoint("LEFT",button,"LEFT",6,0);button.idText:SetWidth(nameWidth-8);button.idText:SetJustifyH("LEFT");button.idText:SetText(tostring(raid.id));button.idText:Show()
-                button.zoneText:ClearAllPoints();button.zoneText:SetPoint("LEFT",button,"LEFT",nameWidth,0);button.zoneText:SetWidth(raidWidth-4);button.zoneText:SetJustifyH("LEFT");button.zoneText:SetText(tostring(raid.raidName or "Unknown"));button.zoneText:Show()
-                button.dateText:ClearAllPoints();button.dateText:SetPoint("LEFT",button,"LEFT",nameWidth+raidWidth,0);button.dateText:SetWidth(timeWidth-4);button.dateText:SetJustifyH("LEFT");button.dateText:SetText(date("%Y-%m-%d",tonumber(raid.savedAt) or 0));button.dateText:Show();button.allText:Hide()
+                button.idText:ClearAllPoints();button.idText:SetPoint("LEFT",button,"LEFT",starts[1],0);button.idText:SetWidth(math.max(1,widths[1]));button.idText:SetJustifyH("LEFT");button.idText:SetText(tostring(raid.id))
+                button.zoneText:ClearAllPoints();button.zoneText:SetPoint("LEFT",button,"LEFT",starts[2],0);button.zoneText:SetWidth(widths[2]);button.zoneText:SetJustifyH("LEFT");button.zoneText:SetText(tostring(raid.raidName or "Unknown"));button.zoneText:Show()
+                button.dateText:ClearAllPoints();button.dateText:SetPoint("LEFT",button,"LEFT",starts[3],0);button.dateText:SetWidth(math.max(1,widths[3]));button.dateText:SetJustifyH("LEFT");button.dateText:SetText(date("%Y-%m-%d",tonumber(raid.savedAt) or 0));button.allText:Hide()
+                if showId then button.idText:Show() else button.idText:Hide() end
+                if showTime then button.dateText:Show() else button.dateText:Hide() end
                 button.allText:SetText(tostring(raid.id) .. " | " .. tostring(raid.raidName or "Unknown") .. " | " .. date("%Y-%m-%d",tonumber(raid.savedAt) or 0))
                 local selected = self.selectedHistoryIds[raid.id] and true or false; button:Show()
                 button.bootyClassicSelected=false
@@ -511,10 +621,13 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
                 else
                 row.editMember=nil;row.nameEdit:Hide();row.attendanceEdit:Hide();row.srEdit:Hide();row.name:Show();row.attendance:Show();row.loot:Show();row.name:SetText(player.name)
                 local classKey=string.upper(tostring(player.class or ""));local classColor=(RAID_CLASS_COLORS and RAID_CLASS_COLORS[classKey]) or UI.Theme.classColors[classKey]
-                if classColor then row.name:SetTextColor(classColor.r,classColor.g,classColor.b) else row.name:SetTextColor(1,1,1) end
+                if self.useClassColors and classColor then row.name:SetTextColor(classColor.r,classColor.g,classColor.b) else row.name:SetTextColor(1,1,1) end
+                if not self.showAttendance then row.attendance:Hide() end
+                if not self.showLoot then row.loot:Hide() end
                 row.attendance:SetText(player.attendanceOff and "Off" or player.raids); row.loot:SetInactive(table.getn(player.lootItems or {}) == 0)
                 row.srMissing:Hide()
-                if singleRaid and self.directItemLabel and player.srItems and player.srItems[1] and player.srItems[1].itemId then
+                if not self.showSR then row.srDirect.itemId=nil;row.srDirect:Hide();row.sr:Hide()
+                elseif singleRaid and self.directItemLabel and player.srItems and player.srItems[1] and player.srItems[1].itemId then
                     local item = player.srItems[1]; row.sr:Hide(); row.srDirect.itemId = item.itemId; row.srDirect.itemName = item.name; row.srDirect.label:SetText(Raider.UI.Components.GetItemLabel(item.itemId) .. (table.getn(player.srItems) > 1 and (" +" .. (table.getn(player.srItems) - 1)) or "")); row.srDirect:Show()
                     local texture = type(GetItemIcon) == "function" and GetItemIcon(item.itemId) or nil; row.srDirect.iconRegion:SetTexture(texture or "Interface\\Icons\\INV_Misc_QuestionMark")
                 elseif singleRaid then row.srDirect.itemId = nil; row.srDirect:Hide(); row.sr:Hide(); row.srMissing:Show()
@@ -555,10 +668,10 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
     end
     return {
         frame = page, page = page,
-        Hide = function(self) controller.raidPanel:Hide(); controller.raidDismiss:Hide(); controller.dateDismiss:Hide(); controller.itemDialog:Hide(); controller.datePicker:Hide(); controller.editDialog:Hide(); controller.removeDialog:Hide(); page:Hide();host:Hide() end,
+        Hide = function(self) controller.raidPanel:Hide(); controller.raidDismiss:Hide(); controller.dateDismiss:Hide(); controller.itemDialog:Hide(); controller.datePicker:Hide(); controller.editDialog:Hide(); controller.removeDialog:Hide(); if controller.lootRulesDialog then controller.lootRulesDialog:Close() end;page:Hide();host:Hide() end,
         Show = function(self) host:Show();page:Show(); controller:Refresh() end,
         Refresh = function(self) controller:Refresh() end,
         OnResize = function(self) controller.datePicker:Hide(); controller.raidPanel:Hide(); controller:Render() end,
-        SelectRaid = function(self, raidId) for selectedId in pairs(controller.selectedHistoryIds) do controller.selectedHistoryIds[selectedId]=nil end; if raidId then controller.selectedHistoryIds[raidId]=true end; controller.raidScroll.offset = 0; controller.scroll.offset = 0; controller:Refresh() end,
+        SelectRaid = function(self, raidId) ClearEditDraft(controller);for selectedId in pairs(controller.selectedHistoryIds) do controller.selectedHistoryIds[selectedId]=nil end; if raidId then controller.selectedHistoryIds[raidId]=true end; controller.raidScroll.offset = 0; controller.scroll.offset = 0; controller:Refresh() end,
     }
 end

@@ -33,6 +33,11 @@ function RaidEdit.Create(name, owner, saveMetadata, onSaved, showSavedPopup)
     local dialog
     dialog = UI.CreateTextPrompt(name, "Edit Raid", "Raid ID", "Save", function(value)
         if not saveMetadata then return false, "Editing saved raids is unavailable." end
+        local audit=Raider.Services.RaidAudit
+        if audit and audit.CheckEditBase then
+            local current,reason=audit.CheckEditBase(dialog.editBase)
+            if not current then return false,reason end
+        end
         local success, result = saveMetadata(dialog.raidId, {id=value,raidName=dialog.selectedRaidName})
         if not success then return false, result end
         if onSaved then onSaved(dialog.raidId, result) end
@@ -48,6 +53,8 @@ function RaidEdit.Create(name, owner, saveMetadata, onSaved, showSavedPopup)
     dialog.Open = function(self, snapshot)
         if not snapshot then return false end
         self.raidId = snapshot.id
+        local audit=Raider.Services.RaidAudit
+        self.editBase=audit and audit.CaptureEditBase and audit.CaptureEditBase(snapshot,{"raid:metadata"}) or nil
         open(self); self.edit:SetText(tostring(snapshot.id or ""))
         self:SetRaidType(snapshot.raidName); return true
     end

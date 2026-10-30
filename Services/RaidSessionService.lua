@@ -6,7 +6,7 @@ Raider.Services.RaidSession = RaidSession
 
 local Session = {}
 Session.__index = Session
-local presetKeys = {"lmAutoLootExceptions", "lmAutoLootPresets"}
+local presetKeys = {"lmAutoLootExceptions", "lmAutoLootPresets", "lmAutoLootInclusions"}
 
 -- Dependencies are domain adapters, never UI objects or session flag owners.
 -- Keeping their namespaces also preserves instrumentation installed afterward.
@@ -17,6 +17,52 @@ end
 function Session:RaidIdExists(raidId)
     local database = self.dependencies.database
     return database.HasSoftReserveSnapshot(raidId) or database.HasRaidStatistic(raidId)
+end
+
+function Session:SetRaidType(raidName, expectedAttendance)
+    local dependencies = self.dependencies
+    local attendance = dependencies.database.GetRaidAttendance()
+    if dependencies.testRaid.IsActive() then return false, "End the test raid before editing a saved session." end
+    if not dependencies.raidRes.HasSession(attendance) then return false, "Start a raid session first." end
+    if attendance ~= expectedAttendance then return false, "The session changed. Select the raid type again." end
+    local valid = false
+    for _, name in ipairs(dependencies.raidStatistics.GetRaidNames()) do if name == raidName then valid = true end end
+    if not valid then return false, "Select an available raid type." end
+    if attendance.raidName == raidName then return true end
+    local replacement = {}
+    for key, value in pairs(attendance) do replacement[key] = value end
+    replacement.raidName = raidName
+    local database = dependencies.database
+    local store = database.Ensure()
+    local oldMask, oldExclusions, oldInclusions = store.lmAutoLootPresets, store.lmAutoLootExceptions, store.lmAutoLootInclusions
+    local mask, exclusions, inclusions = dependencies.autoLoot.GetRaidPreset(raidName, oldExclusions, oldInclusions)
+    local function Publish(previous, current)
+        if database.onRaidAttendanceMetadataChanged then database.onRaidAttendanceMetadataChanged(previous, current) end
+        database.StoreRaidAttendance(current)
+        if dependencies.onRaidTypeChanged then dependencies.onRaidTypeChanged() end
+    end
+    -- Publish only after both preset fields and the type have their final values.
+    -- Preserve the loot-session owner; a failed refresh restores the same state.
+    store.lmAutoLootPresets, store.lmAutoLootExceptions = mask, exclusions
+    store.lmAutoLootInclusions = inclusions
+    local function PublishChange()
+        Publish(attendance,replacement)
+        local audit=Raider.Services.RaidAudit
+        if audit then
+            local accepted,reason=audit.Commit(replacement,"raid.metadata",{{key="raid:metadata",value=audit.Metadata(replacement)}},{subject=replacement.snapshotId or ""})
+            if not accepted then error(reason) end
+        end
+    end
+    local ok, failure = pcall(PublishChange)
+    if not ok then
+        store.lmAutoLootPresets, store.lmAutoLootExceptions = oldMask, oldExclusions
+        store.lmAutoLootInclusions = oldInclusions
+        local restored, reason = pcall(Publish, replacement, attendance)
+        if not restored then return false, tostring(failure) .. " Restore failed: " .. tostring(reason) end
+        return false, tostring(failure)
+    end
+    self.preparedSave = nil
+    return true
 end
 
 local function SaveRequest(options, attendance)
@@ -40,7 +86,7 @@ local function SaveRequest(options, attendance)
     return {raidId = raidId, saveRaidStatistics = options.saveRaidStatistics and true or false,
         saveAttendance = options.saveAttendance and true or false, saveCSR = options.saveCSR and true or false,
         saveRaidEndTime = not previousEnd and options.saveRaidEndTime == true or false,
-        modifyRaidEndTime = modifyEnd, endedAt = endedAt}
+        modifyRaidEndTime = modifyEnd, endedAt = endedAt, endSession = options.endSession == true}
 end
 
 function Session:PrepareSave(options)
@@ -52,7 +98,7 @@ function Session:PrepareSave(options)
     request.raidId = canonical or request.raidId
     local confirmation = {attendance = attendance, raidId = request.raidId, snapshot = snapshot, statistic = statistic,
         saveRaidStatistics = request.saveRaidStatistics, saveAttendance = request.saveAttendance, saveCSR = request.saveCSR,
-        saveRaidEndTime = request.saveRaidEndTime, modifyRaidEndTime = request.modifyRaidEndTime, endedAt = request.endedAt}
+        saveRaidEndTime = request.saveRaidEndTime, modifyRaidEndTime = request.modifyRaidEndTime, endedAt = request.endedAt, endSession = request.endSession}
     self.preparedSave = confirmation
     request.confirmation = confirmation
     return request, canonical ~= nil
@@ -68,6 +114,7 @@ function Session:CaptureActiveRoster(isDraft)
     local dependencies = self.dependencies
     if dependencies.testRaid.IsActive() then return dependencies.testRaid.GetRaidMemberCount() end
     local previousAttendance = dependencies.database.GetRaidAttendance()
+    if previousAttendance and previousAttendance.syncEnded then return nil,"This session has ended. Reopen it in Raid Sync before recording." end
     local count, failure = dependencies.raid.SaveRoster()
     if count == nil then return nil, failure end
     local attendance = dependencies.database.GetRaidAttendance()
@@ -78,9 +125,13 @@ end
 
 function Session:CapturePendingRaid(getPendingId, getPendingName)
     local dependencies = self.dependencies
-    local count, attendance = dependencies.raid.CaptureRoster(true)
+    local solo = self.pendingRaid and self.pendingRaid.offline and type(GetNumRaidMembers) == "function" and GetNumRaidMembers() == 0
+    local count, attendance
+    if solo then
+        count, attendance = 0, {members = {}, scannedAt = dependencies.now(), updatedBy = UnitName("player")}
+    else count, attendance = dependencies.raid.CaptureRoster(true) end
     if count == nil then return nil, attendance end
-    if count <= 0 then return nil, "The physical raid roster is not ready. Retry or cancel the new session." end
+    if count <= 0 and not solo then return nil, "The physical raid roster is not ready. Retry or cancel the new session." end
     if attendance and getPendingId() then
         attendance.snapshotId = getPendingId()
         attendance.raidName = getPendingName() or attendance.raidName
@@ -95,10 +146,11 @@ function Session:CapturePendingRaid(getPendingId, getPendingName)
     return count
 end
 
-function Session:BeginPendingRaid()
+function Session:BeginPendingRaid(syncEnabled)
     -- This reference is transient, never another durable copy of attendance.
     local database = self.dependencies.database
-    local pending = {attendance = database.GetRaidAttendance(), presets = {}}
+    local pending = {attendance = database.GetRaidAttendance(), presets = {}, syncEnabled=syncEnabled~=false,
+        offline = type(GetNumRaidMembers) == "function" and GetNumRaidMembers() == 0}
     self.pendingRaid = pending
     local index
     for index = 1, table.getn(presetKeys) do pending.presets[presetKeys[index]] = database.GetSetting(presetKeys[index]) end
@@ -116,7 +168,18 @@ function Session:CapturePendingPreset()
 end
 
 function Session:CommitPendingRaid()
+    local attendance=self.dependencies.database.GetRaidAttendance()
+    if self.pendingRaid and attendance and Raider.Services.RaidAudit then
+        if self.pendingRaid.syncEnabled==false then
+            local id=Raider.Services.RaidAudit.EnsureIdentity(attendance)
+            local db=Raider.Database.Ensure();db.raidSyncDisabled=db.raidSyncDisabled or {};db.raidSyncDisabled[id]=true
+            db.raidSyncPolicyRevision=(db.raidSyncPolicyRevision or 0)+1
+        end
+        local ok,reason=Raider.Services.RaidAudit.Start(attendance)
+        if not ok then return false,reason end
+    end
     self.pendingRaid = nil
+    return true
 end
 
 function Session:CancelPendingRaid()
@@ -171,7 +234,7 @@ function Session:Complete(saveOptions)
                 or confirmation.raidId ~= request.raidId or confirmation.snapshot ~= snapshot or confirmation.statistic ~= statistic
                 or confirmation.saveRaidStatistics ~= request.saveRaidStatistics or confirmation.saveAttendance ~= request.saveAttendance
                 or confirmation.saveCSR ~= request.saveCSR or confirmation.saveRaidEndTime ~= request.saveRaidEndTime
-                or confirmation.modifyRaidEndTime ~= request.modifyRaidEndTime or confirmation.endedAt ~= request.endedAt then
+                or confirmation.endSession ~= request.endSession or confirmation.modifyRaidEndTime ~= request.modifyRaidEndTime or confirmation.endedAt ~= request.endedAt then
                 self:CancelPreparedSave(confirmation)
                 return false, "The raid or save destination changed. Review the save options and try again."
             end
@@ -181,9 +244,21 @@ function Session:Complete(saveOptions)
         -- confirmation never alter the active session or its historical source.
         local staged, key, value = {}, nil, nil
         for key, value in pairs(attendance) do staged[key] = value end
+        local sourceId = attendance._loadedSnapshotId or attendance.snapshotId
+        sourceId = sourceId and dependencies.database.GetSavedRaidState(sourceId)
+        local targetSyncId = snapshot and snapshot.syncRaidId or statistic and statistic.syncRaidId
+        local copySource
+        if sourceId and string.lower(sourceId) ~= string.lower(request.raidId)
+            or targetSyncId and targetSyncId ~= attendance.syncRaidId then
+            -- Save As creates an independent raid, or replaces the explicitly
+            -- confirmed destination. Never rename the source's journal identity.
+            copySource = attendance
+            staged.syncRaidId = targetSyncId
+            if staged.syncRaidId == attendance.syncRaidId then staged.syncRaidId = nil end
+        end
         staged.snapshotId, staged._loadedSnapshotId = request.raidId, nil
         local savedAt = dependencies.now()
-        local endedAt = request.saveRaidEndTime and savedAt or request.endedAt
+        local endedAt = (request.endSession or request.saveRaidEndTime) and savedAt or request.endedAt
         local startedAt = tonumber(attendance.sessionStartedAt or attendance.createdAt)
         if endedAt and (not startedAt or endedAt < startedAt or endedAt > savedAt) then
             return false,"Raid end time must be between the raid start and the current time."
@@ -199,7 +274,17 @@ function Session:Complete(saveOptions)
             entry = dependencies.raidStatistics.BuildEntry(staged, request)
             if not entry then return false, "Raid statistics could not be prepared." end
         end
-        if not dependencies.raidRes.SyncHistory(staged) then return false, "The raid snapshot could not be saved." end
+        local preparedSnapshot
+        if Raider.Services.RaidAudit then
+            preparedSnapshot=dependencies.raidRes.BuildSnapshot(staged)
+            if not preparedSnapshot then return false,"The raid snapshot could not be prepared." end
+            local ok,reason=Raider.Services.RaidAudit.Save(staged,entry,preparedSnapshot,request.endSession,copySource)
+            if not ok then return false,reason end
+            if entry then entry.syncRaidId=staged.syncRaidId end
+            preparedSnapshot.syncRaidId=staged.syncRaidId
+        end
+        if preparedSnapshot then dependencies.database.StoreSoftReserveSnapshot(preparedSnapshot)
+        elseif not dependencies.raidRes.SyncHistory(staged) then return false, "The raid snapshot could not be saved." end
         if entry then dependencies.database.StoreRaidStatistic(entry)
         elseif statistic then
             local removed, reason = dependencies.database.RemoveRaidStatisticForSave(request.raidId, attendance)
@@ -215,7 +300,24 @@ function Session:LoadSnapshot(snapshotId)
     local dependencies = self.dependencies
     local _, snapshot = dependencies.database.GetSavedRaidState(snapshotId)
     if snapshot then
-        local attendance = dependencies.raidRes.RestoreSnapshot(snapshot)
+        local attendance
+        if snapshot.syncRaidId and dependencies.getProjection then
+            local reason
+            if dependencies.canJoinRaid then
+                local ok,failure=dependencies.canJoinRaid(snapshot.syncRaidId)
+                if not ok then return nil,failure end
+            end
+            attendance,reason=dependencies.getProjection(snapshot.syncRaidId)
+            if not attendance then return nil,reason end
+            if attendance.syncEnded and dependencies.resumeRaid then
+                local ok,failure=dependencies.resumeRaid(snapshot.syncRaidId)
+                if not ok then return nil,failure end
+                attendance,reason=dependencies.getProjection(snapshot.syncRaidId)
+                if not attendance then return nil,reason end
+            end
+            attendance._loadedSnapshotId=snapshot.id;attendance._sessionDraft=true
+            dependencies.database.StoreRaidAttendance(attendance)
+        else attendance=dependencies.raidRes.RestoreSnapshot(snapshot) end
         dependencies.raidRes.Reconcile(attendance, attendance)
         return attendance
     end
@@ -247,12 +349,22 @@ function Session:ClearAttendance()
     self.dependencies.database.StoreRaidAttendance(nil)
 end
 
-function Session:Quit()
+function Session:Quit(leaveOnly)
     local dependencies = self.dependencies
     local wasTestRaid = dependencies.testRaid.IsActive()
+    if not wasTestRaid and Raider.Services.RaidAudit then
+        local attendance=dependencies.database.GetRaidAttendance()
+        if attendance then
+            local audit=Raider.Services.RaidAudit
+            local ok,reason
+            if leaveOnly then ok,reason=audit.Leave(attendance) else ok,reason=audit.End(attendance) end
+            if not ok then return false,reason end
+        end
+    end
     dependencies.testRaid.Stop()
     self.preparedSave = nil
     if not wasTestRaid then dependencies.database.StoreRaidAttendance(nil) end
+    return true
 end
 
 function Session:StartTest()

@@ -9,7 +9,7 @@ end
 
 function Runtime.Print(message)
     if Runtime.host and Runtime.host.Print then Runtime.host.Print(message)
-    elseif DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("BootyRaider: " .. tostring(message)) end
+    elseif DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("[BootyRaider] " .. tostring(message)) end
 end
 function Runtime.PrintAction(message)
     if Raider.Database.GetSetting("chatActionLogs") then Runtime.Print(message) end
@@ -33,6 +33,7 @@ function Runtime.RefreshViews()
 end
 function Runtime.WantsGuildDirectory()
     if not Raider.active then return false end
+    if Raider.Modules.RaidSyncRuntime and Raider.Modules.RaidSyncRuntime.WantsDirectory() then return true end
     if Raider.Services.Raid.IsInRaid() then return true end
     for _,view in pairs(Runtime.views) do
         if view and view.page and view.page:IsVisible() then return true end
@@ -44,6 +45,7 @@ function Runtime.RequestHistoryAuthority()
 end
 function Runtime.OnGuildDirectoryUpdated()
     if not Raider.active then return end
+    if Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.RefreshAuthority() end
     if not Runtime.IsTestRaid() then Raider.Services.Raid.RefreshGuildRanks(Raider.Database.GetRaidAttendance()) end
     Runtime.RefreshViews()
 end
@@ -57,7 +59,7 @@ function Runtime.RequestRaidScan()
     this, event, arg1 = previousThis, previousEvent, previousArg
     if not called then failure, count = tostring(count), nil end
     Runtime.RefreshViews()
-    if count == nil or count <= 0 then
+    if count == nil then
         failure = failure or "The physical raid roster is not ready. Retry or cancel the new session."
         Runtime.Print(failure)
         return false, failure
@@ -65,13 +67,19 @@ function Runtime.RequestRaidScan()
     return true
 end
 function Runtime.SaveSession(options)
+    if type(options)=="table" and options.endSession and Runtime.ShowEndedSessionPrompt(Raider.Database.GetRaidAttendance()) then
+        return false,"This raid has already ended. Choose Continue Session or Quit."
+    end
     local saved,failure=Runtime.sessionController:Complete(options)
     if saved then Runtime.CloseSessionPrompts(); Runtime.RefreshViews() end
     return saved,failure
 end
-function Runtime.QuitSession()
-    Runtime.sessionController:Quit()
+function Runtime.QuitSession(leaveOnly)
+    local ok,reason=Runtime.sessionController:Quit(leaveOnly)
+    if ok==false then return false,reason end
     Runtime.CloseSessionPrompts()
+    Runtime.RefreshViews()
+    return true
 end
 function Runtime.AcceptLoadedSnapshot()
     -- Loading the same saved ID can occur after a zone change. Re-observe the
@@ -143,9 +151,74 @@ function Runtime.CloseSessionPrompts()
     HideTransitionPrompt()
     local view=Runtime.views.raid
     if view and view.HideSessionTransitionPrompt then view:HideSessionTransitionPrompt() end
+    if Runtime.endedSessionPrompt then Runtime.endedSessionPrompt:Hide() end
+end
+function Runtime.ShowEndedSessionPrompt(attendance)
+    local current=Raider.Database.GetRaidAttendance()
+    if not Raider.active or not attendance or attendance~=current or not attendance.syncRaidId or not Runtime.replica or Runtime.IsTestRaid() then return false end
+    local id=attendance.syncRaidId
+    -- Most context events read only the cached lifecycle. Attribution is needed
+    -- once an end is observed, not on each roster/world notification.
+    if Runtime.replica.GetRaidInfo(id).lifecycle~="ended" then return false end
+    local status=Runtime.replica.GetStatus(id)
+    local revision=status.lifecycleRevision
+    Raider.raidSessionPaused=true;Raider.raidLiveTracking=false
+    local dialog=Runtime.endedSessionPrompt
+    if dialog and dialog.raidId==id and dialog.endRevision==revision then return true end
+    Runtime.CloseSessionPrompts()
+    local view=Runtime.views.raid
+    if view and view.CancelSessionSave then view:CancelSessionSave() end
+    if not dialog then
+        dialog=UI.Window.CreateProjectConfirmation("BootyRaiderSessionEnded","Raid ended","Continue Session","raids",{modal=false})
+        if UI.WindowStack then UI.WindowStack.SetOwner(dialog,RaidPromptOwner) end
+        dialog:SetWidth(430);dialog.no:SetText("Quit");dialog.no:SetWidth(96);dialog.yes:SetWidth(132)
+        dialog.yes:ClearAllPoints();dialog.yes:SetPoint("BOTTOMRIGHT",dialog,"BOTTOMRIGHT",-8,8)
+        dialog.no:ClearAllPoints();dialog.no:SetPoint("RIGHT",dialog.yes,"LEFT",-10,0)
+        Runtime.endedSessionPrompt=dialog
+    end
+    dialog.raidId=id;dialog.endRevision=revision
+    local message=tostring(status.endedBy or "An officer")..(status.savedAndEnded and " has saved and ended the raid." or " has ended the raid.")
+        .." Do you want to continue this session?"
+    local function Owner()
+        local owner=Raider.Database.GetRaidAttendance()
+        if not Raider.active or not owner or owner.syncRaidId~=id or dialog.raidId~=id or dialog.endRevision~=revision then return nil end
+        local latest=Runtime.replica.GetStatus(id)
+        if latest.lifecycle=="ended" and latest.lifecycleRevision~=revision then Runtime.ShowEndedSessionPrompt(owner);return nil end
+        return owner,latest
+    end
+    local onContinue,onQuit
+    local function Failure(reason)
+        dialog:Open(message.."\n"..tostring(reason),onContinue,onQuit)
+    end
+    onContinue=function()
+        local owner,latest=Owner();if not owner then return end
+        if latest.lifecycle=="ended" then
+            local ok,reason=Runtime.replica.Reopen(id,revision)
+            if not ok then Failure(reason);return end
+        end
+        -- Keep local physical receipts. Recovering a fresh projection here
+        -- could discard facts still awaiting a successful journal write.
+        owner.syncEnded=nil
+        Runtime.sessionController:Continue(nil)
+        Runtime.CloseSessionPrompts()
+        Runtime.AcceptLoadedSnapshot()
+        Runtime.RefreshViews()
+    end
+    onQuit=function()
+        local owner,latest=Owner();if not owner then return end
+        if latest.needsAttention then
+            Failure("Some loot changes exist only on this character. Continue the session and save them before quitting.")
+            return
+        end
+        local ok,reason=Runtime.QuitSession(true)
+        if not ok then Failure(reason) end
+    end
+    dialog:Open(message,onContinue,onQuit)
+    return true
 end
 local function ShowTransitionPrompt(contextKey)
     local attendance=Raider.Database.GetRaidAttendance()
+    if Runtime.ShowEndedSessionPrompt(attendance) then return false end
     if not Raider.raidSessionDraft or not Raider.Services.RaidRes.HasSession(attendance) then Runtime.CloseSessionPrompts(); return false end
     Runtime.sessionController:ConfirmTransition(contextKey)
     if not Runtime.transitionPrompt then
@@ -168,6 +241,7 @@ local function ShowTransitionPrompt(contextKey)
         or "You left the raid context. Continue this session, or save and end it?"
     dialog.contextKey=contextKey
     dialog:Open(message,function()
+        if Runtime.ShowEndedSessionPrompt(Raider.Database.GetRaidAttendance()) then return end
         if Raider.Database.GetRaidAttendance()~=attendance or not Raider.raidSessionDraft then Runtime.CloseSessionPrompts(); return end
         Runtime.sessionController:Continue(contextKey)
         if string.find(contextKey or "","different-raid-context|",1,true)==1 then
@@ -177,10 +251,11 @@ local function ShowTransitionPrompt(contextKey)
         end
         Runtime.RefreshViews()
     end,function()
+        if Runtime.ShowEndedSessionPrompt(Raider.Database.GetRaidAttendance()) then return end
         if Raider.Database.GetRaidAttendance()~=attendance or not Raider.raidSessionDraft then Runtime.CloseSessionPrompts(); return end
         Runtime.OpenView("raid")
         local view=Runtime.GetView("raid")
-        if view and view.OpenSaveDialog then view:OpenSaveDialog(contextKey) end
+        if view and view.OpenSaveDialog then view:OpenSaveDialog(contextKey,true) end
     end)
 end
 
@@ -206,11 +281,16 @@ local function RestoreLootHook()
     Runtime.lootBinding=nil
 end
 
-local eventNames={"RAID_ROSTER_UPDATE","PLAYER_ENTERING_WORLD","ZONE_CHANGED_NEW_AREA","CHAT_MSG_LOOT"}
+local eventNames={"PARTY_MEMBERS_CHANGED","PARTY_LEADER_CHANGED","RAID_ROSTER_UPDATE","PLAYER_ENTERING_WORLD","ZONE_CHANGED_NEW_AREA","CHAT_MSG_LOOT"}
 local function Dispatch()
     if not Raider.active then return end
     Raider.Diagnostics.Count("events")
-    if event=="CHAT_MSG_LOOT" then
+    if event=="CHAT_MSG_ADDON" then Raider.Modules.RaidSyncRuntime.Receive(arg1,arg2,arg3,arg4);return end
+    if event=="PLAYER_REGEN_ENABLED" then Raider.Modules.RaidSyncRuntime.Wake();return end
+    if event=="PARTY_MEMBERS_CHANGED" or event=="PARTY_LEADER_CHANGED" then
+        local view=Runtime.views.raid
+        if view and view.OnGroupChanged then view:OnGroupChanged() end
+    elseif event=="CHAT_MSG_LOOT" then
         if not BootyRaiderDB.raidLiveTrackingEnabled or Raider.raidSessionPaused or Raider.raidSessionTransitionPending
             or Runtime.IsTestRaid() or not Raider.Services.Raid.IsInRaid() then return end
         local attendance=Raider.Database.GetRaidAttendance()
@@ -221,6 +301,13 @@ local function Dispatch()
         Runtime.worldContext.Update()
         local view=Runtime.views.raid
         if event=="RAID_ROSTER_UPDATE" and view and view.OnRosterUpdate then view:OnRosterUpdate() end
+        if Raider.Modules.RaidSyncRuntime then
+            if event=="RAID_ROSTER_UPDATE" then Raider.Modules.RaidSyncRuntime.OnRosterUpdate()
+            elseif event=="PLAYER_ENTERING_WORLD" then
+                Raider.Modules.RaidSyncRuntime.RefreshAuthority()
+                if Runtime.raidSync then Runtime.raidSync:Discover();Raider.Modules.RaidSyncRuntime.Wake() end
+            end
+        end
     end
 end
 
@@ -234,6 +321,7 @@ function Runtime.Initialize(host)
                 Raider.active=true
                 for _,name in ipairs(eventNames) do Runtime.events:RegisterEvent(name) end
                 InstallLootHook()
+                if Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.Initialize(Runtime) end
                 local ready,message=Runtime.nativeRaidTab:Sync()
                 if ready==false and message then return false,message end
                 return true
@@ -251,7 +339,7 @@ function Runtime.Initialize(host)
     if Raider.Diagnostics.Wrap and not Runtime.diagnosticsWrapped then
         Raider.Services.Raid.SaveRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.SaveRoster,1)
         Raider.Services.Raid.CaptureRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.CaptureRoster,1)
-        Raider.Services.Raid.RecordLoot=Raider.Diagnostics.Wrap("Loot message",Raider.Services.Raid.RecordLoot,2)
+        Raider.Services.Raid.RecordLoot=Raider.Diagnostics.Wrap("Loot message",Raider.Services.Raid.RecordLoot,3)
         Raider.Services.RaidStatistics.BuildSummary=Raider.Diagnostics.Wrap("Raid summary",Raider.Services.RaidStatistics.BuildSummary,2)
         Raider.Services.CSR.BuildSummary=Raider.Diagnostics.Wrap("CSR model",Raider.Services.CSR.BuildSummary,8)
         Raider.Services.RaidRes.Import=Raider.Diagnostics.Wrap("SR import",Raider.Services.RaidRes.Import,3)
@@ -261,8 +349,19 @@ function Runtime.Initialize(host)
     end
     Raider.Database.onRaidAttendanceChanged=Raider.Services.Raid.OnRaidAttendanceChanged
     Raider.Database.onRaidAttendanceMetadataChanged=Raider.Services.Raid.PreserveLootSession
-    Runtime.session=Raider.Services.RaidSession.Create({database=Raider.Database,raid=Raider.Services.Raid,raidRes=Raider.Services.RaidRes,
-        raidStatistics=Raider.Services.RaidStatistics,testRaid=Raider.Services.TestRaid,now=function() return time() end})
+    Runtime.session=Raider.Services.RaidSession.Create({getProjection=function(id) return Runtime.replica.GetProjection(id) end,
+        canJoinRaid=Raider.Modules.RaidSyncRuntime.CanJoinRaid,
+        resumeRaid=function(id)
+            local allowed,reason=Raider.Modules.RaidSyncRuntime.CanJoinRaid(id);if not allowed then return false,reason end
+            -- Recover validates local unsaved loot and the current session before
+            -- publishing a shared reopen. A rejected load must not reopen a raid.
+            local recovered,failure=Runtime.replica.Recover(id,true)
+            if not recovered then return false,failure end
+            if Runtime.replica.GetStatus(id).lifecycle=="ended" then return Runtime.replica.Reopen(id) end
+            return recovered
+        end,database=Raider.Database,raid=Raider.Services.Raid,raidRes=Raider.Services.RaidRes,
+        raidStatistics=Raider.Services.RaidStatistics,testRaid=Raider.Services.TestRaid,now=function() return time() end,
+        autoLoot=Raider.Services.AutoLoot,onRaidTypeChanged=function() Raider.OnSettingChanged("lmAutoLootPresets") end})
     Runtime.sessionController=Raider.Modules.RaidSessionController.Create({state=Raider,session=Runtime.session,
         setHistoricalLoaded=function(value) Runtime.historicalLoaded=value and true or false end,
         getHistoricalLoaded=function() return Runtime.historicalLoaded end,
@@ -270,7 +369,8 @@ function Runtime.Initialize(host)
         showSavedPopup=function() UI.ShowOpaquePopup("BOOTY_RAIDER_ATTENDANCE_RELOAD") end,
         isLiveTrackingWanted=function() return BootyRaiderDB.raidLiveTrackingEnabled and true or false end,
         canStartNewRaid=function()
-            return Raider.Services.Raid.IsInRaid() and not Raider.raidSessionDraft and not Raider.raidScanReady and not Runtime.IsTestRaid()
+            if Raider.raidSessionDraft or Raider.raidScanReady or Runtime.IsTestRaid() then return false,"Finish the current session or scan first." end
+            return Raider.Modules.RaidSyncRuntime.CanJoinRaid()
         end,
         applyRaidPreset=Raider.Services.AutoLoot.ApplyRaidPreset,
     })
@@ -292,6 +392,7 @@ function Runtime.Initialize(host)
         showRaidStartReminder=function() UI.ShowOpaquePopup("BOOTY_RAIDER_START_RAID_REMINDER") end,
         hideRaidStartReminder=function() UI.HideOpaquePopup("BOOTY_RAIDER_START_RAID_REMINDER") end,
         showSessionTransitionPrompt=ShowTransitionPrompt,hideSessionTransitionPrompt=HideTransitionPrompt,
+        handleEndedSession=Runtime.ShowEndedSessionPrompt,
     })
     Runtime.nativeRaidTab=Raider.Modules.NativeRaidTab.Create({
         isEnabled=function() return Raider.active and not Runtime.stoppingNativeContent and Raider.Database.GetSetting("useBootyRaidTab") end,
@@ -303,6 +404,7 @@ function Runtime.Initialize(host)
     InstallLootHook();Runtime.nativeRaidTab:Sync()
     Raider.CompleteRaidSession=Runtime.SaveSession
     Runtime.initialized=true
+    if Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.Initialize(Runtime) end
     return true
 end
 local function SyncNative()
@@ -324,12 +426,13 @@ local function ReleaseResources()
         if not ok or result==false then table.insert(failures,CleanupMessage(reason or result)) end
     end
     Raider.active=false
+    if Raider.Modules.RaidSyncRuntime then Attempt(Raider.Modules.RaidSyncRuntime.Stop) end
     if Runtime.events then
         for _,name in ipairs(eventNames) do Attempt(Runtime.events.UnregisterEvent,Runtime.events,name) end
     end
-    if Runtime.worldContext then Attempt(Runtime.worldContext.CancelConfirmation,Runtime.worldContext) end
     Attempt(RestoreLootHook)
-    Attempt(HideTransitionPrompt)
+    Attempt(Runtime.CloseSessionPrompts)
+    if Runtime.endedSessionPrompt then Runtime.endedSessionPrompt.raidId=nil;Runtime.endedSessionPrompt.endRevision=nil end
     for _,view in pairs(Runtime.views) do
         if view.Stop then Attempt(view.Stop,view) elseif view.Hide then Attempt(view.Hide,view) end
     end
@@ -373,12 +476,14 @@ function Runtime.Stop()
 end
 local function ApplySettingChanges(keys)
     if not Runtime.initialized or not Raider.active then return end
-    local native,tracking,autoLoot,csr=false,false,false,false
+    local native,tracking,autoLoot,csr,statistics=false,false,false,false,false
     for key in pairs(keys) do
+        if (key=="profile" or key=="raidSyncEnabled") and Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.RefreshAuthority() end
         if key=="profile" or key=="useBootyRaidTab" or key=="useBootyRaidLogo" or string.find(key,"^nativeRaid") then native=true end
         if key=="profile" or key=="raidLiveTrackingEnabled" then tracking=true end
         if key=="profile" or string.find(key,"^lmAutoLoot") then autoLoot=true end
         if key=="profile" or string.find(key,"^csr") then csr=true end
+        if key=="profile" or string.find(key,"^raidStats") then statistics=true end
     end
     if native then Runtime.nativeRaidTab:Sync() end
     if autoLoot then Raider.Modules.MasterLootWindow.ApplyAutoLootSetting() end
@@ -388,6 +493,7 @@ local function ApplySettingChanges(keys)
         view:Refresh()
     end
     if csr and Runtime.views.csr then Runtime.views.csr:Refresh() end
+    if statistics and Runtime.views.raidStatistics then Runtime.views.raidStatistics:Refresh() end
 end
 function Runtime.BeginSettingsBatch()
     Runtime.settingsBatchDepth=(Runtime.settingsBatchDepth or 0)+1

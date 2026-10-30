@@ -143,7 +143,7 @@ function Dialog.Create(options)
             end
         end
         for index=table.getn(self.memberEntries),used+1,-1 do table.remove(self.memberEntries,index) end
-        projectOpen(self,"Link an item, then choose roll types and players.")
+        projectOpen(self,"Link an item or type its name, then choose rolls.")
         self:SetWidth(320); self:SetHeight(184)
         self.label:ClearAllPoints(); self.label:SetPoint("TOPLEFT",self.projectDivider,"BOTTOMLEFT",4,-8)
         self.label:SetPoint("TOPRIGHT",self.projectDivider,"BOTTOMRIGHT",-4,-8)

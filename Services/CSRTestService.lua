@@ -14,7 +14,7 @@ local function AddEntry(state, srItemId, lootItemId)
     if srItemId then member.srItems[1] = { itemId = srItemId, count = 1 } end
     if lootItemId then member.lootItems[1] = { itemId = lootItemId, count = 1 } end
     table.insert(state.entries, {
-        id = "csr-test-" .. state.sequence, raidName = "CSR Test Raid", createdAt = state.now, savedAt = state.now,
+        id = "csr-test-" .. state.sequence, raidName = "CSR Test Raid", createdAt = state.now, savedAt = state.now, endedAt = state.now,
         csrEnabled = true, lootRules = { silverback = { csr = true }, macaque = { csr = false } },
         members = { member },
     })

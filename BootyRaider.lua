@@ -1,5 +1,79 @@
 local Raider = BootyRaider
 local Runtime = Raider.Runtime
+local standaloneViews={{id="raid",label="Raid",icon="raids",width=78},
+    {id="raidStatistics",label="Raid Stats",icon="raid_stats",width=104},
+    {id="csr",label="CSR",icon="csr",width=72}}
+local function CreateView(parent,host,id,create)
+    if not host or not host.standalone then return create(parent) end
+    local UI=Raider.UI.Components
+    local frame=UI.CreateContainer(nil,parent);frame:SetAllPoints(parent)
+    local body=UI.CreateContainer(nil,frame);body:SetPoint("TOPLEFT",frame,"TOPLEFT",0,-30)
+    body:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",0,0)
+    body.bootyWidthOwner=parent;body.bootyWidthInset=0;body.bootyHeightOwner=parent;body.bootyHeightInset=30
+    local toolbar=UI.CreateToolbarSurface(frame,false,true)
+    toolbar.bootyBorderOutsetLeft=0;toolbar.bootyBorderOutsetRight=0;UI.SetSurfaceHorizontalBorders(toolbar,false,true)
+    toolbar:SetPoint("TOPLEFT",frame,"TOPLEFT",0,0);toolbar:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0);toolbar:SetHeight(28)
+    local function SizeBody()
+        local width,height=UI.GetFrameSpan(parent)
+        frame:SetWidth(width);frame:SetHeight(height)
+        body:SetWidth(math.max(1,width));body:SetHeight(math.max(1,height-30))
+    end
+    SizeBody()
+    local view=create(body)
+    view.frame=frame;view.standaloneNavigation={frame=toolbar,body=body,buttons={}}
+    local left=6
+    for _,entry in ipairs(standaloneViews) do
+        local target=entry.id
+        local button=UI.CreateButton(toolbar,nil,entry.label,entry.width,22)
+        button:SetPoint("TOPLEFT",toolbar,"TOPLEFT",left,-2);left=left+entry.width+4
+        button.bootyClassicKeepNormalSurface=true;button.bootyHoverTextColor={1,0.82,0.28}
+        UI.SetClassicButtonIcon(button,entry.icon,13,7,0);UI.AttachGoldHoverBorder(button,0.35,0.35,0.35,1)
+        UI.SetClassicButtonSelected(button,target==id)
+        button:SetScript("OnClick",function()
+            if target==id then return end
+            local previous=host.windows and host.windows[id]
+            local opened=host.OpenView(target,previous)
+            if opened and previous then
+                local ready,reason=previous.HideView()
+                if ready==false then host.Print(reason or "Cannot close this raid view.");return end
+                previous:Hide()
+            end
+        end)
+        view.standaloneNavigation.buttons[target]=button
+    end
+    local show,hide,resize,stop,refresh=view.Show,view.Hide,view.OnResize,view.Stop,view.Refresh
+    local function JoinNavigationEdge()
+        local controls=view.page and view.page.syncHistoryControls
+        local historyToolbar=controls and controls.historyToolbar
+        if not historyToolbar then return end
+        -- With its heading hidden, the history toolbar meets the tab strip.
+        -- Keep the tabs' existing project edge instead of drawing both rails.
+        local top=not (BootyRaiderDB.raidHideSectionHeader and historyToolbar:IsShown())
+        if historyToolbar.bootyBorderTop~=top then UI.SetSurfaceHorizontalBorders(historyToolbar,top,true) end
+    end
+    local function ResizeView(self) SizeBody();if resize then resize(self) end;JoinNavigationEdge() end
+    function view:OnResize()
+        body.bootyResizeInProgress=true
+        local ok,failure=pcall(ResizeView,self)
+        body.bootyResizeInProgress=nil
+        if not ok then error(failure) end
+    end
+    function view:Show() frame:Show();SizeBody();show(self);JoinNavigationEdge() end
+    if refresh then function view:Refresh() refresh(self);JoinNavigationEdge() end end
+    function view:Hide()
+        local result,reason=hide(self)
+        if result==false then return result,reason end
+        frame:Hide();return result,reason
+    end
+    if stop then
+        function view:Stop()
+            local result,reason=stop(self)
+            if result==false then return result,reason end
+            frame:Hide();return result,reason
+        end
+    end
+    return view
+end
 local function RequestHistoryOnShow(view)
     local show=view.Show
     function view:Show()
@@ -8,23 +82,29 @@ local function RequestHistoryOnShow(view)
     end
     return view
 end
-local function CreateRaid(parent,host) return RequestHistoryOnShow(Raider.Modules.RaidScreen.Create(parent,host)) end
+local function CreateRaid(parent,host)
+    return RequestHistoryOnShow(CreateView(parent,host,"raid",function(body) return Raider.Modules.RaidScreen.Create(body,host) end))
+end
 local function CreateStatistics(parent,host)
     Runtime.Initialize(host)
-    local view=Raider.Modules.RaidStatistics.Create(parent,Raider.Database.GetRaidStatistics,Raider.Database.DeleteRaidStatistic,Raider.Database.UpdateRaidStatistic)
-    view.frame=view.page
+    local view=CreateView(parent,host,"raidStatistics",function(body)
+        local controller=Raider.Modules.RaidStatistics.Create(body,Raider.Database.GetRaidStatistics,Raider.Database.DeleteRaidStatistic,Raider.Database.UpdateRaidStatistic)
+        controller.frame=controller.page;return controller
+    end)
     Runtime.views.raidStatistics=view
     return RequestHistoryOnShow(view)
 end
 local function CreateCSR(parent,host)
     Runtime.Initialize(host)
-    local view=Raider.Modules.CSR.Create(parent,Raider.Database.GetRaidStatistics,Raider.Database.GetLootRules,Raider.Database.GetRosterData,
-        function(id)
-            Runtime.OpenView("raidStatistics")
-            local statistics=Runtime.GetView("raidStatistics")
-            if statistics and statistics.SelectRaid then statistics:SelectRaid(id) end
-        end,{canManageHistory=Raider.Services.RankPolicy.CanManageHistory,setSourceArchived=Raider.Database.SetCSRSourceArchived})
-    view.frame=view.page
+    local view=CreateView(parent,host,"csr",function(body)
+        local controller=Raider.Modules.CSR.Create(body,Raider.Database.GetRaidStatistics,Raider.Database.GetLootRules,Raider.Database.GetRosterData,
+            function(id)
+                Runtime.OpenView("raidStatistics")
+                local statistics=Runtime.GetView("raidStatistics")
+                if statistics and statistics.SelectRaid then statistics:SelectRaid(id) end
+            end,{canManageHistory=Raider.Services.RankPolicy.CanManageHistory,setSourceArchived=Raider.Database.SetCSRSourceArchived})
+        controller.frame=controller.page;return controller
+    end)
     Runtime.views.csr=view
     return RequestHistoryOnShow(view)
 end
@@ -38,11 +118,29 @@ function Raider.HandleCommand(text)
         end
         if arguments=="" then return Raider.Modules.MasterLootWindow.OpenNewRollDialog() end
         return Raider.Modules.MasterLootWindow.OpenLinkedItemRoll(arguments)
+    elseif command=="sync" or command=="conflicts" then
+        local record=Runtime.GetAttendance()
+        if arguments~="" then record=Raider.Services.RaidAudit.FindRaidId(arguments) or arguments end
+        local ok,result=Raider.Modules.RaidSync.Open(record,Runtime.host and Runtime.host.window)
+        if not ok then Runtime.Print(result) end
+        return ok
+    elseif command=="log" then
+        local record=Runtime.GetAttendance()
+        if arguments~="" then
+            local _,snapshot,statistic=Raider.Database.GetSavedRaidState(arguments)
+            if record and record.snapshotId==arguments then
+                -- Keep the active identity when its display ID matches.
+            else record=snapshot or statistic or Raider.Services.RaidAudit.FindRaidId(arguments) or arguments end
+        end
+        local owner=Runtime.host and Runtime.host.window
+        local ok,result=Raider.Modules.RaidLog.Open(record,owner)
+        if not ok then Runtime.Print(result) end
+        return ok
     elseif command=="stats" then return Runtime.OpenView("raidStatistics")
     elseif command=="csr" then return Runtime.OpenView("csr")
     elseif command=="settings" then if Runtime.host and Runtime.host.OpenSettings then return Runtime.host.OpenSettings() end
     elseif command=="" or command=="raid" then return Runtime.OpenView("raid") end
-    Runtime.Print("Use /br, /br stats, /br csr, /br settings or /br roll [item] [players] [Tmog OS MS RC SR].")
+    Runtime.Print("Use /br, /br stats, /br csr, /br sync [raid ID], /br log [raid ID], /br settings or /br roll [item] [players] [Tmog OS MS RC SR].")
     return false
 end
 local function QuickMenu(host)
@@ -78,7 +176,8 @@ local function QuickMenu(host)
         Entry("Test Raid","groups",function() return Run("test") end,state.canTest),
         Entry("Load Raid","archive",nil,state.canLoad and table.getn(snapshots)>0,snapshots),
         Entry("Save Raid","save",function() return Run("save") end,state.canSave),
-        Entry("End Raid","quit",function() return Run("quit") end,state.canQuit),
+        Entry("End & Save","save",function() return Run("quit") end,state.canQuit),
+        Entry("Leave Session","quit",function() return Run("leave") end,state.canQuit),
     }
     local stats=Entry("Raid Stats","raid_stats",function() return Runtime.OpenView("raidStatistics") end)
     local entries={Entry("Raid","raids",function() return Runtime.OpenView("raid") end,true,raid)}
@@ -88,10 +187,41 @@ local function QuickMenu(host)
     return entries
 end
 
+function Raider.GetProfilingTargets()
+    local D = BootyLib.Diagnostics
+    local descriptor = D.CreateProfilingDescriptor(Raider.version,
+        "Raid events, roster/loot, incremental synchronization, journal/projection, CSR, SR import and Raid refresh. Selected Lua entry points; not total addon or rendering time.")
+    D.AddProfilingScript(descriptor, Runtime.events, "OnEvent", "Raid events", true)
+    D.AddProfilingFunction(descriptor, Raider.Services.Raid, "CaptureRoster", "Capture roster")
+    D.AddProfilingFunction(descriptor, Raider.Services.Raid, "RecordLoot", "Record loot")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidStatistics, "BuildSummary", "Raid statistics summary")
+    D.AddProfilingFunction(descriptor, Raider.Services.CSR, "BuildSummary", "CSR summary")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidCSR, "BuildSummary", "Incremental CSR")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidJournal, "Commit", "Journal local change")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidJournal, "Apply", "Journal received change")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidJournal, "Compact", "Journal checkpoint")
+    D.AddProfilingFunction(descriptor, Raider.Modules.RaidSyncRuntime, "Tick", "Sync scheduled work")
+    D.AddProfilingFunction(descriptor, Runtime.replica, "Flush", "Raid projection")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidRes, "Import", "SR import")
+    D.AddProfilingFunction(descriptor, Raider.Services.RaidRes, "BuildSnapshot", "SR snapshot")
+    D.AddProfilingFunction(descriptor, Raider.Modules.RaidManagement, "RefreshPage", "Raid refresh")
+    return descriptor
+end
+function Raider.GetDatabaseStatistics()
+    return {collections = {
+        {id = "savedRaids", label = "Saved raid statistics", path = {"raidStatistics", "raids"}, unit = "Raids", valueType = "table", emptyWhenMissing = true},
+        {id = "srSnapshots", label = "Saved SR snapshots", path = {"softReserveHistory", "raids"}, unit = "Snapshots", valueType = "table", emptyWhenMissing = true},
+        {id = "sessionMembers", label = "Current session members", path = {"raidAttendance", "members"}, unit = "Members", valueType = "table", emptyWhenMissing = true},
+        {id = "sessionDeparted", label = "Current session departed members", path = {"raidAttendance", "departedMembers"}, unit = "Members", valueType = "table", emptyWhenMissing = true},
+        {id = "syncRaids", label = "Synchronized raids", path = {"raidJournal", "raids"}, unit = "Raids", valueType = "table", emptyWhenMissing = true},
+        {id = "syncOperations", label = "Raid changes and causal markers", path = {"raidJournal", "operations"}, unit = "Records", valueType = "table", emptyWhenMissing = true},
+    }}
+end
+
 local descriptor={id="raider",name="BootyRaider",label="Raid",namespace=Raider,version=Raider.version,apiVersion=1,OnHostReady=Runtime.Initialize,
     Initialize=Runtime.Initialize,Start=Runtime.Initialize,Stop=Runtime.Stop,IsBusy=Runtime.IsBusy,GetSettings=Raider.Settings.Get,
     OnActivationFailed=Runtime.OnActivationFailed,
-    GetDatabase=Raider.Database.Ensure,GetQuickMenu=QuickMenu,ResetSettings=Raider.Settings.Reset,OnSettingChanged=Raider.OnSettingChanged,Command=Raider.HandleCommand,
+    GetDatabase=Raider.Database.Ensure,GetProfilingTargets=Raider.GetProfilingTargets,GetDatabaseStatistics=Raider.GetDatabaseStatistics,GetQuickMenu=QuickMenu,ResetSettings=Raider.Settings.Reset,OnSettingChanged=Raider.OnSettingChanged,Command=Raider.HandleCommand,
     BeginSettingsBatch=Runtime.BeginSettingsBatch,EndSettingsBatch=Runtime.EndSettingsBatch,OnSettingsProfileApplied=Runtime.OnSettingsProfileApplied,
     GetGuildDirectoryDemand=Runtime.WantsGuildDirectory,
     OnGuildDirectoryUpdated=Runtime.OnGuildDirectoryUpdated,

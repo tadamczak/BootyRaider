@@ -441,6 +441,9 @@ local function ShowItemTooltip(owner, slot, link)
     if slot and GameTooltip.SetLootItem then
         shown = pcall(GameTooltip.SetLootItem, GameTooltip, slot)
     end
+    if not shown and not Raider.Services.ItemReference.Id(link) then
+        GameTooltip:SetText(link); shown = true
+    end
     if not shown and GameTooltip.SetHyperlink then
         local payload = Match(link, "|H([^|]+)|h") or link
         shown = pcall(GameTooltip.SetHyperlink, GameTooltip, payload)
@@ -503,6 +506,26 @@ local function AutoLootEnabled()
 end
 
 local autoLootPendingSlot
+local awardTimeout = Raider.UI.Components.CreateContainer("BootyRaiderAwardTimeout", UIParent)
+awardTimeout:Hide()
+local function StopAwardTimeout()
+    awardTimeout:SetScript("OnUpdate", nil); awardTimeout:Hide()
+end
+local function FailPendingAward(reason)
+    local pending = pendingAward
+    if not pending then return end
+    pendingAward = nil; StopAwardTimeout()
+    RaidService.CancelLootAwardAttempt(pending.receipt, pending.reyCoin, pending.softReserveTrade)
+    if not panel:IsShown() then events:UnregisterEvent("LOOT_SLOT_CLEARED") end
+    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("Raider: Loot delivery was not confirmed for " .. tostring(pending.link)
+        .. " to " .. tostring(pending.winner) .. ". " .. tostring(reason)
+        .. " Check the item and recipient before trying again.") end
+end
+local function OnAwardTimeout()
+    this.remaining = this.remaining - arg1
+    if this.remaining > 0 then return end
+    FailPendingAward(pendingAward and pendingAward.error or "The client did not acknowledge the request.")
+end
 local autoLootFailedSlots = {}
 local autoLootTimeout = Raider.UI.Components.CreateContainer(nil, panel)
 autoLootTimeout:Hide()
@@ -521,7 +544,7 @@ local function AutoLootRoute(slot, candidate)
 end
 
 local function AutoLootNext()
-    if autoLootPendingSlot or not panel:IsShown() or not RaidService.IsPlayerLootMaster() or not AutoLootEnabled() then return end
+    if autoLootPendingSlot or pendingAward or not panel:IsShown() or not RaidService.IsPlayerLootMaster() or not AutoLootEnabled() then return end
     local candidate = FindCandidate(UnitName("player"))
     local slot
     for slot = 1, GetNumLootItems() or 0 do
@@ -541,7 +564,9 @@ end
 local function CanGive(roll, name)
     if not roll or not panel:IsShown() or not RaidService.IsPlayerLootMaster() then return nil, nil, "Master Loot is not open." end
     if not RaidService.IsLootSessionCurrent(roll.lootSessionToken) then return nil, nil, "This roll belongs to a previous raid session." end
-    if roll.awarded or pendingAward then return nil,nil,"This item was already given or an award is pending." end
+    if roll.awarded then return nil,nil,"This item was already given." end
+    if pendingAward then return nil,nil,"Waiting for loot delivery to " .. tostring(pendingAward.winner) .. "; please wait a few seconds." end
+    if autoLootPendingSlot then return nil,nil,"Automatic loot is still pending; please wait a few seconds." end
     if roll.results then
         if activeRoll or raidRollPending or lastRollBySource[currentLootSession]~=roll then return nil,nil,"This roll was replaced by a newer round." end
     elseif activeRoll or raidRollPending then return nil,nil,"Wait for the current roll to finish." end
@@ -580,13 +605,16 @@ local function AwardToPlayer(roll, name)
     local lootIcon, lootName, quantity = GetLootSlotInfo(slot)
     local historyKey = retention.ResolveHistoryKey(roll.historyKey or (roll.source .. ":" .. slot .. ":award:" .. roll.link), roll.link)
     roll.historyKey = historyKey
-    RaidService.QueueLootAwardForReceipt(name, roll.link, historyKey,
+    local _, receipt = RaidService.QueueLootAwardForReceipt(name, roll.link, historyKey,
         history and history.link == roll.link and history.lines or nil, quantity)
     pendingAward = { source = roll.source, slot = slot, link = roll.link,
+        receipt = receipt,
         lootSessionToken = roll.lootSessionToken,
         historyKey = historyKey,
         icon = lootIcon, winner = name,
         softReserve = roll.winnerResult and roll.winnerResult.range == 102 and roll.winner == name }
+    local attempt = pendingAward
+    awardTimeout.remaining = 5; awardTimeout:SetScript("OnUpdate", OnAwardTimeout); awardTimeout:Show()
     if RaidService.debugReyCoin and DEFAULT_CHAT_FRAME then
         DEFAULT_CHAT_FRAME:AddMessage("Raider Reycoin trace: Give loot recipient=" .. tostring(name)
             .. " winner=" .. tostring(roll.winner) .. " tradeWinner=" .. tostring(roll.tradeWinner)
@@ -606,8 +634,10 @@ local function AwardToPlayer(roll, name)
                 end
             end
         end
-        if RaidService.QueueReyCoinAward(reyCoinWinner, roll.link, name,
-            reyCoinRollers, roll.historyKey, history and history.link == roll.link and history.lines or nil, quantity) then
+        local queued, transfer = RaidService.QueueReyCoinAward(reyCoinWinner, roll.link, name,
+            reyCoinRollers, roll.historyKey, history and history.link == roll.link and history.lines or nil, quantity)
+        attempt.reyCoin = transfer
+        if queued then
             if string.lower(name) == string.lower(UnitName("player") or "") then
                 reyCoinEvents.TrackLocalBag(roll.link)
             end
@@ -615,10 +645,14 @@ local function AwardToPlayer(roll, name)
     end
     if roll.tradeWinnerResult and roll.tradeWinnerResult.range == 102 and roll.tradeWinner
         and roll.winner and string.lower(name) == string.lower(roll.winner) then
-        RaidService.QueueSoftReserveTrade(roll.tradeWinner, roll.link, name,
+        local _, transfer = RaidService.QueueSoftReserveTrade(roll.tradeWinner, roll.link, name,
             roll.historyKey, history and history.link == roll.link and history.lines or nil, quantity)
+        attempt.softReserveTrade = transfer
     end
-    GiveMasterLoot(slot, candidate)
+    local called, failure = pcall(GiveMasterLoot, slot, candidate)
+    if pendingAward == attempt and (not called or failure == false) then
+        FailPendingAward(not called and tostring(failure) or "The client rejected the request.")
+    end
 end
 local giveConfirmation
 local function ConfirmGive(roll, name)
@@ -1147,9 +1181,9 @@ local function Refresh()
             if entry.manual then
                 local itemId = tonumber(Match(tostring(entry.link), "item:(%d+)"))
                 local equipLocation
-                manualName, _, _, _, _, _, _, _, equipLocation, manualTexture = GetItemInfo(itemId or entry.link)
-                if type(GetItemIcon) == "function" then
-                    local icon = GetItemIcon(itemId or entry.link)
+                if itemId then manualName, _, _, _, _, _, _, _, equipLocation, manualTexture = GetItemInfo(itemId) end
+                if itemId and type(GetItemIcon) == "function" then
+                    local icon = GetItemIcon(itemId)
                     if icon then manualTexture = icon end
                 end
                 if not manualTexture and type(equipLocation) == "string"
@@ -1551,8 +1585,8 @@ local function StartRoll(slot, link, request)
     local _, historyKey = FindHistoryForItem(currentLootSession, slot, link)
     local icon
     if slot then icon = GetLootSlotInfo(slot)
-    else
-        local _, _, _, _, _, _, _, _, _, itemTexture = GetItemInfo(link)
+    elseif Raider.Services.ItemReference.Id(link) then
+        local _, _, _, _, _, _, _, _, _, itemTexture = GetItemInfo(Raider.Services.ItemReference.Id(link))
         icon = itemTexture
     end
     activeRoll = { slot = slot, link = link, icon = icon, source = currentLootSession,
@@ -2061,6 +2095,7 @@ function MasterLootWindow.Open()
         lootSessionNumber = lootSessionNumber + 1
         currentLootSession = "session:" .. lootSessionNumber
     end
+    if pendingAward and pendingAward.source ~= currentLootSession then FailPendingAward("The loot source changed before confirmation.") end
     retention.RememberSource(currentLootSession)
     retention.Prune()
     if activeRoll and activeRoll.source ~= currentLootSession then tracker:Show(); RefreshTracker() end
@@ -2099,7 +2134,7 @@ function MasterLootWindow.StartManualRoll(request)
     if not Raider.Services.LootRollRequest.CanOrganize() then
         return false,"Only the Loot Master, raid leader or an assistant can start a roll."
     end
-    if activeRoll or raidRollPending then
+    if activeRoll or raidRollPending or pendingAward then
         return false,"Another roll is already in progress."
     end
     RaidService.GetLootSessionToken()
@@ -2138,7 +2173,7 @@ function MasterLootWindow.OpenNewRollDialog()
 end
 
 function MasterLootWindow.CanStartManualRoll()
-    return Raider.active~=false and Raider.Services.LootRollRequest.CanOrganize() and not activeRoll and not raidRollPending
+    return Raider.active~=false and Raider.Services.LootRollRequest.CanOrganize() and not activeRoll and not raidRollPending and not pendingAward
 end
 
 function MasterLootWindow.ApplyAutoLootSetting()
@@ -2185,12 +2220,12 @@ events:SetScript("OnEvent", function()
             end
             if completedRolls[pendingAward.historyKey] then completedRolls[pendingAward.historyKey].awarded = true end
             if RaidService.IsLootSessionCurrent(pendingAward.lootSessionToken) then
-                RaidService.RecordPendingAwardReceipt(pendingAward.winner, pendingAward.link)
+                RaidService.RecordPendingAwardReceipt(pendingAward.winner, pendingAward.link,pendingAward.softReserve)
                 if pendingAward.softReserve then RaidService.ConfirmSoftReserveReceipt(pendingAward.winner, pendingAward.link, pendingAward.lootSessionToken) end
                 RaidService.ConfirmSoftReserveCarrierReceipt(pendingAward.winner, pendingAward.link)
                 reyCoinEvents.ConfirmAwardReceipt(pendingAward.winner, pendingAward.link)
             end
-            pendingAward = nil
+            pendingAward = nil; StopAwardTimeout()
             retention.Prune()
             if not activeRoll and not raidRollPending then events:UnregisterEvent("CHAT_MSG_SYSTEM") end
             if not panel:IsShown() then events:UnregisterEvent("LOOT_SLOT_CLEARED") end
@@ -2200,6 +2235,10 @@ events:SetScript("OnEvent", function()
             UpdateRestoreCandidates()
             AutoLootNext()
         end
+    elseif event == "UI_ERROR_MESSAGE" and pendingAward then
+        -- An unrelated UI error is not proof of award failure. Keep the short
+        -- acknowledgement deadline and include the client's diagnostic if it expires.
+        pendingAward.error = tostring(arg1 or "The client reported a loot error.")
     elseif event == "UI_ERROR_MESSAGE" and autoLootPendingSlot then
         autoLootTimeout:Hide()
         autoLootFailedSlots[autoLootPendingSlot] = true
@@ -2250,6 +2289,7 @@ events:SetScript("OnEvent", function()
 end)
 
 RaidService.onLootSessionChanged = function()
+    StopAwardTimeout()
     activeRoll = nil; raidRollPending = nil; pendingAward = nil; lastRoll = nil
     retention.Reset()
     timer:SetScript("OnUpdate", nil); timer:Hide()

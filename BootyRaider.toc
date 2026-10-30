@@ -2,8 +2,8 @@
 ## Title: BootyRaider
 ## Notes: Raid sessions, loot tools, raid statistics and CSR. Works with or without Booty Suite.
 ## Author: Mukla
-## Version: 0.1.0-dev.21
-## X-Release-Version: 0.1.0
+## Version: 1.0.0-dev.27
+## X-Release-Version: 1.0.0
 ## RequiredDeps: BootyLib
 ## SavedVariables: BootyRaiderDB
 
@@ -11,7 +11,14 @@ Core\Bootstrap.lua
 Services\RankPolicy.lua
 Services\LootMessageService.lua
 Core\Database.lua
+Services\RaidJournalService.lua
+Services\RaidConflictService.lua
+Services\RaidSyncCodec.lua
+Services\RaidSyncService.lua
+Services\RaidAuditService.lua
+Services\ItemReference.lua
 Services\RaidResService.lua
+Services\RaidItemCatalog.lua
 Services\RaidService.lua
 Services\RaidTabService.lua
 Services\RaidInfoService.lua
@@ -19,8 +26,10 @@ Services\AutoLootService.lua
 Services\TestRaidService.lua
 Services\RaidStatisticsService.lua
 Services\CSRService.lua
+Services\RaidCSRService.lua
 Services\CSRTestService.lua
 Services\RaidSessionService.lua
+Services\RaidReplicaService.lua
 Services\LootRollRequest.lua
 Modules\RaidSessionController.lua
 Modules\MasterLootEvents.lua
@@ -32,8 +41,12 @@ Modules\CSR.lua
 Modules\RaidRules.lua
 Modules\RaidHistory.lua
 Modules\RaidSoftReserve.lua
+Modules\RaidReserveEditor.lua
 Modules\RaidManagement.lua
 Modules\RaidInfo.lua
+Modules\RaidLog.lua
+Modules\RaidSync.lua
+Modules\RaidSyncRuntime.lua
 Modules\NativeRaidTab.lua
 Modules\Runtime.lua
 Modules\RaidScreen.lua

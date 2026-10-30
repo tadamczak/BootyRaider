@@ -8,6 +8,12 @@ local function GroupSettings(page)
     return page and page.groupSettings or BootyRaiderDB
 end
 
+local function HandleEndedSession(options, attendance)
+    if not attendance then return false end
+    if options.handleEndedSession and options.handleEndedSession(attendance) then return true end
+    return attendance.syncEnded and true or false
+end
+
 function RaidManagement.ResetIssueAttention(page)
     page.bootyIssuesHidden = nil
     local button = page.classicIssues
@@ -37,8 +43,9 @@ function RaidManagement.AttachReyCoinAdd(view, refresh)
         local name = string.gsub(view.reyCoinInput:GetText() or "", "^%s*(.-)%s*$", "%1")
         if name == "" then view.reyCoinFeedback:SetText("Enter a player name."); return end
         local item = view.reyCoinItem and string.gsub(view.reyCoinItem:GetText() or "", "^%s*(.-)%s*$", "%1") or ""
-        if not Raider.Services.Raid.SetReyCoinUsage(name, item ~= "" and item or nil, true) then
-            view.reyCoinFeedback:SetText("Player not found in this raid."); return
+        local ok,reason=Raider.Services.Raid.SetReyCoinUsage(name, item ~= "" and item or nil, true)
+        if not ok then
+            view.reyCoinFeedback:SetText(reason or "Player not found in this raid."); return
         end
         view.reyCoinFeedback:SetText(""); view.reyCoinInput:SetText(""); view.reyCoinInput:ClearFocus(); if view.reyCoinItem then view.reyCoinItem:SetText(""); view.reyCoinItem:ClearFocus() end; refresh()
     end
@@ -53,14 +60,15 @@ local function RestoreHeaderFont(control)
     local font, size, flags = label:GetFont()
     control.bootyFitFontSize = control.bootyFitFontSize or size
     label:SetFont(font, control.bootyFitFontSize, flags)
-    label:SetWidth(0)
+    label:SetHeight(control.bootyFitFontSize + 4); label:SetWidth(0)
 end
 
 function RaidManagement.CreateChrome(page, callbacks)
     local view = {}
     view.classicToolbar = Raider.UI.Components.CreateContainer(nil, page)
     page.classicToolbar = view.classicToolbar
-    view.classicToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", 4, -48); view.classicToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", -4, -48); view.classicToolbar:SetHeight(42)
+    local toolbarInset = page.bootyStandalone and 0 or 4
+    view.classicToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", toolbarInset, -48); view.classicToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", -toolbarInset, -48); view.classicToolbar:SetHeight(42)
     view.classicToolbar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 8, edgeSize = 8, insets = { left = 2, right = 2, top = 2, bottom = 2 } }); view.classicToolbar:SetBackdropColor(0, 0, 0, 0); view.classicToolbar:SetBackdropBorderColor(0, 0, 0, 0)
     Raider.UI.Components.RegisterSkinnedSurface(view.classicToolbar, "title", { bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 8, edgeSize = 8, insets = { left = 2, right = 2, top = 2, bottom = 2 } }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 }); view.classicToolbar:Hide()
     Raider.UI.Components.SetSurfaceHorizontalBorders(view.classicToolbar, true, true)
@@ -264,7 +272,11 @@ function RaidManagement.CreateChrome(page, callbacks)
             if selected.pendingTransfer then
                 Raider.Services.Raid.CancelPendingReyCoinTransfer(selected.pendingTransfer)
             else
-                Raider.Services.Raid.SetReyCoinUsage(selected.playerName, nil, false)
+                local ok,reason=Raider.Services.Raid.SetReyCoinUsage(selected.playerName, nil, false)
+                if not ok then
+                    if view.reyCoinFeedback then view.reyCoinFeedback:SetText(reason or "Could not reset Reycoin usage.") end
+                    return
+                end
             end
             RefreshReyCoinList()
         end)
@@ -331,6 +343,10 @@ function RaidManagement.CreateChrome(page, callbacks)
     view.filterLabel = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontNormalSmall")
     view.filterLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -82); view.filterLabel:SetText(""); view.filterLabel:Hide()
     view.filterToolbar = Raider.UI.Components.CreateToolbarSurface(page, false, true); page.filterToolbar = view.filterToolbar; view.filterToolbar:Hide()
+    -- Standalone pages already reach the same inner rails as their tab strip.
+    local filterOutset = page.bootyStandalone and 0 or 4
+    view.filterToolbar.bootyBorderOutsetLeft=filterOutset;view.filterToolbar.bootyBorderOutsetRight=filterOutset
+    Raider.UI.Components.SetSurfaceHorizontalBorders(view.filterToolbar,false,true)
 
     local function CreateFilterButton(text, x)
         local button = Raider.UI.Components.CreateDropdownButton(page, nil, text, 84)
@@ -377,12 +393,27 @@ function RaidManagement.CreateActionControls(page)
         if Raider.Services.Raid.ReadyCheck then Raider.Services.Raid.ReadyCheck() end
     end)
     controls.readyCheck:Hide()
+    controls.raidLog = Raider.UI.Components.CreateButton(page, nil, "Raid Log", 118, 22)
+    Raider.UI.Components.SetClassicButtonIcon(controls.raidLog, "rules", 13, 7, 2)
+    controls.raidLog:SetScript("OnClick", function() if page.OpenRaidLog then page.OpenRaidLog() end end)
+    controls.raidLog:Hide()
+    controls.raidSync = Raider.UI.Components.CreateButton(page,nil,"Sync",78,22)
+    Raider.UI.Components.SetClassicButtonIcon(controls.raidSync,"refresh",13,7,2)
+    controls.raidSync:SetScript("OnClick",function() if page.OpenRaidSync then page.OpenRaidSync() end end)
+    controls.raidSync:Hide();page.raidSyncButton=controls.raidSync
     controls.raidInfo = Raider.UI.Components.CreateIconButton(page, nil, "Interface\\AddOns\\BootyLib\\Assets\\Skins\\Classic\\Icons\\info.tga", 26, 6, Raider.UI.Components.Theme.colors.goldIcon)
     Raider.UI.Components.ApplyDropdownChoiceSurface(controls.raidInfo)
     Raider.UI.Components.AttachGoldHoverBorder(controls.raidInfo, 0.35, 0.35, 0.35, 1)
     Raider.UI.Components.AttachTooltip(controls.raidInfo, "Raid Info", "Your saved instances, raid IDs and time until reset.")
     controls.raidInfo:SetScript("OnClick", function() if Raider.Modules.RaidInfo then Raider.Modules.RaidInfo.Toggle(this) end end)
     controls.raidInfo:Hide(); page.raidInfoButton = controls.raidInfo
+    page.convertRaidButton = Raider.UI.Components.CreateButton(page, nil, "Convert to Raid", 112, 24)
+    page.convertRaidButton:SetPoint("RIGHT", controls.raidSync, "LEFT", -6, 0)
+    Raider.UI.Components.AttachTooltip(page.convertRaidButton, "Convert to Raid", "The party leader can convert the current party to a raid.")
+    page.convertRaidButton:SetScript("OnClick", function()
+        local ok, failure = Raider.Services.Raid.ConvertPartyToRaid()
+        if not ok and Raider.Runtime then Raider.Runtime.Print(failure) end
+    end)
     controls.scan = Raider.UI.Components.CreateButton(page, nil, "Scan Raid", 140, 24)
     controls.scan:SetPoint("CENTER", page, "CENTER", 0, 12); controls.scan:Hide()
     controls.loadRaid = Raider.UI.Components.CreateButton(page, nil, "Load", 78, 24); controls.loadRaid:Hide(); Raider.UI.Components.SetButtonEnabled(controls.loadRaid, false)
@@ -398,6 +429,12 @@ function RaidManagement.CreateActionControls(page)
     controls.historyCanvas = Raider.UI.Components.CreateContainer(nil, controls.historyScroll)
     controls.historyCanvas:SetWidth(300); controls.historyCanvas:SetHeight(1)
     controls.historyScroll:SetScrollChild(controls.historyCanvas); controls.historyScroll:Hide()
+    -- Native range callbacks can arrive after layout; the measured range owns visibility.
+    controls.historyScroll:SetScript("OnScrollRangeChanged",function()
+        local bar=getglobal("BootyRaiderRaidHistoryScrollScrollBar")
+        Raider.UI.Components.ApplyScrollRange(this,bar,this.bootyHistoryMaximum or 0)
+        if not this:IsShown() then Raider.UI.Components.SetScrollBarVisible(bar,false) end
+    end)
     controls.historyScroll:EnableMouseWheel(true)
     controls.historyScroll:SetScript("OnMouseWheel", function()
         local maximum = math.max(0, controls.historyCanvas:GetHeight() - this:GetHeight())
@@ -409,8 +446,9 @@ function RaidManagement.CreateActionControls(page)
     controls.historyDeleteButtons = {}
     controls.historyLoadButtons = {}
     controls.historyEditButtons = {}
+    controls.historyLogButtons = {}
     controls.historyHeaders = {}
-    for index, text in ipairs({"#", "Raid ID", "Raid Type", "Duration", "Created At", "Modified At"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
+    for index, text in ipairs({"#", "Raid ID", "Raid", "Duration", "Created At", "Modified At", "Storage", "Last changed by", "Status"}) do controls.historyHeaders[index] = Raider.UI.Components.CreateColumnLabel(page, text, "gold"); controls.historyHeaders[index]:Hide() end
     local historyIndex
     for historyIndex = 1, 10 do
         local button = Raider.UI.Components.CreateSelectionButton(controls.historyCanvas, nil, "", 380, 26); button.historyIndex = historyIndex; button:Hide()
@@ -422,18 +460,22 @@ function RaidManagement.CreateActionControls(page)
         button.raidName = Raider.UI.Components.CreateLabel(button, nil, "OVERLAY", "GameFontHighlightSmall")
         button.savedAt:SetPoint("RIGHT", button, "RIGHT", -8, 0); button.savedAt:SetWidth(112); button.savedAt:SetJustifyH("RIGHT"); button.savedAt:SetTextColor(0.78, 0.78, 0.72)
         controls.historyButtons[historyIndex] = button
-        local deleteButton = Raider.UI.Components.CreateDeleteButton(controls.historyCanvas, nil, 18, 2)
+        local deleteButton = Raider.UI.Components.CreateGoldToolbarButton(controls.historyCanvas, "trash")
         deleteButton.historyIndex = historyIndex; deleteButton:Hide()
         Raider.UI.Components.AttachTooltip(deleteButton, "Delete saved raid", "Permanently remove this raid snapshot from saved history.")
         controls.historyDeleteButtons[historyIndex] = deleteButton
-        local load = Raider.UI.Components.CreateIconButton(controls.historyCanvas, nil, "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up", 18, 2)
+        local load = Raider.UI.Components.CreateGoldToolbarButton(controls.historyCanvas, "start")
         load.historyIndex = historyIndex; load:Hide()
         Raider.UI.Components.AttachTooltip(load, "Load raid", "Open this saved raid snapshot.")
         controls.historyLoadButtons[historyIndex] = load
-        local edit = Raider.UI.Components.CreateIconButton(controls.historyCanvas, nil, "Interface\\Icons\\INV_Misc_Note_01", 18, 2)
+        local edit = Raider.UI.Components.CreateGoldToolbarButton(controls.historyCanvas, "fix")
         edit.historyIndex = historyIndex; edit:Hide()
         Raider.UI.Components.AttachTooltip(edit, "Edit raid", "Change this saved raid's ID, name and raid type.")
         controls.historyEditButtons[historyIndex] = edit
+        local log = Raider.UI.Components.CreateGoldToolbarButton(controls.historyCanvas, "rules")
+        log.historyIndex = historyIndex; log:Hide()
+        Raider.UI.Components.AttachTooltip(log, "Raid Log", "View officer changes made to this raid.")
+        controls.historyLogButtons[historyIndex] = log
     end
     controls.historyEmpty = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontDisable"); controls.historyEmpty:SetText("No raids to load"); controls.historyEmpty:Hide()
     controls.addStatistics = Raider.UI.Components.CreateButton(page, nil, "Add to Raid Statistics", 132, 22); controls.addStatistics:Hide()
@@ -449,11 +491,21 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.SetClassicButtonGold(controls.export, true)
     controls.export:SetPoint("TOPRIGHT", page, "TOPRIGHT", -110, -42); controls.export:Hide()
     Raider.UI.Components.AttachTooltip(controls.export, "Save Raid", "Save this raid snapshot.")
-    controls.quit = Raider.UI.Components.CreateButton(page, nil, "End Raid", 90, 22); controls.quit:Hide()
+    controls.quit = Raider.UI.Components.CreateButton(page, nil, "End & Save", 110, 22); controls.quit:Hide()
     Raider.UI.Components.SetClassicButtonVariant(controls.quit, "red")
     Raider.UI.Components.SetClassicButtonIcon(controls.quit, "quit")
     Raider.UI.Components.SetClassicButtonGold(controls.quit, true)
-    Raider.UI.Components.AttachTooltip(controls.quit, "End Raid", "End the active raid session.")
+    Raider.UI.Components.AttachTooltip(controls.quit, "End & Save", "Save a snapshot and end the shared session for all officers.")
+    controls.leave = Raider.UI.Components.CreateButton(page, nil, "Leave Session", 120, 22); controls.leave:Hide()
+    Raider.UI.Components.SetClassicButtonIcon(controls.leave, "quit")
+    Raider.UI.Components.AttachTooltip(controls.leave, "Leave Session", "Leave on this character. Other officers can continue the raid.")
+    page.leaveButton = controls.leave
+    controls.session=Raider.UI.Components.CreateButton(page,nil,"Session",88,22);controls.session:Hide()
+    controls.session.bootyClassicKeepNormalSurface=true
+    controls.session.bootyHoverTextColor={1,0.82,0.28}
+    Raider.UI.Components.SetClassicButtonIcon(controls.session,"list",13,7,0)
+    Raider.UI.Components.AttachGoldHoverBorder(controls.session,0.35,0.35,0.35,1)
+    page.sessionButton=controls.session
     controls.raidLeaderTools = Raider.UI.Components.CreateButton(page, nil, "Raid Leader Tools", 118, 22); controls.raidLeaderTools:Hide()
     controls.raidLeaderTools.bootyClassicKeepNormalSurface = true
     controls.raidLeaderTools.bootyHoverTextColor = {1, 0.82, 0.28}
@@ -496,7 +548,7 @@ function RaidManagement.CreateActionControls(page)
     Raider.UI.Components.SetClassicButtonIcon(controls.resetLoot, "reset")
     controls.resetLoot:SetPoint("TOPRIGHT", page, "TOPRIGHT", -326, -42); controls.resetLoot:Hide()
     controls.resetLoot:SetScript("OnClick", function() RaidManagement.resetLootDialog:Open("Reset all recorded raid loot?", StaticPopupDialogs.BOOTY_RAIDER_RESET_LOOT.OnAccept) end)
-    controls.live = Raider.UI.Components.CreateButton(page, nil, "Start Live Tracking", 118, 22)
+    controls.live = Raider.UI.Components.CreateButton(page, nil, "Record raid events", 118, 22)
     controls.live:SetPoint("TOPRIGHT", page, "TOPRIGHT", -416, -42); controls.live:Hide()
     return controls
 end
@@ -507,7 +559,8 @@ function RaidManagement.RegisterResetLootDialog(options)
         text = "Reset all recorded raid loot?", button1 = "Reset loot", button2 = "Cancel",
         OnAccept = function()
             local attendance = options.getAttendance()
-            Raider.Services.Raid.ResetRecordedLoot(attendance)
+            local ok,reason = Raider.Services.Raid.ResetRecordedLoot(attendance)
+            if ok==false then Raider.Runtime.Print(reason or "Raid loot history could not be reset.");return end
             options.clearSelection(); options.refresh(); options.printMessage("Raid loot history reset.")
         end,
         timeout = 0, whileDead = 1, hideOnEscape = 1,
@@ -561,6 +614,13 @@ end
 
 local function OnRaidPageSizeChanged()
     if not this:IsVisible() then return end
+    -- The standalone host sizes content and invokes OnResize as one layout.
+    -- Native width/height notifications inside that batch must not render again.
+    local owner=this
+    while owner do
+        if owner.bootyResizeInProgress then return end
+        owner=owner:GetParent()
+    end
     local currentWidth, currentHeight = PageSpan(this)
     if math.abs(currentWidth - (this.layoutWidth or 0)) <= 0.5 and math.abs(currentHeight - (this.layoutHeight or 0)) <= 0.5 then return end
     this.layoutWidth, this.layoutHeight = currentWidth, currentHeight
@@ -594,12 +654,21 @@ local function OnGroupClick()
     if row and row.controller and row.controller.onGroup then row.controller.onGroup(row) end
 end
 
-local function OnSoftReserveEnter() Raider.UI.Components.ShowItemTooltip(this) end
+local function OnSoftReserveEnter()
+    if this.itemId then Raider.UI.Components.ShowItemTooltip(this)
+    elseif this.itemName then
+        Raider.UI.Components.AnchorTooltip(this); GameTooltip:SetText(this.itemName); GameTooltip:Show()
+    end
+end
 local function OnSoftReserveClick() Raider.UI.Components.HandleItemClick(this) end
 local function OnSoftReserveLeave() GameTooltip:Hide() end
 local function OnSoftReserveDeleteClick()
     local row = this.ownerRow
     if row and row.controller and row.controller.onRemoveSoftReserve then row.controller.onRemoveSoftReserve(row) end
+end
+local function OnSoftReserveEditClick()
+    local row = this.ownerRow
+    if row and row.controller and row.controller.onEditSoftReserve then row.controller.onEditSoftReserve(row) end
 end
 local function OnLootItemEnter()
     if not this.itemId then return end
@@ -685,9 +754,17 @@ function RaidManagement.CreateListRow(parent, index, controller)
     AddRaidCell(parent, row, "sr", 500, 55, false)
     row.srHit = Raider.UI.Components.CreateControl(nil, row)
     row.srHit.ownerRow = row; row.srHit.label = row.sr; row.srHit:Hide()
-    row.srDelete = Raider.UI.Components.CreateDeleteButton(row.srHit, nil, 18, 3)
+    row.srDelete = Raider.UI.Components.CreateGoldToolbarButton(row.srHit, "trash")
     row.srDelete:SetPoint("LEFT", row.srHit, "LEFT", 0, 0); row.srDelete.ownerRow = row; row.srDelete:SetScript("OnClick", OnSoftReserveDeleteClick); row.srDelete:Hide()
     Raider.UI.Components.AttachTooltip(row.srDelete, "Remove Soft Reserve", "Remove this player's assigned Soft Reserve.")
+    row.srAdd = Raider.UI.Components.CreateGoldToolbarButton(row.srHit, "plus")
+    row.srAdd.ownerRow = row; row.srAdd:SetScript("OnClick", OnSoftReserveEditClick)
+    Raider.UI.Components.AttachTooltip(row.srAdd, "Add Soft Reserve", "Choose one SR for this player.")
+    row.srEdit = Raider.UI.Components.CreateGoldToolbarButton(row.srHit, "fix")
+    row.srActions = {row.srAdd, row.srEdit, row.srDelete}
+    row.srEdit:SetPoint("LEFT", row.srDelete, "RIGHT", 2, 0); row.srEdit.ownerRow = row
+    row.srEdit:SetScript("OnClick", OnSoftReserveEditClick)
+    Raider.UI.Components.AttachTooltip(row.srEdit, "Edit Soft Reserves", "Add or change SR items and allow a loot-rights exception.")
     row.srIcon = Raider.UI.Components.CreateTexture(row.srHit, nil, "ARTWORK")
     row.srIcon:SetWidth(16); row.srIcon:SetHeight(16); row.srIcon:SetPoint("LEFT", row.srHit, "LEFT", 20, 0); row.srIcon:Hide()
     row.srHit.iconRegion = row.srIcon
@@ -854,6 +931,17 @@ end
 function RaidManagement.MountList(page, chrome, options)
     page.getSoftReserveData = options.getData
     page.getSoftReserveRules = options.getRules
+    page.OpenSREditor = function(member)
+        if not page.srEditor then page.srEditor = RaidManagement.CreateReserveEditor(page, options.getData, options.refresh) end
+        page.srEditor:Open(member)
+    end
+    page.OpenSRReview = function()
+        local attendance = options.getData()
+        local review = attendance and attendance.softReserveImport and attendance.softReserveImport.customReview
+        if table.getn(review or {}) == 0 then return false end
+        if not page.srReview then page.srReview = RaidManagement.CreateReserveReview(page, options.getData, options.refresh) end
+        return page.srReview:Open()
+    end
     RaidManagement.CreateFilterController({
         page = page, classButton = chrome.classButton, rankButton = chrome.rankButton,
         classPanel = chrome.classPanel, rankPanel = chrome.rankPanel, dismiss = chrome.dismiss,
@@ -867,7 +955,14 @@ function RaidManagement.MountList(page, chrome, options)
     local pendingSoftReserveRemoval = nil
     StaticPopupDialogs["BOOTY_RAIDER_REMOVE_MEMBER_SR"] = {
         text = "Remove the Soft Reserve assigned to %s?", button1 = "Remove SR", button2 = "Cancel",
-        OnAccept = function() if pendingSoftReserveRemoval then options.removeSoftReserve(pendingSoftReserveRemoval); options.refresh() end; pendingSoftReserveRemoval = nil end,
+        OnAccept = function()
+            if pendingSoftReserveRemoval then
+                local ok,reason=options.removeSoftReserve(pendingSoftReserveRemoval)
+                if not ok then RaidManagement.ReportSoftReserveFailure(reason)
+                else options.refresh() end
+            end
+            pendingSoftReserveRemoval = nil
+        end,
         OnCancel = function() pendingSoftReserveRemoval = nil end,
         timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
@@ -882,6 +977,7 @@ function RaidManagement.MountList(page, chrome, options)
         end,
     })
     local rows, scrollFrame = RaidManagement.CreateListViewport(page, options.rowCount or 25, controller)
+    controller.onEditSoftReserve = function(row) if row.displayedMember then page.OpenSREditor(row.displayedMember) end end
     return { rows = rows, scrollFrame = scrollFrame }
 end
 
@@ -989,7 +1085,7 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
 
     local classic = Raider.UI.Components.IsClassicSkin()
     page.reyCoinToggle:Hide(); page.lmConfigToggle:Hide()
-    if not page.lootMasterController or not page.lootMasterController.IsVisible() then if not page.reyCoinSolo then page.reyCoinPanel:Hide() end; page.lmConfigPanel:Hide() end
+    if not page.lootMasterController or not page.lootMasterController.IsVisible() then if not page.reyCoinSolo then page.reyCoinPanel:Hide() end; if not page.lmConfigSolo then page.lmConfigPanel:Hide() end end
     local submenuOffset = classic and ((page.classicSectionOffset or 0) + (page.classicActionOffset or 0) + (page.classicToolbarOffset or 0)) or 0
     local pageWidth = PageSpan(page)
     local available = math.max(1, pageWidth - 12)
@@ -1019,7 +1115,7 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
     local extraRows = settings.raidListShowFilters and filterBottom - 31 or 0
     if settings.raidListShowFilters and settings.raidListShowSearch then
         local remaining = available - filterWidth - 10 - controls.refreshButton:GetWidth() - 4
-        if filterBottom == 31 and remaining >= 90 then
+        if filterWidth <= available and remaining >= 90 then
             controls.searchBox:SetPoint("LEFT", controls.resetButton, "RIGHT", 10, 0)
             searchWidth = remaining
         else
@@ -1034,7 +1130,6 @@ function RaidManagement.LayoutListToolbar(page, lootMasterMode, settings)
     controls.searchBox:SetWidth(page.classicSearchWidth)
     controls.refreshButton:ClearAllPoints(); controls.refreshButton:SetPoint("LEFT", controls.searchBox, "RIGHT", 4, 0)
     if page.filterToolbar then
-        page.filterToolbar.bootyBorderOutsetLeft=4;page.filterToolbar.bootyBorderOutsetRight=4;Raider.UI.Components.SetSurfaceHorizontalBorders(page.filterToolbar,false,true)
         page.filterToolbar:ClearAllPoints(); page.filterToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -92 - submenuOffset); page.filterToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, -92 - submenuOffset)
         page.filterToolbar:SetHeight(38 + extraRows)
     end
@@ -1069,7 +1164,7 @@ function RaidManagement.MountChrome(page, chrome, actions)
     })
     RaidManagement.SetRefreshControls(page, {
         leaderMode = page.leaderModeButton,
-        readyCheck = actions.readyCheck, raidInfo = actions.raidInfo,
+        readyCheck = actions.readyCheck, raidInfo = actions.raidInfo, raidLog = actions.raidLog, raidSync = actions.raidSync,
         title = chrome.title,
         resetFilters = page.resetFiltersButton,
         unavailable = chrome.unavailable,
@@ -1084,12 +1179,13 @@ function RaidManagement.MountChrome(page, chrome, actions)
         historyDeleteButtons = actions.historyDeleteButtons,
         historyLoadButtons = actions.historyLoadButtons,
         historyEditButtons = actions.historyEditButtons,
+        historyLogButtons = actions.historyLogButtons,
         historyHeaders = actions.historyHeaders,
         historyScroll = actions.historyScroll, historyCanvas = actions.historyCanvas,
         historyEmpty = actions.historyEmpty,
         export = actions.export,
         addStatistics = actions.addStatistics,
-        quit = actions.quit,
+        quit = actions.quit, leave = actions.leave, session = actions.session,
         lootRules = actions.lootRules,
         sendLootRules = actions.sendLootRules,
         reycoin = actions.reycoin,
@@ -1167,7 +1263,7 @@ function RaidManagement.CreateCompactGroupView(parent, dependencies)
         ensureDatabase = dependencies.ensureDatabase or function() end,
         getLootMasterInfo = dependencies.getLootMasterInfo or function() return nil end,
         getRaidMemberCount = function() return math.min(40, table.getn(members)) end,
-        getRaidMemberIndex = function(index) return members[index] and members[index].raidIndex or index end,
+        getRaidMemberIndex = function(index) return members[index] and members[index].raidIndex end,
         getRaidMemberInfo = function(index)
             local member = members[index]
             if member then return member.name, member.raidRank, member.subgroup, member.level, member.class, member.classFile, member.zone, member.online end
@@ -1220,7 +1316,9 @@ function RaidManagement.RefreshPage(renderer)
     local page, rows = renderer.page, renderer.rows
     renderer.countRefresh()
     RaidManagement.BeginRefresh(page, rows)
-    local pageWidth = PageSpan(page)
+    local pageWidth, pageHeight = PageSpan(page)
+    -- A late anchored size notification must recognize the host's completed layout.
+    page.layoutWidth, page.layoutHeight = pageWidth, pageHeight
     page.classicActionOffset = 0
     page.classicActionScale = 1
     -- The normal metadata row already has nine pixels of top padding. The
@@ -1233,12 +1331,13 @@ function RaidManagement.RefreshPage(renderer)
             page.raidInfoButton:ClearAllPoints(); page.raidInfoButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, -9 - page.classicSectionOffset); page.raidInfoButton:Show()
         end
     end
+    RaidManagement.UpdateConvertRaidButton(page, lootMasterMode)
     local attendance = renderer.getData()
     local issues
     local importInfo = attendance and attendance.softReserveImport
     local raidId = attendance and (attendance.snapshotId or (importInfo and importInfo.id))
     if attendance and raidId and renderer.isScanReady() then
-        local savedText = attendance.lastSavedAt and date("%Y-%m-%d %H:%M", attendance.lastSavedAt) or "Not saved yet"
+        local savedText = attendance.lastSavedAt and ("Last save: "..date("%Y-%m-%d %H:%M", attendance.lastSavedAt)) or "Not saved yet"
         if Raider.UI.Components.IsClassicSkin() and not lootMasterMode then
             local issueCount = 0
             issues = Raider.Services.Raid.GetSoftReserveIssues(attendance, page.getSoftReserveRules and page.getSoftReserveRules())
@@ -1257,7 +1356,7 @@ function RaidManagement.RefreshPage(renderer)
             page.classicActionOffset = 0
         else
             page.refreshControls.title:Show(); page.classicRaidName:Hide(); page.classicMeta:Hide(); page.classicSaved:Hide(); page.classicIssues:Hide()
-            page.refreshControls.title:SetText("Raid")
+            page.refreshControls.title:SetText(attendance.raidName or "Raid")
         end
     else
         page.refreshControls.title:Show(); page.classicRaidName:Hide(); page.classicMeta:Hide(); page.classicSaved:Hide(); page.classicIssues:Hide()
@@ -1275,7 +1374,7 @@ function RaidManagement.RefreshPage(renderer)
         RaidManagement.ShowMinimizedLootMasterState(page, rows)
         return
     end
-    if not renderer.isInRaid() and not renderer.isHistoricalLoaded() then
+    if not renderer.isInRaid() and not renderer.isHistoricalLoaded() and not Raider.Services.RaidRes.HasSession(attendance) then
         RaidManagement.ClearSessionHeader(page)
         renderer.setScanReady(false)
         RaidManagement.ShowNoRaidState(page, rows)
@@ -1302,7 +1401,7 @@ function RaidManagement.ShowMinimizedLootMasterState(page, rows)
     if page.toolDropdowns then for _, panel in pairs(page.toolDropdowns) do panel:Hide() end end
     local controls = page.refreshControls
     controls.leaderMode:Hide(); controls.resetFilters:Hide()
-    controls.unavailable:Hide(); controls.status:Hide(); controls.scan:Hide(); controls.testRaid:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.live:Hide()
+    controls.unavailable:Hide(); controls.status:Hide(); controls.scan:Hide(); controls.testRaid:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.session:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.live:Hide()
     controls.searchLabel:Hide(); controls.searchBox:Hide(); controls.refreshButton:Hide(); controls.filterLabel:Hide(); controls.classButton:Hide(); controls.rankButton:Hide(); controls.classPanel:Hide(); controls.rankPanel:Hide()
     RaidManagement.HideRaidHistoryControls(controls)
     RaidManagement.HideListTable(page, rows)
@@ -1318,17 +1417,17 @@ function RaidManagement.ShowNoRaidState(page, rows)
     local controls = page.refreshControls
     controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.mode:Hide(); controls.unavailable:Show()
     controls.unavailable:ClearAllPoints(); controls.unavailable:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -48); controls.unavailable:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, -48); controls.unavailable:SetHeight(0); if controls.unavailable.SetWordWrap then controls.unavailable:SetWordWrap(true) end
-    controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
+    controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.session:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
     controls.searchLabel:Hide(); controls.searchBox:Hide(); controls.refreshButton:Hide(); controls.filterLabel:Hide(); controls.classButton:Hide(); controls.rankButton:Hide(); controls.classPanel:Hide(); controls.rankPanel:Hide()
-    RaidManagement.HideListTable(page, rows); controls.status:SetText(""); controls.unavailable:SetText("Join a raid to start a new snapshot, or load a saved raid.")
-    RaidManagement.ShowRaidHistoryControls(page, controls, false)
+    RaidManagement.HideListTable(page, rows); controls.status:SetText(""); controls.unavailable:SetText("Start a new session, or load a saved raid. You can prepare a session before joining a raid.")
+    RaidManagement.ShowRaidHistoryControls(page, controls, true)
 end
 
 function RaidManagement.ShowScanRequiredState(page, rows)
     if page.toolDropdowns then for _, panel in pairs(page.toolDropdowns) do panel:Hide() end end
     local controls = page.refreshControls
     controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.mode:Hide()
-    controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
+    controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.session:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
     controls.searchLabel:Hide(); controls.searchBox:Hide(); controls.refreshButton:Hide(); controls.filterLabel:Hide(); controls.classButton:Hide(); controls.rankButton:Hide()
     RaidManagement.HideListTable(page, rows); controls.status:SetText("")
     RaidManagement.ShowRaidHistoryControls(page, controls, true)
@@ -1338,7 +1437,7 @@ function RaidManagement.ShowScanningState(page, rows)
     local controls = page.refreshControls
     page.groupFrame:Hide(); page.viewButton:Hide()
     controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.mode:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.unavailable:Hide(); controls.status:Hide(); controls.scan:Hide()
-    controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
+    controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.session:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide(); controls.minimize:Hide(); controls.live:Hide()
     controls.searchLabel:Hide(); controls.searchBox:Hide(); controls.refreshButton:Hide(); controls.filterLabel:Hide(); controls.classButton:Hide(); controls.rankButton:Hide(); controls.classPanel:Hide(); controls.rankPanel:Hide()
     RaidManagement.HideRaidHistoryControls(controls); RaidManagement.HideListTable(page, rows)
     page.softReserveWarning:Hide(); page.missingSoftReserveWarning:Hide(); page.invalidSoftReserveWarning:Hide()
@@ -1356,6 +1455,20 @@ function RaidManagement.UpdateActionAvailability(page, testRaid)
     if controls.readyCheck then
         Raider.UI.Components.SetButtonEnabled(controls.readyCheck, not testRaid and Raider.Services.Raid.CanReadyCheck and Raider.Services.Raid.CanReadyCheck() or false)
     end
+    if controls.raidLog then Raider.UI.Components.SetButtonEnabled(controls.raidLog,not testRaid) end
+    if controls.raidSync then
+        local attendance=page.listRenderer and page.listRenderer.getData()
+        local count=attendance and attendance.syncConflictCount or 0
+        controls.raidSync:SetText("Sync")
+        controls.raidSync:Hide()
+        Raider.UI.Components.SetButtonEnabled(controls.raidSync,not testRaid)
+    end
+    if controls.live then
+        local runtime=Raider.Runtime
+        local historical=runtime and runtime.historicalLoaded
+        controls.live:SetText(not historical and Raider.raidLiveTracking and "Pause recording" or "Record raid events")
+        Raider.UI.Components.SetButtonEnabled(controls.live,not testRaid and runtime and runtime.IsInRaid() and not (runtime.GetAttendance() and runtime.GetAttendance().syncEnded))
+    end
 end
 
 function RaidManagement.ShowReadyState(page, lootMasterMode)
@@ -1370,12 +1483,12 @@ function RaidManagement.ShowReadyState(page, lootMasterMode)
     if lootMasterMode then
         page.lmConfigToggle:Show()
         if page.lmConfigOpen then page.lmConfigPanel:Show() end
-        controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.scan:Hide(); controls.resetLoot:Hide(); controls.live:Hide()
+        controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.raidLeaderTools:Hide(); controls.lootMasterTools:Hide(); controls.addStatistics:Hide(); controls.export:Hide(); controls.quit:Hide(); controls.leave:Hide(); controls.session:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.scan:Hide(); controls.resetLoot:Hide(); controls.live:Hide()
         controls.mode:ClearAllPoints(); controls.mode:SetPoint("TOPRIGHT", page, "TOPRIGHT", -6, -8); controls.mode:SetWidth(18); controls.mode:SetHeight(18); Raider.UI.Components.SetWindowButtonAction(controls.mode, "close"); controls.mode:Show()
         controls.minimize:ClearAllPoints(); controls.minimize:SetPoint("RIGHT", controls.mode, "LEFT", -4, 0); controls.minimize:SetWidth(18); controls.minimize:SetHeight(18); controls.minimize:Show(); Raider.UI.Components.SetWindowButtonAction(controls.minimize, "minimize")
         controls.classButton:Hide(); controls.rankButton:Hide(); controls.classPanel:Hide(); controls.rankPanel:Hide()
     else
-        controls.resetFilters:Show(); controls.raidLeaderTools:Show(); controls.lootMasterTools:Show(); controls.addStatistics:Hide(); controls.export:Show(); controls.quit:Show()
+        controls.resetFilters:Show(); controls.raidLeaderTools:Show(); controls.lootMasterTools:Show(); controls.addStatistics:Hide(); controls.export:Show(); controls.quit:Hide(); controls.leave:Hide(); controls.session:Show()
         controls.leaderMode:Hide(); controls.mode:Hide(); controls.lootRules:Hide(); controls.sendLootRules:Hide(); controls.import:Hide(); controls.shareSr:Hide(); controls.resetLoot:Hide()
         RaidManagement.UpdateActionAvailability(page, page.isTestRaid and page.isTestRaid())
         controls.live:Hide(); controls.scan:Hide(); controls.minimize:Hide()
@@ -2004,11 +2117,11 @@ function RaidManagement.PositionListRow(page, row, rowY, lootMasterMode, tableLe
             row.groupHit:SetWidth(page.listWidths[columnIndex])
             row.groupHit:SetHeight(tonumber(BootyRaiderDB.raidListRowHeight) or 20)
         elseif column.key == "sr" then
-            row.sr:ClearAllPoints(); row.sr:SetPoint("TOPLEFT", page, "TOPLEFT", page.listPositions[columnIndex] + 36, rowY)
-            row.sr:SetWidth(math.max(1, page.listWidths[columnIndex] - 36))
+            row.sr:ClearAllPoints(); row.sr:SetPoint("TOPLEFT", page, "TOPLEFT", page.listPositions[columnIndex] + 74, rowY)
+            row.sr:SetWidth(math.max(1, page.listWidths[columnIndex] - 74))
             row.srHit:ClearAllPoints(); row.srHit:SetPoint("TOPLEFT", page, "TOPLEFT", page.listPositions[columnIndex], rowY)
             row.srHit:SetWidth(page.listWidths[columnIndex]); row.srHit:SetHeight(tonumber(BootyRaiderDB.raidListRowHeight) or 20)
-            row.srIcon:ClearAllPoints(); row.srIcon:SetPoint("LEFT", row.srHit, "LEFT", 20, 0)
+            row.srIcon:ClearAllPoints(); row.srIcon:SetPoint("LEFT", row.srHit, "LEFT", 56, 0)
         end
     end
 end
@@ -2040,13 +2153,22 @@ local function SetListTextColor(row, color, shade)
     row.group:SetTextColor(r, g, b); row.class:SetTextColor(r, g, b); row.rank:SetTextColor(r, g, b); row.sr:SetTextColor(r, g, b)
 end
 
+function RaidManagement.UpdateConvertRaidButton(page, lootMasterMode)
+    local button = page.convertRaidButton
+    if not button then return end
+    if lootMasterMode or Raider.Services.Raid.IsInRaid() or page.syncHistoryControls and page.syncHistoryControls.historyToolbar and page.syncHistoryControls.historyToolbar:IsShown() then button:Hide(); return end
+    button:ClearAllPoints();button:SetPoint("RIGHT",page.raidSyncButton and page.raidSyncButton:IsShown() and page.raidSyncButton or page.raidInfoButton,"LEFT",-6,0)
+    button:Show()
+    Raider.UI.Components.SetButtonEnabled(button, Raider.Services.Raid.CanConvertPartyToRaid())
+end
+
 function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMasterIndex, lootMasterMode, tableLeft, shorten)
     if row.bootyProjectOutline then
         local settings = BootyRaiderDB
         Raider.UI.Components.SetProjectButtonOutline(row, row.bootyRaidHovered and settings.raidListShowHoverBorder, settings.raidListHoverBorderSize, settings.raidListHoverBorderColor)
     end
     row.name:SetText(shorten(member.name, 22))
-    local memberRank = tonumber(member.raidRank) or 0
+    local memberRank = page.currentRaidRoles and (page.currentRaidRoles[string.lower(member.name or "")] or 0) or tonumber(member.raidRank) or 0
     local showRole = not lootMasterMode and BootyRaiderDB.raidListShowRoleIcon and memberRank > 0
     if showRole then
         row.crown:SetTexture(memberRank == 2 and "Interface\\GroupFrame\\UI-Group-LeaderIcon" or "Interface\\GroupFrame\\UI-Group-AssistantIcon")
@@ -2070,12 +2192,25 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
     row.class:SetText(shorten(member.class, 12))
     row.rank:SetText(shorten(Raider.Services.RankPolicy.GetDisplayName(member.guildRank ~= "" and member.guildRank or "Guest"), 18))
     local itemId = member.srItemIds and member.srItemIds[1]
-    row.sr:SetText(itemId and Raider.UI.Components.GetItemLabel(itemId) or "")
-    row.srHit.itemId = itemId
-    local srTexture = itemId and type(GetItemIcon) == "function" and GetItemIcon(itemId) or nil
-    if not srTexture and itemId then local _, _, _, _, _, _, _, _, _, cachedTexture = GetItemInfo(itemId); srTexture = cachedTexture end
+    local numericId = tonumber(itemId)
+    row.srHit.labelPrefix = member.srException and "* " or ""
+    row.sr:SetText(itemId and (row.srHit.labelPrefix .. (numericId and Raider.UI.Components.GetItemLabel(numericId) or itemId)) or "")
+    row.srHit.itemId, row.srHit.itemName = numericId, itemId and Raider.Services.ItemReference.Name(itemId)
+    local srTexture = numericId and type(GetItemIcon) == "function" and GetItemIcon(numericId) or nil
+    if not srTexture and numericId then local _, _, _, _, _, _, _, _, _, cachedTexture = GetItemInfo(numericId); srTexture = cachedTexture end
     if srTexture then row.srIcon:SetTexture(srTexture); row.srIcon:Show() else row.srIcon:Hide() end
     if itemId and not lootMasterMode then row.srDelete:Show() else row.srDelete:Hide() end
+    if not itemId and not lootMasterMode then row.srAdd:Show() else row.srAdd:Hide() end
+    if itemId and not lootMasterMode then row.srEdit:Show() else row.srEdit:Hide() end
+    local srInset = 0
+    for _, action in ipairs(row.srActions) do
+        action:ClearAllPoints()
+        if action:IsShown() then action:SetPoint("LEFT", row.srHit, "LEFT", srInset, 0); srInset=srInset+action:GetWidth()+2 end
+    end
+    row.srIcon:ClearAllPoints(); row.srIcon:SetPoint("LEFT", row.srHit, "LEFT", srInset, 0)
+    if srTexture then srInset=srInset+18 end
+    row.sr:ClearAllPoints(); row.sr:SetPoint("LEFT", row.srHit, "LEFT", srInset, 0)
+    row.sr:SetWidth(math.max(1,row.srHit:GetWidth()-srInset))
     local shade = member.online and 1 or 0.55
     SetListTextColor(row, member.online and BootyRaiderDB.raidListTextColor or offlineTextColor, shade)
     row.crown:SetAlpha(member.online and 1 or 0.55); row.lootMasterIcon:SetAlpha(member.online and 1 or 0.55)
@@ -2100,7 +2235,7 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
         if page.listEnabled[columnIndex] then row[column.key]:Show() else row[column.key]:Hide() end
     end
     if page.listEnabled[4] then row.groupHit:Show() else row.groupHit:Hide() end
-    if page.listEnabled[7] and itemId then row.srHit:Show() else row.srHit:Hide() end
+    if page.listEnabled[7] then row.srHit:Show() else row.srHit:Hide() end
     if not page.listEnabled[1] then row.crown:Hide() end
 end
 
@@ -2178,6 +2313,13 @@ function RaidManagement.KeepSelectionVisible(scrollFrame, members, selectedName,
 end
 
 function RaidManagement.RenderListRows(page, rows, members, offset, visibleCount, rowStep, rowStartY, lootMasterMode, tableLeft, tableWidth, lootMethod, raidLootMasterIndex, selectedName, shorten, expandedHeight)
+    page.currentRaidRoles = nil
+    local runtime = Raider.Runtime
+    local attendance = runtime and runtime.GetAttendance and runtime.GetAttendance()
+    if attendance and not attendance.syncEnded and not (page.isTestRaid and page.isTestRaid()) then
+        page.raidRoleBuffer = page.raidRoleBuffer or {}
+        if Raider.Services.Raid.GetCurrentRoles(page.raidRoleBuffer) then page.currentRaidRoles = page.raidRoleBuffer end
+    end
     local rowY = rowStartY
     local rowIndex
     for rowIndex = 1, table.getn(rows) do
@@ -2452,6 +2594,10 @@ function RaidManagement.RefreshGroupView(page)
         local panel = page.groupPanels[groupIndex]
         panel:ClearAllPoints(); panel:SetPoint("TOPLEFT", page.groupCanvas, "TOPLEFT", x, y); panel:SetWidth(panelWidth); panel:SetHeight(bottom - top)
         if visible then panel:Show(); visibleIndex = visibleIndex + 1 else panel:Hide() end
+        -- Window focus reallocates absolute frame levels. Derive the outline
+        -- from the current tiles instead of retaining their creation levels.
+        panel.outlineLevel=panel:GetFrameLevel()+1
+        for _,slot in ipairs(page.groupSlots[groupIndex]) do panel.outlineLevel=math.max(panel.outlineLevel,slot:GetFrameLevel()+2) end
         local header = page.groupHeaders[groupIndex]
         RaidManagement.ApplyGroupTileAppearance(panel, header, headerHeight, settings)
         SetFontSize(header, headerTextSize)
@@ -2534,7 +2680,8 @@ function RaidManagement.RefreshGroupView(page)
             end
         end
         if slot and name then
-            local memberIndex = renderer.getRaidMemberIndex and renderer.getRaidMemberIndex(raidIndex) or raidIndex
+            local memberIndex = raidIndex
+            if renderer.getRaidMemberIndex then memberIndex = renderer.getRaidMemberIndex(raidIndex) end
             slot.raidIndex = memberIndex
             slot.hasMember = true; slot.displayedMember.name = name or "Unknown"; slot.displayedMember.raidRank = raidRank or 0
             slot.displayedMember.raidIndex = memberIndex; slot.displayedMember.subgroup = subgroup
@@ -2657,18 +2804,22 @@ function RaidManagement.CreateGroupGrid(page)
             slot.targetGroup = groupIndex; slot.slotIndex = slotIndex; slot.displayedMember = {}; slot:RegisterForClicks("LeftButtonUp", "RightButtonUp"); slot:RegisterForDrag("LeftButton")
             RaidManagement.AttachGroupSlotHandlers(slot, page)
             page.groupSlots[groupIndex][slotIndex] = slot
-            panel.outlineLevel = math.max(panel.outlineLevel or 0, slot:GetFrameLevel() + 2)
         end
     end
 end
 
 function RaidManagement.CreateMemberMenu(page, runAction, isIgnored)
+    local ancestor=page
+    while ancestor and ancestor~=UIParent do
+        Raider.UI.Components.InstallControlInput(ancestor)
+        ancestor=ancestor:GetParent()
+    end
     local dismiss = Raider.UI.Components.CreateControl(nil, UIParent)
-    dismiss:SetAllPoints(UIParent); dismiss:Hide()
+    dismiss:SetAllPoints(UIParent); dismiss:EnableMouse(true);dismiss:RegisterForClicks("LeftButtonUp","RightButtonUp");dismiss:Hide()
     page.memberMenuDismiss = dismiss
 
     local menu = Raider.UI.Components.CreateContainer(nil, UIParent)
-    menu:SetWidth(132); menu:SetHeight(168)
+    menu:SetWidth(132); menu:SetHeight(168);menu:EnableMouse(true)
     menu:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
     menu:SetBackdropColor(0.03, 0.03, 0.06, 0.98); menu:SetBackdropBorderColor(0.55, 0.55, 0.65, 1)
     menu.title = Raider.UI.Components.CreateLabel(menu, nil, "OVERLAY", "GameFontNormalSmall")
@@ -2686,9 +2837,12 @@ function RaidManagement.CreateMemberMenu(page, runAction, isIgnored)
         button.action = menuSpecs[menuIndex][2]
         button:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
         button:SetScript("OnClick", function()
-            local owner = page.contextSlot
-            if owner and owner.displayedMember then runAction(owner.displayedMember, this.action) end
+            local member,action=menu.member,this.action
             menu:Hide()
+            if member then
+                local ok,reason=runAction(member,action)
+                if ok==false and reason and Raider.Runtime then Raider.Runtime.Print(reason) end
+            end
         end)
         menu.buttons[menuIndex] = button
     end
@@ -2700,7 +2854,10 @@ function RaidManagement.CreateMemberMenu(page, runAction, isIgnored)
     menu.cancel:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
     menu.cancel:SetScript("OnClick", function() menu:Hide() end)
     dismiss:SetScript("OnClick", function() menu:Hide() end)
-    menu:SetScript("OnHide", function() dismiss:Hide() end); menu:Hide()
+    menu:SetScript("OnHide", function()
+        dismiss:Hide();page.contextSlot=nil;menu.member=nil
+        if Raider.UI.Components.openDropdownPanel==menu then Raider.UI.Components.openDropdownPanel=nil end
+    end); menu:Hide()
 
     page.showMemberMenu = function(owner) RaidManagement.ShowMemberMenu(page, owner, isIgnored) end
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(menu, {owner = page, kind = "popup", dismiss = dismiss}) end
@@ -2710,7 +2867,12 @@ end
 function RaidManagement.ShowMemberMenu(page, owner, isIgnored)
     if not owner or not owner.displayedMember then return end
     local member = owner.displayedMember
+    local previous=Raider.UI.Components.openDropdownPanel
+    if previous and previous~=page.memberMenu then previous:Hide() end
     page.contextSlot = owner
+    page.memberMenu.member={name=member.name,raidRank=member.raidRank,raidIndex=member.raidIndex}
+    page.memberMenu.toggle=owner
+    Raider.UI.Components.openDropdownPanel=page.memberMenu
     page.memberMenu.title:SetText(member.name or "Unknown")
     page.memberMenu.buttons[2].label:SetText((tonumber(member.raidRank) or 0) == 1 and "Demote" or "Promote")
     page.memberMenu.buttons[6].label:SetText(isIgnored(member.name) and "Unignore Player" or "Ignore Player")
@@ -2738,8 +2900,7 @@ function RaidManagement.SetActions(page, viewButton, raidLeaderToolsButton, loot
         { button = viewButton, width = 92 },
         { button = raidLeaderToolsButton, width = 118 },
         { button = lootMasterToolsButton, width = 118 },
-        { button = exportButton, width = 88 },
-        { button = quitButton, width = 64 },
+        { button = page.sessionButton, width = 88 },
     }
 end
 
@@ -2765,17 +2926,23 @@ end
 local function ToolSpecs(page, kind)
     local controls = page.refreshControls
     page.toolActionSpecs = page.toolActionSpecs or {
+        session = {{key="save",source=controls.export,caption="Save Raid",icon="save"},
+            {key="sync",source=controls.raidSync,caption="Raid Sync",icon="refresh"},
+            {key="leave",source=controls.leave,caption="Leave Session",icon="quit"},
+            {key="quit",source=controls.quit,caption="End & Save",icon="save"}},
         leader = {{key = "rl-mode", source = controls.leaderMode, caption = "RL Mode", icon = "raid_tools", openRaid = true},
-            {key = "ready-check", source = controls.readyCheck, caption = "Ready Check", icon = "check"}},
+            {key = "ready-check", source = controls.readyCheck, caption = "Ready Check", icon = "check"},
+            {key = "raid-log", source = controls.raidLog, caption = "Raid Log", icon = "rules"}},
         loot = {
-            {key = "loot-mode", source = controls.mode, caption = "Loot Master Mode", icon = "loot_tools"},
-            {key = "reset-loot", source = controls.resetLoot, caption = "Reset Loot", icon = "reset"},
-            {key = "import-sr", source = controls.import, caption = "Import SR", icon = "import"},
-            {key = "share-sr", source = controls.shareSr, caption = "Share SR", icon = "link"},
-            {key = "loot-rules", source = controls.lootRules, caption = "Loot Rules", icon = "rules"},
-            {key = "send-loot-rules", source = controls.sendLootRules, caption = "Send Loot Rules", icon = "rules"},
-            {key = "reycoin", source = controls.reycoin, caption = "Reycoin list", icon = "lootmaster"},
+            {key = "loot-mode", source = controls.mode, caption = "LM Mode", icon = "loot_tools"},
+            {key = "lm-config", source = page.lmConfigToggle, caption = "LM Config", icon = "settings"},
             {key = "new-roll", source = controls.newRoll, caption = "New Roll", icon = "dice"},
+            {key = "reycoin", source = controls.reycoin, caption = "Reycoin list", icon = "lootmaster"},
+            {key = "import-sr", source = controls.import, caption = "Import SR", icon = "import"},
+            {key = "share-sr", source = controls.shareSr, caption = "Share SR link", icon = "link"},
+            {key = "loot-rules", source = controls.lootRules, caption = "Set Loot Rules", icon = "rules"},
+            {key = "send-loot-rules", source = controls.sendLootRules, caption = "Send Loot Rules", icon = "rules"},
+            {key = "reset-loot", source = controls.resetLoot, caption = "Reset Loot History", icon = "reset"},
         },
     }
     return page.toolActionSpecs[kind]
@@ -2790,7 +2957,7 @@ end
 
 local function ToolCaption(spec)
     local caption = spec.source and spec.source.label and spec.source.label:GetText()
-    return caption and caption ~= "" and caption or spec.caption
+    return spec.caption or caption
 end
 
 local function InvokeToolChoice()
@@ -2816,7 +2983,7 @@ function RaidManagement.CreateQuickActions(options, loadSelectedRaid)
         local attendance = options.getAttendance()
         return {
             active = active, test = test, primaryLabel = active and "Open Raid" or "Start new raid",
-            canStart = not active and options.isInRaid() and true or false,
+            canStart = not active,
             canTest = not active, canLoad = not active,
             canSave = active and not test and attendance ~= nil, canQuit = active,
             canTools = active and attendance ~= nil,
@@ -2863,6 +3030,9 @@ function RaidManagement.CreateQuickActions(options, loadSelectedRaid)
         elseif key == "save" then
             if not state.canSave then return false end
             OpenRaid(); return InvokeActionSource(controls.export)
+        elseif key == "leave" then
+            if not state.canQuit then return false end
+            OpenRaid(); return InvokeActionSource(controls.leave)
         elseif key == "quit" then
             if not state.canQuit then return false end
             OpenRaid(); return InvokeActionSource(controls.quit)
@@ -2910,9 +3080,10 @@ function RaidManagement.UpdateToolSubmenu(page)
     for key, panel in pairs(page.toolDropdowns) do if key ~= page.activeToolMenu then panel:Hide() end end
     UI.SetClassicButtonSelected(controls.raidLeaderTools, page.activeToolMenu == "leader")
     UI.SetClassicButtonSelected(controls.lootMasterTools, page.activeToolMenu == "loot")
+    UI.SetClassicButtonSelected(controls.session, page.activeToolMenu == "session")
     if not page.activeToolMenu then return end
     local key = page.activeToolMenu
-    local toggle = key == "leader" and controls.raidLeaderTools or controls.lootMasterTools
+    local toggle = key=="session" and controls.session or key == "leader" and controls.raidLeaderTools or controls.lootMasterTools
     local panel = page.toolDropdowns[key]
     if not panel then
         local specs = ToolSpecs(page, key)
@@ -2946,7 +3117,7 @@ function RaidManagement.UpdateToolSubmenu(page)
         local option = panel.options[index]
         local sourceLabel = option.toolSource and (option.toolSource.label or option.toolSource)
         local caption = sourceLabel and sourceLabel.GetText and sourceLabel:GetText()
-        option:SetText(caption and caption ~= "" and caption or option.toolCaption)
+        option:SetText(option.toolCaption or caption)
         option.label:ClearAllPoints(); option.label:SetPoint("LEFT", option, "LEFT", 4, 0); option.label:SetWidth(0)
         choiceWidth = math.max(choiceWidth, option.label:GetStringWidth() + 16)
         UI.SetButtonEnabled(option, SourceEnabled(option.toolSource))
@@ -2981,7 +3152,8 @@ local function PlaceRaidHeaderLabel(page, control, width, y, left)
     if size < 9 then label:SetFont(font, 9, flags) end
     if label.SetWordWrap then label:SetWordWrap(false) end
     if control.label then control.bootyCaptionBottomInset = 4; Raider.UI.Components.ApplyButtonCaptionBaseline(control)
-    else label:SetHeight(22); label:SetJustifyV("BOTTOM") end
+    else label:SetHeight(math.max(26, size + 4)); label:SetJustifyV("MIDDLE") end
+    control:Show()
     return left + width + 8
 end
 
@@ -2991,7 +3163,10 @@ function RaidManagement.LayoutActions(page)
         local sectionOffset = page.classicSectionOffset or 0
         local UI = Raider.UI.Components
         local pageWidth = PageSpan(page)
-        local available = math.max(1, pageWidth - 12 - (page.raidInfoButton and 36 or 0))
+        local trailing = page.raidInfoButton and page.raidInfoButton:IsShown() and page.raidInfoButton:GetWidth()+8 or 0
+        if page.raidSyncButton and page.raidSyncButton:IsShown() then trailing=trailing+page.raidSyncButton:GetWidth()+6 end
+        if page.convertRaidButton and page.convertRaidButton:IsShown() then trailing=trailing+page.convertRaidButton:GetWidth()+6 end
+        local available = math.max(1, pageWidth - 12 - trailing)
         local showIssues = page.classicIssues:IsShown()
         RestoreHeaderFont(page.classicRaidName); RestoreHeaderFont(page.classicMeta)
         local nameLabel = page.classicRaidName.label or page.classicRaidName
@@ -3007,48 +3182,47 @@ function RaidManagement.LayoutActions(page)
             page.classicIssues.bootyRaidIssuesText = page.classicIssues.bootyRaidIssuesText or page.classicIssues:GetText()
             page.classicIssues:SetText(page.classicIssues.bootyRaidIssuesText)
         end
-        page.exportButton.label:Show(); page.quitButton.label:Show()
+        page.sessionButton.label:Show();page.exportButton:Hide();page.quitButton:Hide();page.leaveButton:Hide()
         local nameWidth = math.max(48, nameLabel:GetStringWidth() + 4)
         local metaWidth = math.max(42, metaLabel:GetStringWidth() + 4)
-        local total = nameWidth + metaWidth + 108 + (showIssues and 96 or 0) + 108 + 90 + (showIssues and 40 or 32)
+        local savedWidth = math.min(pageWidth-24, math.max(108, page.classicSaved.label:GetStringWidth()+20))
+        local total = nameWidth + metaWidth + savedWidth + (showIssues and 96 or 0) + 88 + (showIssues and 48 or 40)
         local compact = total > available
-        page.classicActionOffset = compact and 30 or 0
+        page.classicActionOffset = compact and math.max(30, nameLabel:GetHeight()+4, metaLabel:GetHeight()+4) or 0
         local actionOffset = page.classicActionOffset
         local top, left = -9 - sectionOffset, 6
         local scale = 1
         if compact then
-            page.classicRaidName:Hide()
+            page.classicRaidName:Show()
             metaLabel:SetText(raidId)
             local iconOnly = pageWidth < 300
-            local savedWidth = iconOnly and 72 or 108
-            if iconOnly then page.classicSaved:SetText(savedText == "Not saved yet" and "Not saved" or "Saved") end
-            metaWidth = math.min(math.max(42, metaLabel:GetStringWidth() + 4), math.max(1, pageWidth - 20 - savedWidth))
+            page.classicSaved:SetText(savedText)
+            metaWidth = math.min(math.max(42, metaLabel:GetStringWidth() + 4), math.max(1, (pageWidth - 36 - savedWidth) * 0.45))
             left = PlaceRaidHeaderLabel(page, page.classicMeta, metaWidth, top, left)
+            left = PlaceRaidHeaderLabel(page, page.classicRaidName, math.min(nameWidth, math.max(1, pageWidth - savedWidth - metaWidth - 36)), top, left)
             left = PlaceRaidHeaderButton(page, page.classicSaved, savedWidth, top, left, scale)
             left = 6
-            local actionsWidth = 108 + 90 + (showIssues and 96 or 0)
-            local gaps = showIssues and 16 or 8
+            local actionsWidth = 88 + (showIssues and 96 or 0)
+            local gaps = showIssues and 24 or 16
             if iconOnly then
                 if showIssues then
                     page.classicIssues:SetText(string.gsub(page.classicIssues.bootyRaidIssuesText, "[^%d].*$", ""))
                     left = PlaceRaidHeaderButton(page, page.classicIssues, 40, top - actionOffset, left, 1)
                 end
-                left = PlaceRaidHeaderButton(page, page.exportButton, 26, top - actionOffset, left, 1)
-                left = PlaceRaidHeaderButton(page, page.quitButton, 26, top - actionOffset, left, 1)
-                page.exportButton.label:Hide(); page.quitButton.label:Hide()
+                left = PlaceRaidHeaderButton(page, page.sessionButton, 26, top - actionOffset, left, 1)
+                page.sessionButton.label:Hide()
             else
                 scale = math.min(1, math.max(1, available - gaps) / actionsWidth)
                 if showIssues then left = PlaceRaidHeaderButton(page, page.classicIssues, math.floor(96 * scale), top - actionOffset, left, scale) end
-                left = PlaceRaidHeaderButton(page, page.exportButton, math.floor(108 * scale), top - actionOffset, left, scale)
-                left = PlaceRaidHeaderButton(page, page.quitButton, math.floor(90 * scale), top - actionOffset, left, scale)
+                left = PlaceRaidHeaderButton(page, page.sessionButton, math.floor(88 * scale), top - actionOffset, left, scale)
             end
         else
             page.classicRaidName:Show()
             left = PlaceRaidHeaderLabel(page, page.classicMeta, metaWidth, top, left)
             left = PlaceRaidHeaderLabel(page, page.classicRaidName, nameWidth, top, left)
-            left = PlaceRaidHeaderButton(page, page.classicSaved, 108, top, left, scale)
+            left = PlaceRaidHeaderButton(page, page.classicSaved, savedWidth, top, left, scale)
             if showIssues then left = PlaceRaidHeaderButton(page, page.classicIssues, 96, top, left, scale) end
-            left = PlaceRaidHeaderButton(page, page.exportButton, 108, top, left, scale); left = PlaceRaidHeaderButton(page, page.quitButton, 90, top, left, scale)
+            left=PlaceRaidHeaderButton(page,page.sessionButton,88,top,left,scale)
         end
         page.classicActionScale = scale
         UI.SetButtonLabelInsets(page.classicSaved, 8, 4)
@@ -3056,7 +3230,8 @@ function RaidManagement.LayoutActions(page)
             page.raidInfoButton:ClearAllPoints(); page.raidInfoButton:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, top - actionOffset)
             page.raidInfoButton:Show()
         end
-        page.classicToolbar:ClearAllPoints(); page.classicToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", 4, -48 - sectionOffset - actionOffset); page.classicToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", -4, -48 - sectionOffset - actionOffset); page.classicToolbar:SetHeight(42 + toolbarOffset)
+        local toolbarInset = page.bootyStandalone and 0 or 4
+        page.classicToolbar:ClearAllPoints(); page.classicToolbar:SetPoint("TOPLEFT", page, "TOPLEFT", toolbarInset, -48 - sectionOffset - actionOffset); page.classicToolbar:SetPoint("TOPRIGHT", page, "TOPRIGHT", -toolbarInset, -48 - sectionOffset - actionOffset); page.classicToolbar:SetHeight(42 + toolbarOffset)
         page.classicListButton:ClearAllPoints(); page.classicListButton:SetPoint("TOPLEFT", page, "TOPLEFT", 8, -56 - sectionOffset - actionOffset)
         page.classicGroupButton:ClearAllPoints(); page.classicGroupButton:SetPoint("LEFT", page.classicListButton, "RIGHT", 8, 0)
         page.classicTwoButton:ClearAllPoints(); page.classicTwoButton:SetPoint("LEFT", page.classicGroupButton, "RIGHT", 8, 0)
@@ -3224,6 +3399,13 @@ end
 function RaidManagement.HandleWorldContext(options, context, confirmed)
     if options.setTransitionPending then options.setTransitionPending(nil) end
     local attendance = options.getAttendance()
+    if not options.isTestRaid() and HandleEndedSession(options, attendance) then
+        context.active = false; context.observedRaid = false
+        context.raidZone = nil; context.promptedContext = nil
+        options.setContinuedContext(nil)
+        options.hideSessionTransitionPrompt(); options.hideRaidStartReminder()
+        return
+    end
     local zone = options.getZone() or ""
     local inInstance, instanceType = options.getInstanceState()
     local inRaidInstance = inInstance and instanceType == "raid"
@@ -3243,6 +3425,7 @@ function RaidManagement.HandleWorldContext(options, context, confirmed)
     end
     if options.isTestRaid() or not hasSession then
         context.active = false
+        context.observedRaid = false
         context.raidZone = nil
         context.promptedContext = nil
         options.setContinuedContext(nil)
@@ -3255,6 +3438,7 @@ function RaidManagement.HandleWorldContext(options, context, confirmed)
         context.sessionId = attendance.snapshotId
         context.startedAt = attendance.sessionStartedAt
         context.raidZone = nil
+        context.observedRaid = false
         context.promptedContext = nil
         options.setContinuedContext(nil)
         options.hideSessionTransitionPrompt()
@@ -3262,12 +3446,15 @@ function RaidManagement.HandleWorldContext(options, context, confirmed)
     -- A saved/session display name is not an instance identity. Observe the
     -- actual client context instead, without persisting derived zone state.
     local contextKey = options.getSessionTransitionContext and options.getSessionTransitionContext()
+    -- Saved attendance can outlive the physical group. Initial absence after
+    -- login is a baseline, not evidence that the player just left a raid.
+    if inRaid then context.observedRaid = true end
     if not contextKey and inRaid and (not instanceType or instanceType == "") then return end
     if contextKey then
         -- A saved roster can belong to another physical group in the same zone.
         -- Preserve it until the user makes the existing session choice.
     elseif not inRaid then
-        contextKey = "outside-raid-context"
+        if context.observedRaid then contextKey = "outside-raid-context" end
     elseif context.raidZone and not inRaidInstance then
         contextKey = "outside-raid-context"
     elseif context.raidZone and zone ~= "" and context.raidZone ~= zone then
@@ -3374,6 +3561,10 @@ function RaidManagement.CreateLifecycle(options)
         if options.page.memberMenu then options.page.memberMenu:Hide() end
         if options.page.memberMenuDismiss then options.page.memberMenuDismiss:Hide() end
         if not detached and options.page.softReserveImportDialog then options.page.softReserveImportDialog:Hide() end
+        if options.page.raidTypePanel then options.page.raidTypePanel:Hide() end
+        if options.page.lmConfigSolo then options.page.lmConfigPanel:Hide();options.page.lmConfigOpen=false end
+        if options.page.srEditor then options.page.srEditor:Hide() end
+        if options.page.srReview then options.page.srReview:Hide() end
         if options.page.softReserveFixDialog and options.page.softReserveFixDialog.Close then options.page.softReserveFixDialog:Close() end
         if not detached and options.page.lootRulesDialog and options.page.lootRulesDialog.Close then options.page.lootRulesDialog:Close() end
         if options.page.contestedItemsDialog then options.page.contestedItemsDialog:Hide() end
@@ -3447,19 +3638,30 @@ function RaidManagement.CreateLootMasterController(options)
     options.page.reyCoinPanel:ClearAllPoints()
     options.page.reyCoinPanel:SetPoint("TOPLEFT", options.page.lmConfigPanel, "TOPLEFT", 0, 0)
     if UI.WindowStack then
-        UI.WindowStack.Register(options.page.lmConfigPanel, {owner = window})
+        UI.WindowStack.Register(options.page.lmConfigPanel, {owner = function() return options.page.lmConfigSolo and options.page or window end})
         UI.WindowStack.Register(options.page.reyCoinPanel, {owner = function()
             return options.page.reyCoinSolo and options.page or window
         end})
     end
     controller.ReanchorPanels = function()
-        options.page.lmConfigPanel:ClearAllPoints()
-        options.page.lmConfigPanel:SetPoint("TOPLEFT", window, "TOPRIGHT", 0, 0)
+        if not options.page.lmConfigSolo then
+            options.page.lmConfigPanel:ClearAllPoints()
+            options.page.lmConfigPanel:SetPoint("TOPLEFT", window, "TOPRIGHT", 0, 0)
+        end
         if not options.page.reyCoinSolo then
             options.page.reyCoinPanel:ClearAllPoints()
             options.page.reyCoinPanel:SetPoint("TOPLEFT", window, "TOPRIGHT", 0, 0)
         end
     end
+    controller.ToggleConfig = function()
+        local panel=options.page.lmConfigPanel
+        if panel:IsShown() then options.page.lmConfigOpen=false;panel:Hide();return end
+        options.page.lmConfigSolo=not window:IsShown()
+        if options.page.lmConfigSolo then panel:ClearAllPoints();panel:SetPoint("CENTER",UIParent,"CENTER",0,0)
+        else controller.ReanchorPanels() end
+        options.page.reyCoinPanel:Hide();options.page.lmConfigOpen=true;panel:Show()
+    end
+    options.page.lmConfigToggle:SetScript("OnClick",controller.ToggleConfig)
     local function SetupSidePanelResize(panel, widthKey, heightKey, minimumWidth, minimumHeight)
         minimumWidth = minimumWidth or 150; minimumHeight = minimumHeight or 90
         local settings = options.getSettings()
@@ -3489,6 +3691,10 @@ function RaidManagement.CreateLootMasterController(options)
     reyGrip:SetWidth(12); reyGrip:SetHeight(12)
     options.page.reyCoinPanel.resizeGrip.texture:Hide()
     UI.RegisterSkinCallback(function() options.page.reyCoinPanel.resizeGrip.texture:Hide() end)
+    local configPanel=options.page.lmConfigPanel
+    configPanel:SetMovable(true);configPanel:EnableMouse(true);configPanel:RegisterForDrag("LeftButton")
+    configPanel:SetScript("OnDragStart",function() if options.page.lmConfigSolo then configPanel:StartMoving() end end)
+    configPanel:SetScript("OnDragStop",function() configPanel:StopMovingOrSizing();controller.ReanchorPanels() end)
     local reyPanel = options.page.reyCoinPanel
     reyPanel:SetMovable(true); reyPanel:RegisterForDrag("LeftButton")
     reyPanel:SetScript("OnDragStart", function() if options.page.reyCoinSolo then reyPanel:StartMoving() end end)
@@ -3627,12 +3833,7 @@ function RaidManagement.CreateLootMasterController(options)
         minimize:SetScript("OnClick", function() controller.toggleMinimize() end)
         config = UI.CreateSettingsButton(window); config:SetPoint("RIGHT", minimize, "LEFT", -2, 0)
         UI.AttachTooltip(config, "LM Config", "Open Loot Master configuration.")
-        config:SetScript("OnClick", function()
-            controller.ReanchorPanels()
-            options.page.reyCoinPanel:Hide()
-            options.page.lmConfigOpen = not options.page.lmConfigOpen
-            if options.page.lmConfigOpen then options.page.lmConfigPanel:Show() else options.page.lmConfigPanel:Hide() end
-        end)
+        config:SetScript("OnClick", controller.ToggleConfig)
         reycoin = UI.CreateGoldToolbarButton(window, "list")
         UI.AttachTooltip(reycoin, "Reycoin List", "View used Reycoins and pending item trades.")
         reycoin:SetPoint("RIGHT", config, "LEFT", -2, 0)
@@ -3757,15 +3958,15 @@ function RaidManagement.AttachActionHandlers(options)
         failedCancellationId, failedCancellationToken, failedOperationReason, failedCancellationMessage = nil, nil, nil, nil
         return true
     end
-    local newRaidDialog = Raider.UI.Components.CreateTextPrompt("BootyRaiderNewRaidDialog", "Start New Raid", "Unique raid ID", "Start", function(value)
+    local newRaidDialog
+    newRaidDialog = Raider.UI.Components.CreateTextPrompt("BootyRaiderNewRaidDialog", "Start New Raid", "Unique raid ID", "Start", function(value)
         local cleaned, cleanupFailure = RetryFailedCancellation()
         if cleaned == false then return false, cleanupFailure end
         value = string.gsub(tostring(value or ""), "^%s+", ""); value = string.gsub(value, "%s+$", "")
         if value == "" then return false, "Raid ID is required." end
         if options.raidIdExists(value) then return false, "This raid ID already exists." end
-        if not options.isInRaid() then return false, "Join a raid before starting a session." end
         local priorPendingId = Raider.pendingRaidSessionId
-        local started, startFailure = options.startNewRaid(value, selectedRaidName)
+        local started, startFailure = options.startNewRaid(value, selectedRaidName, newRaidDialog.raidSync:GetChecked() and true or false)
         if started == false then
             local message = startFailure or "Finish the current session or scan first."
             if not priorPendingId and Raider.pendingRaidSessionId == value then
@@ -3799,10 +4000,16 @@ function RaidManagement.AttachActionHandlers(options)
     end)
     local openNewRaidDialog = newRaidDialog.Open
     newRaidDialog.Open = function(self)
+        self.raidSync:SetChecked(true)
         openNewRaidDialog(self)
         if failedCancellationMessage then self.message:SetText(failedCancellationMessage); self.message:SetTextColor(1, 0.25, 0.2) end
     end
-    newRaidDialog:SetHeight(190)
+    newRaidDialog:SetHeight(220)
+    newRaidDialog.raidSync=Raider.UI.Components.CreateCheckButton(nil,newRaidDialog,"UICheckButtonTemplate")
+    newRaidDialog.raidSync:SetWidth(22);newRaidDialog.raidSync:SetHeight(22);newRaidDialog.raidSync:SetPoint("TOPLEFT",newRaidDialog,"TOPLEFT",18,-142);newRaidDialog.raidSync:SetChecked(true)
+    newRaidDialog.raidSync.label=Raider.UI.Components.CreateLabel(newRaidDialog,nil,"OVERLAY","GameFontHighlightSmall")
+    newRaidDialog.raidSync.label:SetPoint("LEFT",newRaidDialog.raidSync,"RIGHT",3,0);newRaidDialog.raidSync.label:SetText("Raid sync")
+    Raider.UI.Components.AttachTooltip(newRaidDialog.raidSync,"Raid sync","Share this raid and its CSR data with authorized officers. Uncheck to keep it local. You can enable synchronization later.")
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(newRaidDialog, options.page) end
     Raider.UI.Components.SetHeadingIcon(newRaidDialog.title,"raids")
     newRaidDialog.raidLabel = Raider.UI.Components.CreateLabel(newRaidDialog, nil, "OVERLAY", "GameFontHighlightSmall")
@@ -3894,6 +4101,10 @@ function RaidManagement.AttachActionHandlers(options)
             local snapshot = options.page.raidHistorySnapshots and options.page.raidHistorySnapshots[this.historyIndex]
             if snapshot then editRaidDialog:Open(snapshot) end
         end)
+        controls.historyLogButtons[historyIndex]:SetScript("OnClick", function()
+            local snapshot = options.page.raidHistorySnapshots and options.page.raidHistorySnapshots[this.historyIndex]
+            if snapshot and options.page.OpenRaidLog then options.page.OpenRaidLog(snapshot) end
+        end)
     end
     local liveLoadDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderLiveLoad", "Live Tracking", "Yes", "refresh")
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(liveLoadDialog, options.page) end
@@ -3906,12 +4117,19 @@ function RaidManagement.AttachActionHandlers(options)
         options.refresh()
     end
     local function OfferCurrentRaidRefresh()
-        if not options.isInRaid() then return end
+        if not options.isInRaid() or (options.getAttendance() and options.getAttendance().syncEnded) then return end
         liveLoadDialog:Open("Refresh members from your current raid? This replaces the member list. Matching members keep their loot and SR. Choose No to keep the current data.", function()
+            if options.acceptLoadedRaid and options.acceptLoadedRaid()==false then
+                if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print("The current raid roster is not ready. Try Record raid events again in a moment.") end
+                return
+            end
             local updated
             if options.refreshCurrentRaid then updated = options.refreshCurrentRaid()
             else options.saveRaidRoster(); options.setHistoricalLoaded(false); updated = true end
-            if updated == false then return end
+            if updated == false then
+                if Raider.Runtime and Raider.Runtime.Print then Raider.Runtime.Print("The current raid roster is not ready. Try Record raid events again in a moment.") end
+                return
+            end
             Raider.Database.SetSetting("raidLiveTrackingEnabled", true); options.setLiveTracking(true); options.refresh()
         end, StopLoadedTracking)
     end
@@ -3925,7 +4143,7 @@ function RaidManagement.AttachActionHandlers(options)
             options.beginRaidSession()
             if options.acceptLoadedRaid then options.acceptLoadedRaid() end
             options.setHistoricalLoaded(true); options.setScanReady(true); options.refresh()
-            if resumeTracking and not (options.hasPendingRaidTransition and options.hasPendingRaidTransition()) then
+            if resumeTracking and not (options.getAttendance() and options.getAttendance().syncEnded) and not (options.hasPendingRaidTransition and options.hasPendingRaidTransition()) then
                 options.setLiveTracking(false)
                 liveLoadDialog:Open("Do you want to refresh saved raid data with current raid? Pressing No turns off Live Tracking option in Settings. Remember to turn it on if desired.", function()
                     options.saveRaidRoster(); options.setHistoricalLoaded(false); Raider.Database.SetSetting("raidLiveTrackingEnabled", true); options.setLiveTracking(true); options.refresh()
@@ -3958,7 +4176,6 @@ function RaidManagement.AttachActionHandlers(options)
         this:SetInactive(false)
     end)
     controls.scan:SetScript("OnClick", function()
-        if not options.isInRaid() then options.refresh(); return end
         newRaidDialog:Open()
     end)
     controls.testRaid:SetScript("OnClick", function()
@@ -4018,6 +4235,17 @@ function RaidManagement.AttachActionHandlers(options)
         if pendingSaveRequest and options.cancelRaidSave then options.cancelRaidSave(pendingSaveRequest.confirmation) end
         pendingSaveRequest = nil
     end
+    options.page.CancelSessionSave = function()
+        saveDialog.transitionContext = nil
+        CancelPreparedSave(); overwriteDialog:Hide(); saveDialog:Hide()
+        saveDialog.attendanceOwner = nil
+    end
+    local function StopEndedTransition()
+        if not HandleEndedSession(options, options.getAttendance()) then return false end
+        if sessionPrompt then sessionPrompt:Hide() end
+        options.page.CancelSessionSave()
+        return true
+    end
     local overwriteHide = overwriteDialog:GetScript("OnHide")
     overwriteDialog:SetScript("OnHide", function()
         if overwriteHide then overwriteHide() end
@@ -4032,6 +4260,7 @@ function RaidManagement.AttachActionHandlers(options)
         saveDialog.error:SetText(message or "The raid could not be saved."); saveDialog.error:Show()
     end
     local function SubmitSave(request)
+        if StopEndedTransition() then return end
         pendingSaveRequest = nil
         local saved, failure = options.saveRaidSession(request)
         if saved == true then saveDialog.transitionContext = nil; saveDialog:Hide()
@@ -4046,11 +4275,13 @@ function RaidManagement.AttachActionHandlers(options)
         CancelPreparedSave(); overwriteDialog:Hide(); saveDialog.attendanceOwner = nil
     end)
     saveDialog.cancel:SetScript("OnClick", function()
+        local transitionContext = saveDialog.transitionContext
         saveDialog:Hide()
-        if saveDialog.transitionContext and sessionPrompt then sessionPrompt:Show() end
         saveDialog.transitionContext = nil
+        if transitionContext and not StopEndedTransition() then options.page.ShowSessionTransitionPrompt(transitionContext) end
     end)
     saveDialog.save:SetScript("OnClick", function()
+        if StopEndedTransition() then return end
         local raidId=string.gsub(tostring(saveDialog.raidId:GetText() or ""),"^%s+","");raidId=string.gsub(raidId,"%s+$","")
         if raidId=="" then saveDialog.error:SetText("Raid ID is required.");saveDialog.error:Show();return end
         if options.getAttendance() ~= saveDialog.attendanceOwner then SaveFailure("The active raid changed. Reopen Save Raid before saving."); return end
@@ -4067,7 +4298,7 @@ function RaidManagement.AttachActionHandlers(options)
         CancelPreparedSave()
         local request, exists = options.prepareRaidSave({raidId=raidId,saveRaidStatistics=saveStatistics,saveAttendance=saveAttendance,saveCSR=saveCSR,
             saveRaidEndTime=not saveDialog.hasEndTime and saveDialog.endTimeCheck:GetChecked() and true or false,
-            modifyRaidEndTime=modifyEnd,endedAt=endedAt})
+            modifyRaidEndTime=modifyEnd,endedAt=endedAt,endSession=saveDialog.endSession})
         if not request then SaveFailure(exists); return end
         pendingSaveRequest = request
         if exists then
@@ -4079,17 +4310,20 @@ function RaidManagement.AttachActionHandlers(options)
         else SubmitSave(request) end
     end)
     saveDialog.Open = function(self)
+        self.save:SetText(self.endSession and "End & Save" or "Save")
+        self.title:SetText(self.endSession and "End & Save" or "Save Raid")
         CancelPreparedSave(); overwriteDialog:Hide()
         local attendance=options.getAttendance and options.getAttendance()
         self.attendanceOwner=attendance
         local flags=attendance and attendance.saveOptions
         self.originalEndTime=attendance and tonumber(attendance.endedAt)
-        self.hasEndTime=self.originalEndTime~=nil
+        self.hasEndTime=not self.endSession and self.originalEndTime~=nil
         local offset=self.hasEndTime and 28 or 0
         self:SetHeight(250+offset)
         self.endTimeCheck:ClearAllPoints();self.endTimeCheck:SetPoint("TOPLEFT",self,"TOPLEFT",18,-70-offset)
-        self.endTimeCheck.label:SetText(self.hasEndTime and "Modify raid end time" or "Save raid end time")
-        self.endTimeCheck:SetChecked(not self.hasEndTime and attendance and not attendance._loadedSnapshotId)
+        self.endTimeCheck.label:SetText(self.endSession and "End session for all officers" or self.hasEndTime and "Modify raid end time" or "Save raid end time")
+        self.endTimeCheck:SetChecked(self.endSession or not self.hasEndTime and attendance and not attendance._loadedSnapshotId)
+        Raider.UI.Components.SetButtonEnabled(self.endTimeCheck,not self.endSession)
         if self.hasEndTime then self.endTimeLabel:Show();self.raidEndTime:Show() else self.endTimeLabel:Hide();self.raidEndTime:Hide() end
         self.error:ClearAllPoints();self.error:SetPoint("TOPLEFT",self,"TOPLEFT",18,-98-offset);self.error:SetWidth(304);self.error:SetHeight(22)
         self.statistics:ClearAllPoints();self.statistics:SetPoint("TOPLEFT",self,"TOPLEFT",18,-126-offset)
@@ -4100,25 +4334,32 @@ function RaidManagement.AttachActionHandlers(options)
         self.raidId:SetText(attendance and (attendance.snapshotId or (attendance.softReserveImport and attendance.softReserveImport.id)) or "")
         self.error:Hide();SyncAttendanceOption(); self:Show();self.raidId:SetFocus();self.raidId:HighlightText()
     end
-    options.page.OpenSaveDialog = function(contextKey) saveDialog.transitionContext=contextKey;saveDialog:Open() end
+    options.page.OpenSaveDialog = function(contextKey, endSession)
+        if StopEndedTransition() then return end
+        saveDialog.transitionContext=contextKey;saveDialog.endSession=endSession==true;saveDialog:Open()
+    end
     saveDialog:Hide()
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(saveDialog, {owner = options.page}) end
     options.page.saveSessionDialog = saveDialog
     controls.export:SetScript("OnClick", function()
         if options.isTestRaid and options.isTestRaid() then return end
-        saveDialog.transitionContext = nil
-        saveDialog:Open()
+        options.page.OpenSaveDialog(nil,false)
     end)
     controls.addStatistics:Hide()
-    StaticPopupDialogs["BOOTY_RAIDER_QUIT_RAID_SESSION"] = {
-        text = "Quit the current raid session without saving?", button1 = "Quit", button2 = "Cancel",
-        OnAccept = function() options.quitRaidSession(); RaidManagement.ResetIssueAttention(options.page); options.refresh() end,
-        timeout = 0, whileDead = 1, hideOnEscape = 1,
-    }
-    local quitDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderQuitRaidDialog", "Quit Raid", "Quit", "quit")
-    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(quitDialog, options.page) end
-    options.page.quitDialog = quitDialog
-    controls.quit:SetScript("OnClick", function() quitDialog:Open("Quit the current raid session without saving?", StaticPopupDialogs.BOOTY_RAIDER_QUIT_RAID_SESSION.OnAccept) end)
+    local leaveDialog = Raider.UI.Components.Window.CreateProjectConfirmation("BootyRaiderLeaveSessionDialog", "Leave Session", "Leave", "quit")
+    if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.SetOwner(leaveDialog, options.page) end
+    options.page.quitDialog = leaveDialog
+    controls.leave:SetScript("OnClick", function()
+        leaveDialog:Open("Leave this session on your character? Other officers can continue. No new snapshot will be created.", function()
+            local ok,reason=options.quitRaidSession(true)
+            if ok==false then Raider.Runtime.Print(reason or "Could not leave the session.");return end
+            RaidManagement.ResetIssueAttention(options.page);options.refresh()
+        end)
+    end)
+    controls.quit:SetScript("OnClick", function()
+        if options.isTestRaid and options.isTestRaid() then options.quitRaidSession(true);options.refresh();return end
+        options.page.OpenSaveDialog(nil,true)
+    end)
 
     sessionPrompt = Raider.UI.Components.CreateContainer("BootyRaiderRaidSessionPrompt", UIParent)
     sessionPrompt:SetWidth(390); sessionPrompt:SetHeight(150); sessionPrompt:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
@@ -4149,21 +4390,24 @@ function RaidManagement.AttachActionHandlers(options)
     sessionPrompt:Hide()
     if Raider.UI.Components.WindowStack then Raider.UI.Components.WindowStack.Register(sessionPrompt, {owner = options.page}) end
     continueButton:SetScript("OnClick", function()
+        if StopEndedTransition() then return end
         sessionPrompt:Hide()
         if options.continueRaidSession then options.continueRaidSession(sessionPrompt.contextKey) end
         if sessionPrompt.contextKey and string.find(sessionPrompt.contextKey, "different-raid-context|", 1, true) == 1 then OfferCurrentRaidRefresh() end
     end)
     saveButton:SetScript("OnClick", function()
+        if StopEndedTransition() then return end
         sessionPrompt:Hide()
-        saveDialog.transitionContext = sessionPrompt.contextKey
-        saveDialog:Open()
+        options.page.OpenSaveDialog(sessionPrompt.contextKey,true)
     end)
     closeButton:SetScript("OnClick", function()
+        if StopEndedTransition() then return end
         sessionPrompt:Hide()
         if options.dismissRaidSessionTransition then options.dismissRaidSessionTransition(sessionPrompt.contextKey) end
         options.refresh()
     end)
     options.page.ShowSessionTransitionPrompt = function(contextKey)
+        if StopEndedTransition() then return end
         if sessionPrompt:IsVisible() then return end
         sessionPrompt.contextKey = contextKey
         if contextKey and string.find(contextKey, "different-raid-context|", 1, true) == 1 then
@@ -4197,6 +4441,9 @@ function RaidManagement.AttachActionHandlers(options)
     options.page.HideRaidStartReminder = function()
         Raider.UI.Components.HideOpaquePopup("BOOTY_RAIDER_START_RAID_REMINDER")
     end
+    controls.session:SetScript("OnClick",function()
+        options.page.activeToolMenu=options.page.activeToolMenu~="session" and "session" or nil;options.refresh()
+    end)
     controls.raidLeaderTools:SetScript("OnClick", function()
         if options.page.activeToolMenu == "leader" then options.page.activeToolMenu = nil else options.page.activeToolMenu = "leader" end
         options.refresh()
@@ -4218,19 +4465,10 @@ function RaidManagement.AttachActionHandlers(options)
         if not sent and message then options.printMessage(message) end
     end)
     controls.live:SetScript("OnClick", function()
-        local tracking = not options.getLiveTracking()
-        options.setLiveTracking(tracking)
-        controls.live:SetText(tracking and "Stop Live Tracking" or "Start Live Tracking")
-        if tracking then
-            if not options.isInRaid() then
-                options.setLiveTracking(false); controls.live:SetText("Start Live Tracking")
-                options.printMessage("You must be in a raid to start live tracking.")
-            else
-                options.saveRaidRoster(); options.setScanReady(true); options.refresh(); options.printMessage("Raid live tracking started.")
-            end
-        else
-            options.printMessage("Raid live tracking stopped.")
-        end
+        if options.isTestRaid and options.isTestRaid() then return end
+        local historical=Raider.Runtime and Raider.Runtime.historicalLoaded
+        if not historical and options.getLiveTracking() then StopLoadedTracking()
+        elseif options.isInRaid() then OfferCurrentRaidRefresh() end
     end)
     return RaidManagement.CreateQuickActions(options, LoadSelectedRaid)
 end
@@ -4323,7 +4561,7 @@ function RaidManagement.CreateAutoLootControls(page, view)
     modeLabel:SetFont(font, size, flags); label:SetFont(font, size, flags); exceptionsLabel:SetFont(font, size, flags)
     inclusionsLabel:SetFont(font, size, flags)
     view.lmConfigLabels = { modeLabel, label, exceptionsLabel, inclusionsLabel }
-    local presetLabel = UI.CreateComponentLabel(panel, "Add Exclusions Preset", "white")
+    local presetLabel = UI.CreateComponentLabel(panel, "Add Exclusion Preset:", "white")
     presetLabel:SetFont(font, size, flags); table.insert(view.lmConfigLabels, presetLabel)
     presetLabel:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 8, 34)
     local presets = UI.CreateDropdownButton(panel, nil, "None", 184)
@@ -4344,9 +4582,14 @@ function RaidManagement.CreateAutoLootControls(page, view)
     end
     local function LayoutConfig()
         local width = math.max(94, panel:GetWidth() - 150)
+        mode:ClearAllPoints(); mode:SetPoint("TOPLEFT", panel, "TOPLEFT", 142, -34)
         mode:SetWidth(width); rarity:SetWidth(width); presets:SetWidth(width)
-        presetLabel:ClearAllPoints(); presetLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -94)
         presets:ClearAllPoints(); presets:SetPoint("TOPLEFT", panel, "TOPLEFT", 160, -94); presets:SetWidth(math.max(84,panel:GetWidth()-168))
+        for _, pair in ipairs({{modeLabel,mode},{label,rarity},{presetLabel,presets}}) do
+            local caption,field=pair[1],pair[2]
+            caption:ClearAllPoints();caption:SetPoint("RIGHT",field,"LEFT",-8,0)
+            caption:SetWidth(pair[1]==presetLabel and 144 or 126);caption:SetHeight(field:GetHeight());caption:SetJustifyH("LEFT");caption:SetJustifyV("MIDDLE")
+        end
         exceptionsLabel:ClearAllPoints(); exceptionsLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -124)
         local areaHeight = math.max(64, (panel:GetHeight() - 188) / 2)
         exclusionsArea:ClearAllPoints(); exclusionsArea:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -144)
@@ -4385,6 +4628,22 @@ function RaidManagement.CreateAutoLootControls(page, view)
     local modeClick, rarityClick = mode:GetScript("OnClick"), rarity:GetScript("OnClick")
     mode:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); modeClick() end)
     rarity:SetScript("OnClick", function() ClearTextFocus(); presetPanel:Hide(); rarityClick() end)
+    local shownPresetMask, shownExclusions, shownInclusions
+    page.RefreshAutoLootConfig = function(force)
+        local mask=Raider.Database.GetSetting("lmAutoLootPresets")
+        local text=Raider.Database.GetSetting("lmAutoLootExceptions")
+        local included=Raider.Database.GetSetting("lmAutoLootInclusions")
+        if force or included~=shownInclusions then
+            shownInclusions=included
+            if inclusions:GetText()~=included then inclusions:SetText(included) end
+        end
+        if force or mask~=shownPresetMask or text~=shownExclusions then
+            shownPresetMask,shownExclusions=mask,text
+            RefreshPresets()
+            if presetPanel:IsShown() then UI.FilterPanel.Refresh(presetPanel, presetNames, presetSelected, SavePresets, false, true) end
+            if exceptions:GetText()~=text then exceptions:SetText(text) end
+        end
+    end
     panel:SetScript("OnShow", function()
         LayoutConfig()
         if page.lootMasterController then page.lootMasterController.ReanchorPanels() end
@@ -4399,7 +4658,7 @@ function RaidManagement.CreateAutoLootControls(page, view)
         inclusionTooltip:SetFrameStrata(strata); inclusionTooltip:SetFrameLevel(level)
         tooltipHit:SetFrameStrata(strata); tooltipHit:SetFrameLevel(level)
         presets:SetFrameStrata(strata); presets:SetFrameLevel(level)
-        RefreshPresets()
+        page.RefreshAutoLootConfig(true)
         local value = Raider.Database.GetSetting("lmAutoLootMode")
         mode:SetText(value == "auto" and "Auto Loot" or value == "shift" and "Shift Loot" or "Off")
         RefreshRarity(); exceptions:SetText(Raider.Database.GetSetting("lmAutoLootExceptions"))

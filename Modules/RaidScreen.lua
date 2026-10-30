@@ -8,6 +8,7 @@ Raider.Modules.RaidScreen = Screen
 function Screen.Create(parent, host)
     Runtime.Initialize(host)
     local page = UI.CreateContainer(nil,parent)
+    page.bootyStandalone = host and host.standalone or false
     page:SetAllPoints(parent);page.bootyWidthOwner=parent;page.bootyHeightOwner=parent
     page.bootyWidthInset=0;page.bootyHeightInset=0;page:Hide()
     local function SizePage()
@@ -25,6 +26,17 @@ function Screen.Create(parent, host)
         toggleMinimize=function() if page.lootMasterController then page.lootMasterController.toggleMinimize() end end,
     })
     local actions=Raid.CreateActionControls(page)
+    function page.OpenRaidLog(record)
+        if Runtime.IsTestRaid() then return false end
+        local ok,result=Raider.Modules.RaidLog.Open(record or Runtime.GetAttendance(),page)
+        if not ok then Runtime.Print(result) end
+        return ok,result
+    end
+    function page.OpenRaidSync(record)
+        local ok,result=Raider.Modules.RaidSync.Open(record or Runtime.GetAttendance(),page)
+        if not ok then Runtime.Print(result) end
+        return ok,result
+    end
     local function RunAction(member,action) return Runtime.ActiveRaidService().RunMemberAction(member,action) end
     local function Counts() return Runtime.ActiveRaidService().GetGroupCounts() end
     local function MoveGroup(member,group) return Runtime.ActiveRaidService().MoveMemberToGroup(member,group) end
@@ -81,10 +93,49 @@ function Screen.Create(parent, host)
         getData=Runtime.GetAttendance,getSelectedName=function() return selectedName end,getSortKey=function() return sortKey end,
         getSettings=function() return BootyRaiderDB end,
     })
+    local raidTypeButton=UI.CreateControl(nil,page)
+    page.raidTypeButton=raidTypeButton
+    UI.AttachTooltip(raidTypeButton,"Raid Type","Click to change the type of this session. Existing SR and loot are preserved.")
+    raidTypeButton:Hide()
+    local selectedAttendance
+    raidTypeButton:SetScript("OnClick",function()
+        if page.raidTypePanel and page.raidTypePanel:IsShown() then page.raidTypePanel:Hide();return end
+        selectedAttendance=Runtime.GetAttendance()
+        if Runtime.IsTestRaid() or not Raider.Services.RaidRes.HasSession(selectedAttendance) then return end
+        if not page.raidTypePanel then
+            local names=Raider.Services.RaidStatistics.GetRaidNames()
+            local panel=UI.CreateDropdownPanel(page,raidTypeButton,200,16+table.getn(names)*24,10)
+            page.raidTypePanel=panel
+            panel.options={}
+            for _,name in ipairs(names) do
+                local choice=UI.CreateButton(panel,nil,name,184,22)
+                choice:SetPoint("TOPLEFT",panel,"TOPLEFT",8,-8-table.getn(panel.options)*24)
+                choice.raidName=name;table.insert(panel.options,choice)
+                choice:SetScript("OnClick",function()
+                    local ok,reason=Runtime.session:SetRaidType(this.raidName,selectedAttendance)
+                    if not ok then Runtime.Print(reason);panel:Hide();return end
+                    if page.srEditor then page.srEditor:Hide() end
+                    if page.srReview then page.srReview:Hide() end
+                    panel:Hide();Refresh()
+                end)
+            end
+        end
+        page.raidTypePanel:Show()
+    end)
     Refresh=function()
+        if Raider.Modules.RaidLog then Raider.Modules.RaidLog.RefreshVisible() end
+        if Raider.Modules.RaidSync then Raider.Modules.RaidSync.RefreshVisible() end
         if not page:IsVisible() and not (page.lootMasterController and page.lootMasterController.IsVisible()) then return end
-        if page:IsVisible() then Raid.RefreshPage(renderer) end
+        if page:IsVisible() then
+            Raid.RefreshPage(renderer)
+            local attendance=Runtime.GetAttendance()
+            local label=UI.IsClassicSkin() and page.classicRaidName or page.refreshControls.title
+            if not Runtime.IsTestRaid() and Raider.Services.RaidRes.HasSession(attendance) and label:IsShown() then
+                raidTypeButton:ClearAllPoints();raidTypeButton:SetAllPoints(label);raidTypeButton:Show()
+            else raidTypeButton:Hide();if page.raidTypePanel then page.raidTypePanel:Hide() end end
+        end
         if page.lootMasterController then page.lootMasterController.Refresh() end
+        if page.lmConfigPanel:IsShown() and page.RefreshAutoLootConfig then page.RefreshAutoLootConfig() end
     end
     Raid.RegisterResetLootDialog({getAttendance=Runtime.GetAttendance,clearSelection=function() selectedName=nil end,
         refresh=Refresh,printMessage=Runtime.PrintAction})
@@ -116,7 +167,7 @@ function Screen.Create(parent, host)
         acceptLoadedRaid=Runtime.AcceptLoadedSnapshot,
         setHistoricalLoaded=function(value) Runtime.historicalLoaded=value and true or false end,getRules=Rules,
         saveRules=function(rules)
-            if Runtime.IsTestRaid() then Raider.Services.TestRaid.SaveLootRules(rules) else Raider.Database.SaveLootRules(rules) end
+            if Runtime.IsTestRaid() then return Raider.Services.TestRaid.SaveLootRules(rules) else return Raider.Database.SaveLootRules(rules) end
         end,
         getHighlyContestedItems=function()
             local items=Raider.Database.GetHighlyContestedItems()
@@ -129,8 +180,9 @@ function Screen.Create(parent, host)
         isInRaid=Runtime.IsInRaid,isSessionActive=function() return Raider.raidSessionDraft or Raider.raidScanReady or Runtime.IsTestRaid() end,
         requestRosterScan=Runtime.RequestRaidScan,saveRaidRoster=Runtime.CaptureActiveRoster,
         beginRaidSession=function() Runtime.sessionController:Begin();Runtime.worldContext.Update() end,
-        startNewRaid=function(id,name) return Runtime.sessionController:StartNew(id,name) end,
+        startNewRaid=function(id,name,syncEnabled) return Runtime.sessionController:StartNew(id,name,syncEnabled) end,
         saveRaidSession=Runtime.SaveSession,quitRaidSession=Runtime.QuitSession,
+        handleEndedSession=Runtime.ShowEndedSessionPrompt,
         continueRaidSession=function(context) Runtime.sessionController:Continue(context) end,
         dismissRaidSessionTransition=function(context) Runtime.sessionController:DismissTransition(context) end,
         hasPendingRaidTransition=function() return Raider.raidSessionTransitionPending end,
@@ -147,15 +199,20 @@ function Screen.Create(parent, host)
     function controller:Hide() page:Hide();lifecycle:Hide() end
     function controller:Refresh() Refresh() end
     function controller:HideSessionTransitionPrompt() page.HideSessionTransitionPrompt() end
+    function controller:CancelSessionSave() page.CancelSessionSave() end
     function controller:OnResize() SizePage();Refresh() end
-    function controller:OnRosterUpdate() lifecycle:OnRosterUpdate() end
+    function controller:OnGroupChanged()
+        if page:IsVisible() then Raid.UpdateConvertRaidButton(page, false) end
+    end
+    function controller:OnRosterUpdate() self:OnGroupChanged();lifecycle:OnRosterUpdate() end
     function controller:SyncTrackingSetting(skipRefresh) lifecycle:SyncTrackingSetting(skipRefresh) end
     function controller:Stop()
+        if Raider.Modules.RaidLog then Raider.Modules.RaidLog.Close() end
         if page.lootMasterController then page.lootMasterController.Close() end
         page:Hide();lifecycle:Hide();lifecycle:CancelRosterUpdate()
     end
     function controller:ClearSelection() selectedName=nil end
-    function controller:OpenSaveDialog(context) page.OpenSaveDialog(context) end
+    function controller:OpenSaveDialog(context, endSession) page.OpenSaveDialog(context, endSession) end
     function controller:OfferCurrentRaidRefresh() page.OfferCurrentRaidRefresh() end
     page.lootMasterController.resetOnLoad()
     return controller
