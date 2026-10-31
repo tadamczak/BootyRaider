@@ -55,7 +55,7 @@ Receiving an item retains its previous reserve entries as **AWARDED** under **Sh
 
 **CSR Test Lab** uses temporary data. Select an earlier test player to add more reserves or award the selected item, archive test sources, and advance time with **+1 Day** or **+7 Days**. View Raid is disabled for simulated sources. Exit Test returns to saved history.
 
-Only current guild ranks **Officer Wukong** and **Mukla** can archive/activate CSR, edit saved raid details, or edit/remove Raid Stats. Reading history remains available to everyone. These controls wait for current guild information; a raid leader or assistant role alone grants no history editing rights.
+The current **guild master** and guild ranks **Officer Wukong** and **Mukla** can archive/activate CSR, edit saved raid details, or edit/remove Raid Stats. Reading history remains available to everyone. These controls wait for current guild information; a raid leader or assistant role alone grants no history editing rights.
 
 **Settings → Addon UI → CSR → General** offers **Use class colors**. **Layout** controls class icons and visibility of each filter. These options are enabled by default. Hiding all filters removes the filter toolbar; hidden filters retain their selected values. Expand controls appear before the class/item icon and name.
 
@@ -85,7 +85,7 @@ Raid Leader Tools and Loot Master Tools menus open above every part of these war
 
 ## Existing data
 
-This experimental branch clears pre-journal active raids, saved raids and CSR history once, retaining addon preferences. These records were test data; there is no migration or backward data recovery. The new synchronized records survive subsequent loads.
+On first upgrade from pre-journal test builds, BootyRaider clears the old active raids, saved raids and CSR history once, retaining addon preferences. These records were test data; there is no migration or backward data recovery. Current synchronized records survive upgrades and subsequent loads.
 
 With current BootyProfiler installed, **Booty Diagnostics → Profile Booty** can measure selected BootyRaider operations after you select the addon and press **Start**. **Stop** ends the capture. The report covers the listed Lua entry points; it does not measure total addon CPU, RAM or disk size.
 
