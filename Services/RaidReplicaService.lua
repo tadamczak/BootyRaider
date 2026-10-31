@@ -233,8 +233,9 @@ function Replica.Create(options)
     options=options or {}
     local J=Raider.Services.RaidJournal
     local db=options.db or Raider.Database.Ensure()
-    local state={revision=0,dirty={},dirtyNames={},aliases={},aliasSources={},mergeConflicts={},metadata={},transport=nil,projected={},waiting={}}
+    local state={revision=0,dirty={},deferred={},receivedCounts={},receivedSources={},catalogEntries={},dirtyNames={},aliases={},aliasSources={},mergeConflicts={},metadata={},transport=nil,projected={},waiting={}}
     local api={}
+    local CatalogEntry
     local function DirectlyFollows(operation,previous)
         for _,change in ipairs(operation.changes or {}) do
             if change.base==previous.id then return true end
@@ -248,7 +249,7 @@ function Replica.Create(options)
         if DirectlyFollows(previous,operation) then return false end
         return operation.timestamp>previous.timestamp or operation.timestamp==previous.timestamp and operation.id>previous.id
     end
-    state.loadedRaids={};state.changedRaids={};state.raidInfo={};state.latestOperations={}
+    state.loadedRaids={};state.changedRaids={};state.raidInfo={};state.latestOperations={};state.receivedLast={}
     for id in pairs(db.raidJournal and db.raidJournal.raids or {}) do state.loadedRaids[id]=true end
     local syncLog=type(db.raidSyncLog)=="table" and db.raidSyncLog or {};db.raidSyncLog=syncLog
     function api.LogSync(message)
@@ -274,6 +275,11 @@ function Replica.Create(options)
         end
         return id
     end
+    local function CatchingUp(id)
+        return id and (db.raidSyncProjectionPending and db.raidSyncProjectionPending[id]
+            or state.transport and state.transport.IsRaidCatchingUp and state.transport:IsRaidCatchingUp(id)) and true or false
+    end
+    function api.GetPendingRaidIds() return db.raidSyncProjectionPending or {} end
     state.deletedSessions={}
     local function DeletionKey(id)
         if state.deletedSessions[id]==nil then
@@ -286,16 +292,32 @@ function Replica.Create(options)
         return state.deletedSessions[id]
     end
     function api.IsSessionDeleted(id) return id and (DeletionKey(id) or DeletionKey(Canonical(id))) and true or false end
+    state.aliasInputs={}
+    local function AliasInputs(id)
+        if CatchingUp(id) then
+            return db.raidSyncProjectionAliases and db.raidSyncProjectionAliases[id] or state.aliasInputs[id] or {records={}}
+        end
+        local inputs={records={},deleted=DeletionKey(id) and true or nil}
+        for key,record in pairs(Raid(id) and Raid(id).records or {}) do
+            if key=="raid:alias-decision" or string.find(key,"^merge:") then inputs.records[key]=Copy(record) end
+        end
+        state.aliasInputs[id]=inputs
+        return inputs
+    end
+    local function AliasRecord(inputs,key)
+        local record=inputs.records[key]
+        return record and not record.deleted and record.value or nil,record
+    end
     local function ReindexAliases()
         state.aliases={};state.aliasSources={};state.mergeConflicts={};state.aliasBlocked={};state.aliasGroups={};state.aliasDecisions={};state.aliasPlans={}
         local journal=J.Ensure(db)
         local graph,claims,targets,uncertain={},{},{},{}
         for _,target in ipairs(Keys(journal.raids)) do
-            local raid=journal.raids[target]
-            for _,key in ipairs(Keys(raid.records)) do
+            local inputs=AliasInputs(target)
+            for _,key in ipairs(Keys(inputs.records)) do
                 if string.find(key,"^merge:") then
-                    local merge,record=Record(target,key);local source=merge and merge.source or string.sub(key,7)
-                    if record and not record.deleted and Text(source,300) and source~=target and not DeletionKey(source) and not DeletionKey(target) then
+                    local merge,record=AliasRecord(inputs,key);local source=merge and merge.source or string.sub(key,7)
+                    if record and not record.deleted and Text(source,300) and source~=target and not AliasInputs(source).deleted and not inputs.deleted then
                         graph[source]=graph[source] or {};graph[target]=graph[target] or {}
                         graph[source][target]=true;graph[target][source]=true
                         targets[source]=targets[source] or {};targets[source][target]=true
@@ -328,7 +350,7 @@ function Replica.Create(options)
                     end
                     for seen in pairs(path) do finished[seen]=true end
                 end
-                local decision,record=Record(coordinator,"raid:alias-decision")
+                local decision,record=AliasRecord(AliasInputs(coordinator),"raid:alias-decision")
                 local valid=decision and record and not record.conflicted and not record.pendingCheckpoint
                     and J.Equal(decision.members,members) and J.Equal(decision.claims,componentClaims)
                 if valid then
@@ -368,28 +390,75 @@ function Replica.Create(options)
         return values
     end
     local function Queue(id,names)
-        state.catalog=nil;state.conflictCache=nil
         id=Canonical(id)
-        state.dirty[id]=true;state.revision=state.revision+1
+        if CatchingUp(id) then state.deferred[id]=true
+        else state.catalog=nil;state.dirty[id]=true end
+        state.conflictCache=nil;state.revision=state.revision+1
         if not names then state.dirtyNames[id]=false
         elseif state.dirtyNames[id]~=false then
             state.dirtyNames[id]=state.dirtyNames[id] or {}
             for name in pairs(names) do state.dirtyNames[id][name]=true end
         end
     end
-    function api.OnOperation(operation,status,localChange)
+    local function ReindexAndQueue()
+        local previousTargets={}
+        for id in pairs(J.Ensure(db).raids) do previousTargets[id]={canonical=Canonical(id),blocked=state.aliasBlocked[id] and true or false} end
+        ReindexAliases()
+        for id,previous in pairs(previousTargets) do
+            if Canonical(id)~=previous.canonical or (state.aliasBlocked[id] and true or false)~=previous.blocked then Queue(id) end
+        end
+    end
+    function api.OnRaidCaughtUp(id)
+        if state.transport and state.transport.IsRaidCatchingUp and state.transport:IsRaidCatchingUp(id) then return false end
+        if not state.deferred[id] and not (db.raidSyncProjectionPending and db.raidSyncProjectionPending[id]) then return true end
+        if db.raidSyncProjectionPending then db.raidSyncProjectionPending[id]=nil end
+        if db.raidSyncProjectionAliases then db.raidSyncProjectionAliases[id]=nil end
+        ReindexAndQueue()
+        local count=state.receivedCounts[id]
+        if count then
+            local operation=count==1 and state.receivedLast[id] and J.GetOperation(db,state.receivedLast[id])
+            if operation and operation.kind~="raid.observe" and not operation.compacted then
+                local action=Raider.Modules and Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
+                api.LogSync("Received update by "..tostring(operation.author)..": "..tostring(action))
+            elseif count>1 then
+                local sources=Keys(state.receivedSources[id]);local from=table.getn(sources)>0 and " from "..table.concat(sources,", ") or ""
+                api.LogSync("Received raid "..tostring((Record(id,"raid:metadata") or {}).id or id)..from.." ("..count.." updates).")
+            end
+            state.receivedCounts[id],state.receivedSources[id],state.receivedLast[id]=nil,nil,nil
+        end
+        state.receivedSinceLoad=true;state.receivedRaids=state.receivedRaids or {};state.receivedRaids[id]=true
+        state.deferred[id]=nil;state.raidInfo[id]=nil;Queue(id)
+        if options.wake then options.wake() end
+        return true
+    end
+    function api.OnOperation(operation,status,localChange,source)
         if not operation or status=="duplicate" then return end
-        state.changedRaids[operation.raidId]=true;state.raidInfo[operation.raidId]=nil
+        local catchingUp=CatchingUp(operation.raidId)
+        if not localChange and catchingUp then
+            -- Only alias inputs need an import checkpoint: saved raid data is
+            -- already retained by the normal projection hold. Never write these
+            -- inputs back into the journal, including after a local edit.
+            db.raidSyncProjectionAliases=db.raidSyncProjectionAliases or {}
+            if not db.raidSyncProjectionAliases[operation.raidId] then
+                db.raidSyncProjectionAliases[operation.raidId]=Copy(state.aliasInputs[operation.raidId] or {records={}})
+            end
+            db.raidSyncProjectionPending=db.raidSyncProjectionPending or {};db.raidSyncProjectionPending[operation.raidId]=true
+            state.receivedCounts[operation.raidId]=(state.receivedCounts[operation.raidId] or 0)+1
+            state.receivedLast[operation.raidId]=operation.id
+            if source then state.receivedSources[operation.raidId]=state.receivedSources[operation.raidId] or {};state.receivedSources[operation.raidId][source]=true end
+        end
+        state.changedRaids[operation.raidId]=true
+        if not catchingUp then state.raidInfo[operation.raidId]=nil end
         local latestId=state.latestOperations[operation.raidId]
         local latest=latestId and J.GetOperation(db,latestId)
         if latestId~=nil and operation.kind~="raid.observe" and LaterChange(operation,latest) then state.latestOperations[operation.raidId]=operation.id end
-        if not localChange then state.receivedSinceLoad=true;state.receivedRaids=state.receivedRaids or {};state.receivedRaids[operation.raidId]=true end
+        if not localChange and not catchingUp then state.receivedSinceLoad=true;state.receivedRaids=state.receivedRaids or {};state.receivedRaids[operation.raidId]=true end
         if localChange and operation.kind=="raid.save" and operation.detail and operation.detail.endSession then
             -- Only End & Save closes the workspace. Save As keeps the local
             -- participant attached to the newly saved copy.
             db.syncJoinedRaidId=nil
         elseif localChange and (operation.kind=="raid.start" or operation.kind=="raid.reopen" or operation.kind=="raid.save") then db.syncJoinedRaidId=operation.raidId end
-        if not localChange and operation.kind~="raid.observe" then
+        if not localChange and not catchingUp and operation.kind~="raid.observe" then
             local action=Raider.Modules and Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
             api.LogSync("Received update by "..tostring(operation.author)..": "..tostring(action))
         end
@@ -399,11 +468,7 @@ function Replica.Create(options)
             if change.key=="raid:alias-decision" or string.find(change.key,"^merge:") then reindex=true end
             if string.find(change.key,"^raid:session%-deleted:") then state.deletedSessions[operation.raidId]=nil;reindex=true end
         end
-        local previousTargets={}
-        if reindex then
-            for id in pairs(J.Ensure(db).raids) do previousTargets[id]={canonical=Canonical(id),blocked=state.aliasBlocked[id] and true or false} end
-        end
-        if reindex then ReindexAliases() else state.aliasPlans={} end
+        if reindex then ReindexAndQueue() else state.aliasPlans={} end
         local names={};local all=false
         for _,change in ipairs(operation.changes or {}) do
             local _,_,name=string.find(change.key,"^sr:(.+)$")
@@ -417,11 +482,6 @@ function Replica.Create(options)
             elseif not string.find(change.key,"^recorder:") then all=true end
         end
         Queue(operation.raidId,not all and names or nil)
-        if reindex then
-            for id,previous in pairs(previousTargets) do
-                if Canonical(id)~=previous.canonical or (state.aliasBlocked[id] and true or false)~=previous.blocked then Queue(id) end
-            end
-        end
         if localChange and state.transport and state.transport.NotifyChanged then state.transport:NotifyChanged(operation.raidId) end
         if options.wake then options.wake() end
     end
@@ -641,12 +701,18 @@ function Replica.Create(options)
     function api.GetJoinedRaidId()
         local id=db.syncJoinedRaidId
         if db.raidAttendance then id=db.raidAttendance.syncRaidId end
+        if id and CatchingUp(id) and db.raidAttendance and not db.raidAttendance.syncEnded then return id end
         return id and not api.IsSessionDeleted(id) and Raid(Canonical(id)) and Record(Canonical(id),"raid:lifecycle")~="ended" and id or nil
     end
     function api.GetRaidInfo(id)
         if not id then return {storage="In memory"} end
         id=Canonical(id)
         if state.raidInfo[id] then return state.raidInfo[id] end
+        if CatchingUp(id) then
+            local visible=state.catalogEntries[id]
+            return {storage=state.loadedRaids[id] and not state.changedRaids[id] and "On disk" or "In memory",lifecycle=visible and visible.state,
+                lastAuthor=visible and visible.author or "Unknown",modifiedAt=visible and visible.updatedAt}
+        end
         local metadata=Record(id,"raid:metadata") or {};local latestId=state.latestOperations[id]
         local latest=latestId and J.GetOperation(db,latestId)
         local raid=Raid(id)
@@ -861,6 +927,8 @@ function Replica.Create(options)
         local used=0
         for _,id in ipairs(onlyRaid and {onlyRaid} or Keys(state.dirty)) do
             if used>=(limit or 1) then break end
+            if CatchingUp(id) then state.dirty[id]=nil;state.deferred[id]=true
+            else
             state.dirty[id]=nil;used=used+1
             local affected=state.dirtyNames[id];state.dirtyNames[id]=nil
             local removed=api.IsSessionDeleted(id)
@@ -949,7 +1017,9 @@ function Replica.Create(options)
                 if Raider.Services.RaidCSR then Raider.Services.RaidCSR.Invalidate(id,affected or nil) end
                 state.projected[id]=true
             end
+            state.catalogEntries[id]=CatalogEntry and CatalogEntry(id) or nil;state.catalog=nil
             if options.onChanged then options.onChanged(id) end
+            end
         end
         return used
     end
@@ -971,6 +1041,7 @@ function Replica.Create(options)
         if localFacts then return false,"Save the current raid successfully before recovering a session. Confirmed loot or loot-right changes are still recorded only locally." end
         if active and active.syncRaidId and Canonical(active.syncRaidId)~=id then return false,"Save or end your current session before recovering another raid." end
         local attendance,failure=Build(id);if not attendance then return false,failure end
+        if CatchingUp(id) then attendance.syncRecoveryNotice="Recovered partial agreed data. Synchronization is incomplete; later updates may change this session." end
         if Record(id,"raid:lifecycle")=="ended" and not viewEnded then return false,"This raid was explicitly ended. Its history is still available." end
         if options.restore then
             local ok,message=options.restore(attendance);if ok==false then return false,message end
@@ -992,6 +1063,14 @@ function Replica.Create(options)
     end
     function api.GetStatus(id)
         local transport=state.transport and state.transport.GetStatus and state.transport:GetStatus(id) or {}
+        local catchingUp=id and api.IsRaidSyncEnabled(id) and CatchingUp(id) or false
+        if not id then
+            for pendingId in pairs(db.raidSyncProjectionPending or {}) do
+                if api.IsRaidSyncEnabled(pendingId) then catchingUp=true;break end
+            end
+        end
+        local waitingForSource=catchingUp and (not state.transport or transport.availableCount==0)
+            and not transport.paused and not (state.transport and state.transport.HasWork and state.transport:HasWork())
         local conflicts=id and table.getn(Conflicts(Canonical(id))) or 0
         local blocked=id and state.aliasBlocked[Canonical(id)]
         local message=blocked and "Overlapping raid recordings: CSR is withheld until their identities are resolved." or id and state.waiting[Canonical(id)] or transport.message or "Waiting for another officer."
@@ -1011,9 +1090,14 @@ function Replica.Create(options)
         local active=db.raidAttendance
         local localFailure=active and id and Canonical(active.syncRaidId)==Canonical(id) and active.syncLocalAuditFailure
         local lifecycle=id and (api.IsSessionDeleted(id) and "deleted" or Record(Canonical(id),"raid:lifecycle"))
+        if catchingUp and id then
+            local visible=state.catalogEntries[id]
+            lifecycle=visible and visible.state or nil
+            if active and active.syncRaidId==id then lifecycle=active.syncEnded and "ended" or "active" end
+        end
         local metadata=id and Record(Canonical(id),"raid:metadata")
         local lifecycleRevision,endedBy,savedAndEnded
-        if lifecycle=="ended" then
+        if lifecycle=="ended" and not catchingUp then
             local _,record=Record(Canonical(id),"raid:lifecycle")
             local operation=record and record.revision and J.GetOperation(db,record.revision)
             lifecycleRevision=record and record.revision
@@ -1024,19 +1108,18 @@ function Replica.Create(options)
             end
         end
         if lifecycle=="deleted" then message="The active session was deleted. Its saved snapshot is preserved." end
+        if catchingUp then message="Receiving the remaining raid history. Previously available data is unchanged until this raid is complete." end
+        if waitingForSource then message="Synchronization is incomplete. Waiting for another officer to resume; previously available data is unchanged." end
         if localFailure then message="Needs attention: a confirmed loot change is stored only locally. Save the raid to retry synchronization. "..tostring(localFailure) end
-        local syncStatus=(transport.hasError or transport.lastError and not transport.interrupted) and "Sync error! Send log" or transport.interrupted and "Sync interrupted" or (id and state.receivedRaids and state.receivedRaids[Canonical(id)] or not id and state.receivedSinceLoad) and "New data received. Please reload!"
-            or (transport.pending or 0)>0 and "Syncing…" or "Up to date"
+        local syncStatus=(transport.hasError or transport.lastError and not transport.interrupted) and "Sync error! Send log" or (transport.interrupted or waitingForSource) and "Sync interrupted" or (catchingUp or (transport.pending or 0)>0) and "Syncing…"
+            or (id and state.receivedRaids and state.receivedRaids[Canonical(id)] or not id and state.receivedSinceLoad) and "New data received. Please reload!" or "Up to date"
         if id and not api.IsRaidSyncEnabled(id) then syncStatus="Sync off" end
-        return {syncStatus=syncStatus,revision=state.revision+(transport.revision or 0),localOnly=transport.localOnly~=false,pending=transport.pending or 0,
+        return {syncStatus=syncStatus,revision=state.revision+(transport.revision or 0),localOnly=transport.localOnly~=false,pending=transport.pending or 0,catchingUp=catchingUp or nil,
             conflicts=conflicts,compatible=transport.compatible~=false,peers=type(transport.peers)=="table" and transport.peers or {},
-            raidName=metadata and metadata.id,retryAvailable=transport.interrupted or transport.lastError~=nil,lifecycle=lifecycle,lifecycleRevision=lifecycleRevision,
+            raidName=metadata and metadata.id,retryAvailable=transport.interrupted or waitingForSource or transport.lastError~=nil,lifecycle=lifecycle,lifecycleRevision=lifecycleRevision,
             endedBy=endedBy,savedAndEnded=savedAndEnded,recordingGap=recordingGap,csrWithheld=blocked and true or false,needsAttention=localFailure and true or false,message=message}
     end
-    local function RaidList()
-        if state.catalog then return state.catalog end
-        local list={};local journal=J.Ensure(db)
-        for id in pairs(journal.raids) do
+    CatalogEntry=function(id)
             if Canonical(id)==id then
                 local metadata,record=Record(id,"raid:metadata")
                 local lifecycle=Record(id,"raid:lifecycle")
@@ -1047,10 +1130,33 @@ function Replica.Create(options)
                     local memberCount=0
                     for key,value in pairs(Raid(id).records or {}) do if string.find(key,"^member:") and not value.deleted then memberCount=memberCount+1 end end
                     local limits={["Molten Core"]=40,["Blackwing Lair"]=40,["Onyxia's Lair"]=40,["Zul'Gurub"]=20,["Karazhan10"]=10,["Lower Karazhan Halls"]=10}
-                    table.insert(list,{createdAt=metadata.startedAt,memberCount=memberCount,memberLimit=limits[metadata.raidName],id=id,name=metadata.id,raidType=metadata.raidName,state=lifecycle,author=operation and operation.author,
-                        updatedAt=operation and operation.timestamp or metadata.startedAt or 0,conflicts=table.getn(Conflicts(id)),lifecycleRevision=lifecycleRecord and lifecycleRecord.revision,recoverable=true})
+                    return {createdAt=metadata.startedAt,memberCount=memberCount,memberLimit=limits[metadata.raidName],id=id,name=metadata.id,raidType=metadata.raidName,state=lifecycle,author=operation and operation.author,
+                        updatedAt=operation and operation.timestamp or metadata.startedAt or 0,conflicts=table.getn(Conflicts(id)),lifecycleRevision=lifecycleRecord and lifecycleRecord.revision,recoverable=true}
                 end
             end
+    end
+    local function PreviousCatalogEntry(id)
+        if state.catalogEntries[id] then return state.catalogEntries[id] end
+        local entry=db.raidAttendance and db.raidAttendance.syncRaidId==id and db.raidAttendance
+        if not entry then
+            for _,history in ipairs({db.softReserveHistory or {},db.raidStatistics or {}}) do
+                for _,saved in pairs(history.raids or {}) do if saved.syncRaidId==id then entry=saved;break end end
+                if entry then break end
+            end
+        end
+        if not entry then return nil end
+        return {id=id,name=entry.snapshotId or entry.id,raidType=entry.raidName,state=(entry.endedAt or entry.syncEnded) and "ended" or "active",
+            createdAt=entry.sessionStartedAt or entry.startedAt,updatedAt=entry.modifiedAt or entry.savedAt or entry.createdAt or 0,
+            memberCount=table.getn(entry.members or {})+table.getn(entry.departedMembers or {}),conflicts=0,recoverable=true}
+    end
+    local function RaidList()
+        if state.catalog then return state.catalog end
+        local list={};local journal=J.Ensure(db)
+        for id in pairs(journal.raids) do
+            local entry
+            if CatchingUp(id) then entry=PreviousCatalogEntry(id) else entry=CatalogEntry(id) end
+            state.catalogEntries[id]=entry
+            if entry then table.insert(list,entry) end
         end
         table.sort(list,function(a,b)if a.updatedAt==b.updatedAt then return a.id<b.id end return a.updatedAt>b.updatedAt end)
         state.catalog=list;return list
@@ -1375,6 +1481,7 @@ function Replica.Create(options)
     api._state=state;api._db=db;api._record=Record;api._records=AllRecords;api._canonical=Canonical
     api._token=RevisionToken;api._commit=Commit;api._conflicts=Conflicts;api._copy=Copy;api._page=Page;api._reindex=ReindexAliases
     ReindexAliases()
+    RaidList()
     for id in pairs(J.Ensure(db).raids) do if Canonical(id)==id then Queue(id) end end
     return api
 end

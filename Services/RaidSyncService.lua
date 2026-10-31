@@ -1,11 +1,11 @@
 local Raider=BootyRaider
 Raider.Services=Raider.Services or {}
-local Sync={PREFIX="BRSYNC1",protocol=3,policy=2}
+local Sync={PREFIX="BRSYNC1",protocol=4,policy=2}
 Raider.Services.RaidSync=Sync
 -- Accommodate one incoming stream per supported peer while retaining the
 -- aggregate byte cap and incremental single-job codec budget.
 Sync.limits={packet=240,rate=1024,burst=2048,packetsPerTick=8,codecNodes=128,
-    peers=12,outbox=4,incoming=12,bufferBytes=2097152,window=4,summary=8,range=16,retry=3,timeout=15}
+    peers=12,outbox=4,incoming=12,bufferBytes=2097152,window=4,summary=8,range=16,retry=3,timeout=15,progressRaids=512,progressRanges=2048}
 
 -- The installed 1.12 addons use SendAddonMessage(prefix,text,"GUILD") and
 -- CHAT_MSG_ADDON(prefix,text,channel,sender). GUILD + recipient routing avoids
@@ -67,7 +67,7 @@ function Sync.New(options)
     local self={options=options,journal=options.journal or Raider.Services.RaidJournal,
         codec=options.codec or Raider.Services.RaidSyncCodec,db=options.db,enabled=false,
         peers={},incompatiblePeers={},retiredSessions={},outbox={},controls={},incoming={},completed={},decodes={},exports={},dependencies={},sentOperations={},receipts={},receiptRanges=0,
-        sequence=0,generation=0,revision=0,tokens=Sync.limits.burst,bufferBytes=0,
+        sequence=0,generation=0,revision=0,tokens=Sync.limits.burst,bufferBytes=0,catchup={},catchupCandidates={},catchupTargets={},
         stats={sentBytes=0,receivedBytes=0,applied=0,duplicates=0,conflicts=0,retries=0,rejected=0}}
     local function Now() return options.now and options.now() or 0 end
     local function Status(reason)
@@ -103,6 +103,7 @@ function Sync.New(options)
             if self.outgoing and self.outgoing.priority>1 then self.outgoing.activity=self.outgoing.activity+duration end
             for _,transfer in pairs(self.incoming) do if transfer.priority>1 then transfer.activity=transfer.activity+duration end end
             for _,receipt in pairs(self.completed) do receipt.time=receipt.time+duration end
+            for _,peer in pairs(self.peers) do for id,progress in pairs(peer.advertised or {}) do if Priority(id)>1 then progress.activity=progress.activity+duration end end end
         end
         return active
     end
@@ -129,7 +130,10 @@ function Sync.New(options)
             if self.outgoing then self.outgoing.activity=self.outgoing.activity+duration end
             for _,transfer in pairs(self.incoming) do transfer.activity=transfer.activity+duration end
             for _,receipt in pairs(self.completed) do receipt.time=receipt.time+duration end
-            for _,peer in pairs(self.peers) do if peer.cooldown then peer.cooldown=peer.cooldown+duration end end
+            for _,peer in pairs(self.peers) do
+                if peer.cooldown then peer.cooldown=peer.cooldown+duration end
+                for _,progress in pairs(peer.advertised or {}) do progress.activity=progress.activity+duration end
+            end
             if self.discoveryAt then self.discoveryAt=self.discoveryAt+duration end
             if self.combatPauseAt then self.combatPauseAt=self.combatPauseAt+duration end
             self.lastTick=self.lastTick+duration;self.pausedAt=nil
@@ -164,14 +168,103 @@ function Sync.New(options)
         self.sequence=self.sequence+1;payload.request=self.sequence
         local queued,failure=Queue(peer.name,payload,priority)
         if not queued then return false,failure end
-        self.request={peer=peer.name,id=payload.request,payload=payload,priority=priority,started=Now(),activity=Now()}
+        self.request={peer=peer.name,id=payload.request,payload=payload,priority=priority,started=Now(),activity=Now(),generation=peer.generation}
         return true
+    end
+    function self:IsRaidCatchingUp(raidId) return self.catchup[raidId]==true end
+    local function QueueCompletion(peer,id)
+        local inventory=peer.inventory
+        local entry=inventory and inventory.raids[id]
+        if entry and entry.closed and not entry.sent and not peer.blocked and not peer.unavailable then
+            local inspected,missingFound=0,false
+            for key,range in pairs(entry.ranges) do
+                local missing=self.journal.GetMissingRanges(self.db,{schema=1,entries={range}},1)
+                if missing and not missing[1] then entry.ranges[key]=nil else missingFound=true end
+                inspected=inspected+1;if inspected>=8 then break end
+            end
+            if next(entry.ranges) then
+                if not missingFound then self.catchupCandidates[id]=true end
+                return
+            end
+            peer.completionPending=peer.completionPending or {};peer.completionPending[id]=inventory.generation;entry.sent=true
+        end
+    end
+    local function ObserveInventory(peer,summary,offset)
+        if offset==0 or not peer.inventory then peer.inventory={raids={},generation=tonumber(peer.generation)} end
+        local inventory=peer.inventory
+        for _,entry in ipairs(summary.entries) do
+            local id=entry.raidId
+            if not self.catchupTargets[id] and CountMap(self.catchupTargets)>=Sync.limits.progressRaids then return false,"progress-raid-limit" end
+            local targets=self.catchupTargets[id] or {};self.catchupTargets[id]=targets
+            local key=entry.origin.."\031"..entry.first..":"..entry.last
+            if not targets[key] then
+                if self.progressRanges>=Sync.limits.progressRanges then return false,"progress-range-limit" end
+                targets[key]={raidId=id,origin=entry.origin,first=entry.first,last=entry.last};self.progressRanges=self.progressRanges+1
+            end
+            if not inventory.raids[id] and CountMap(inventory.raids)>=Sync.limits.progressRaids then return false,"progress-raid-limit" end
+            if inventory.openRaid and inventory.openRaid~=id then
+                inventory.raids[inventory.openRaid].closed=true;self.catchupCandidates[inventory.openRaid]=true
+            end
+            inventory.openRaid=id;inventory.raids[id]=inventory.raids[id] or {ranges={}}
+            local missing=self.journal.GetMissingRanges(self.db,{schema=1,entries={entry}},1)
+            if missing and missing[1] then self.catchup[id]=true;inventory.raids[id].ranges[key]=targets[key] end
+            self.catchupCandidates[id]=true
+        end
+        if not summary.nextOffset then
+            inventory.complete=true
+            if inventory.openRaid then inventory.raids[inventory.openRaid].closed=true;self.catchupCandidates[inventory.openRaid]=true end
+        end
+        return true
+    end
+    local function FinishCatchup()
+        local processed=0
+        for id in pairs(self.catchupCandidates) do
+            self.catchupCandidates[id]=nil;processed=processed+1
+            for _,peer in pairs(self.peers) do QueueCompletion(peer,id) end
+            if self.catchup[id] then
+                local known,complete=false,true
+                for _,peer in pairs(self.peers) do
+                    local entry=peer.inventory and peer.inventory.raids[id]
+                    if entry then
+                        if not peer.blocked and not peer.unavailable then
+                            if entry.closed and not peer.needsSummary then known=true else complete=false end
+                        end
+                    end
+                end
+                -- Keep advertised ranges independent of the current peer/page.
+                -- A disconnected source cannot erase missing evidence, nor veto
+                -- completion after another officer supplied those same ranges.
+                local targets=self.catchupTargets[id] or {};local inspected=0
+                for key,entry in pairs(targets) do
+                    local missing=self.journal.GetMissingRanges(self.db,{schema=1,entries={entry}},1)
+                    if missing and not missing[1] then targets[key]=nil;self.progressRanges=self.progressRanges-1 else complete=false end
+                    inspected=inspected+1
+                    if inspected>=8 then
+                        if next(targets) and complete then self.catchupCandidates[id]=true end
+                        break
+                    end
+                end
+                if next(targets) then complete=false end
+                if self.request and self.request.payload.raidId==id then complete=false end
+                for _,dependency in pairs(self.dependencies) do if dependency.raidId==id then complete=false;break end end
+                if known and complete then
+                    self.catchup[id]=nil;self.catchupTargets[id]=nil;self.statusDirty=true
+                    for _,peer in pairs(self.peers) do QueueCompletion(peer,id) end
+                    if options.onRaidCaughtUp then options.onRaidCaughtUp(id) end
+                end
+            else
+                self.progressRanges=self.progressRanges-CountMap(self.catchupTargets[id] or {});self.catchupTargets[id]=nil
+                for _,peer in pairs(self.peers) do QueueCompletion(peer,id) end
+            end
+            if processed>=8 then break end
+        end
     end
     local function ReleaseIncoming(key)
         local transfer=self.incoming[key]
         if transfer then self.bufferBytes=self.bufferBytes-transfer.bytes;self.incoming[key]=nil end
     end
     local function ClearPeerWork(name)
+        local peer=self.peers[name];if peer then peer.advertised=nil;peer.completionPending=nil end
         if self.request and self.request.peer==name then self.request=nil end
         if self.outgoing and self.outgoing.target==name then self.outgoing=nil end
         if self.encoding and self.encoding.target==name then self.encoding=nil end
@@ -219,12 +312,17 @@ function Sync.New(options)
     end
     local function PeerBusy(peer)
         local name=peer.name
-        if peer.needsSummary or self.request and self.request.peer==name or self.outgoing and self.outgoing.target==name
+        if peer.advertised and next(peer.advertised) or peer.completionPending and next(peer.completionPending)
+            or peer.relayPending or peer.needsSummary or self.request and self.request.peer==name or self.outgoing and self.outgoing.target==name
             or self.encoding and self.encoding.target==name then return true end
         for _,queued in ipairs(self.outbox) do if queued.target==name then return true end end
         for _,queued in ipairs(self.exports) do if queued.peer==name then return true end end
         for _,queued in ipairs(self.decodes) do if queued.sender==name then return true end end
         for _,queued in pairs(self.incoming) do if queued.sender==name then return true end end
+        if peer.summary then
+            local missing=self.journal.GetMissingRanges(self.db,peer.summary,1)
+            if missing and (missing[1] or peer.summary.nextOffset) then return true end
+        end
         return false
     end
     local function Confirm(sender,sent)
@@ -283,8 +381,20 @@ function Sync.New(options)
             if not Integer(payload.offset,9007199254740991) then return Reject("invalid-summary-offset") end
             local summary,failure=Summary(payload.offset,Sync.limits.summary,ActiveRaid())
             if not summary then return Reject(failure) end
-            local queued=Queue(peer.name,{type="summary",request=payload.request,summary=summary,activeRaidId=ActiveRaid()},1)
+            local queued=Queue(peer.name,{type="summary",request=payload.request,summary=summary,activeRaidId=ActiveRaid(),generation=self.generation},1)
             if not queued then return Busy() end
+            peer.advertised=peer.advertised or {}
+            for _,entry in ipairs(summary.entries) do
+                if not peer.advertised[entry.raidId] and CountMap(peer.advertised)>=Sync.limits.progressRaids then return Reject("progress-raid-limit") end
+                local progress=peer.advertised[entry.raidId] or {confirmed=0};peer.advertised[entry.raidId]=progress;progress.generation=self.generation;progress.activity=Now()
+            end
+            return true
+        elseif kind=="caught-up" then
+            if not Text(payload.raidId,300) or not Integer(payload.generation,9007199254740991) then return Reject("invalid-completion") end
+            local progress=peer.advertised and peer.advertised[payload.raidId]
+            if not progress or progress.generation~=payload.generation then return true,"stale-completion" end
+            peer.advertised[payload.raidId]=nil;self.statusDirty=true
+            if options.onRaidDelivered then options.onRaidDelivered(peer.name,payload.raidId,progress.confirmed,progress.lastOperationId) end
             return true
         elseif kind=="range-request" then
             if not Text(payload.raidId,300) or not Text(payload.origin,256) or not Integer(payload.first,9007199254740991)
@@ -292,6 +402,7 @@ function Sync.New(options)
                 or payload.last-payload.first>=Sync.limits.range then return Reject("invalid-range") end
             if not Allowed(payload.raidId) then Queue(peer.name,{type="done",request=payload.request,missing=true},1);return true,"raid-sync-disabled" end
             if Count(self.exports)>=8 then return Busy() end
+            local progress=peer.advertised and peer.advertised[payload.raidId];if progress then progress.transferring=true end
             table.insert(self.exports,{peer=peer.name,request=payload.request,raidId=payload.raidId,origin=payload.origin,
                 cursor=payload.first,last=payload.last,priority=Priority(payload.raidId)})
             return true
@@ -300,6 +411,7 @@ function Sync.New(options)
             local operation=self.journal.GetOperation(self.db,payload.id)
             if operation and Allowed(operation.raidId) then
                 if Count(self.exports)>=8 then return Busy() end
+                local progress=peer.advertised and peer.advertised[operation.raidId];if progress then progress.transferring=true end
                 table.insert(self.exports,{peer=peer.name,request=payload.request,operation=operation,priority=Priority(operation.raidId)})
             else if not Queue(peer.name,{type="done",request=payload.request,missing=true},1) then return Busy() end end
             return true
@@ -312,9 +424,19 @@ function Sync.New(options)
             if payload.summary.nextOffset and (payload.summary.nextOffset<=request.payload.offset
                 or payload.summary.nextOffset>payload.summary.total or Count(payload.summary.entries)==0) then return Reject("invalid-summary-cursor") end
             if payload.activeRaidId~=nil and not Text(payload.activeRaidId,300) then return Reject("invalid-active-raid") end
+            if not Integer(payload.generation,9007199254740991) then return Reject("invalid-summary-generation") end
+            if payload.generation<(tonumber(peer.generation) or 0)
+                or request.payload.offset>0 and tostring(payload.generation)~=request.generation then
+                peer.needsSummary=true;peer.offset=0;peer.inventory=nil;peer.summary=nil;self.request=nil
+                if payload.generation>(tonumber(peer.generation) or 0) then peer.generation=tostring(payload.generation) end
+                return true,"inventory-changed"
+            end
+            peer.generation=tostring(payload.generation)
             for index=Count(payload.summary.entries),1,-1 do if not Allowed(payload.summary.entries[index].raidId) then table.remove(payload.summary.entries,index) end end
             peer.activeRaidId=Allowed(payload.activeRaidId) and payload.activeRaidId or nil
             peer.summary=payload.summary;peer.needsSummary=false;self.request=nil
+            local observed,failure=ObserveInventory(peer,payload.summary,request.payload.offset)
+            if not observed then return Reject(failure) end
             return true
         elseif kind=="operation" then
             local operation=payload.operation
@@ -345,6 +467,7 @@ function Sync.New(options)
                 return Reject(reason)
             end
             self.dependencies[operation.id]=nil
+            self.catchupCandidates[operation.raidId]=true
             self.lastError=nil
             -- A validated complete export also proves that this source held the
             -- same operation in RAM when it sent it; no disk claim is inferred.
@@ -355,7 +478,15 @@ function Sync.New(options)
                 self.stats.applied=self.stats.applied+1
                 if reason=="conflict" then self.stats.conflicts=self.stats.conflicts+1 end
                 if options.onApply and reason~="checkpoint-marker" then options.onApply(operation,reason,peer.name,self.scope) end
-                self:NotifyChanged()
+                -- The supplying officer already has this operation. Advertise
+                -- the received range once to other peers, not back to its source
+                -- after every operation (which would trigger inventory echoes).
+                self.generation=self.generation+1
+                for name,other in pairs(self.peers) do if name~=peer.name then
+                    other.relayPending=true
+                    local advertised=other.advertised and other.advertised[operation.raidId]
+                    if advertised then advertised.generation=self.generation end
+                end end
             end
             return true,reason
         elseif kind=="done" then
@@ -364,6 +495,7 @@ function Sync.New(options)
                 peer.cooldown=Now()+Sync.limits.timeout
                 if request.payload.id and self.dependencies[request.payload.id] then self.dependencies[request.payload.id].peer=nil end
             end
+            if request.payload.raidId then self.catchupCandidates[request.payload.raidId]=true end
             self.request=nil;return true
         end
         return Reject("unknown-message")
@@ -404,15 +536,19 @@ function Sync.New(options)
         local pending=Count(self.outbox)+Count(self.exports)+Count(self.decodes)+Count(self.controls)+CountMap(self.incoming)
             +(self.request and 1 or 0)+(self.outgoing and 1 or 0)+(self.encoding and 1 or 0)+(self.announce and 1 or 0)
         if raidId then
-            -- Incoming envelopes do not reveal their raid until decoding. Keep
-            -- the status pending rather than claiming a completed exchange.
-            pending=Count(self.decodes)+CountMap(self.incoming)+(self.announce and 1 or 0)
+            -- Unidentified chunks or an inventory check for another raid do not
+            -- invalidate an already verified raid. Known frontiers own its state.
+            pending=0
             for _,message in ipairs(self.outbox) do local p=message.payload;if p.raidId==raidId or p.operation and p.operation.raidId==raidId then pending=pending+1 end end
             for _,task in ipairs(self.exports) do if task.raidId==raidId or task.operation and task.operation.raidId==raidId then pending=pending+1 end end
             if self.encoding and self.encoding.receipt and self.encoding.receipt.raidId==raidId then pending=pending+1 end
             local sent=self.outgoing and self.sentOperations[self.outgoing.id];if sent and sent.raidId==raidId then pending=pending+1 end
-            if self.request and (self.request.payload.raidId==raidId or self.request.payload.type=="summary-request") then pending=pending+1 end
-            for _,peer in pairs(self.peers) do if not peer.unavailable and not peer.blocked and peer.needsSummary then pending=pending+1 end end
+            if self.request and self.request.payload.raidId==raidId then pending=pending+1 end
+        end
+        local catching=0;for id in pairs(self.catchup) do if Allowed(id) and (not raidId or id==raidId) then catching=catching+1 end end
+        pending=pending+catching
+        for _,peer in pairs(self.peers) do
+            for id,progress in pairs(peer.advertised or {}) do if progress.transferring and (not raidId or id==raidId) then pending=pending+1 end end
         end
         local message
         if not self.enabled then message=messages[self.reason] or "Synchronization is stopped."
@@ -441,6 +577,22 @@ function Sync.New(options)
         local state,failure=self.journal.Ensure(self.db)
         if not state then Status(failure);return false,failure end
         self.db.raidSyncScope=self.scope
+        self.db.raidSyncPendingFrontiers=self.db.raidSyncPendingFrontiers or {}
+        if type(self.db.raidSyncPendingFrontiers)~="table" then Status("invalid-progress-state");return false,self.reason end
+        self.catchupTargets=self.db.raidSyncPendingFrontiers;self.progressRanges=0;self.catchup={}
+        if CountMap(self.catchupTargets)>Sync.limits.progressRaids then Status("progress-raid-limit");return false,self.reason end
+        for id,targets in pairs(self.catchupTargets) do
+            if not Text(id,300) or type(targets)~="table" then Status("invalid-progress-state");return false,self.reason end
+            for key,entry in pairs(targets) do
+                if type(entry)~="table" or entry.raidId~=id or not Text(entry.origin,256) or not Integer(entry.first,9007199254740991)
+                    or entry.first<1 or not Integer(entry.last,9007199254740991) or entry.last<entry.first
+                    or key~=entry.origin.."\031"..entry.first..":"..entry.last then Status("invalid-progress-state");return false,self.reason end
+            end
+            self.progressRanges=self.progressRanges+CountMap(targets);if Allowed(id) then self.catchup[id]=true end
+        end
+        if self.progressRanges>Sync.limits.progressRanges then Status("progress-range-limit");return false,self.reason end
+        local held=options.getPendingRaidIds and options.getPendingRaidIds() or {}
+        for id,pending in pairs(held) do if pending and Allowed(id) then self.catchup[id]=true end end
         self.session=tostring(Value(options.session) or (math.floor(Now()*1000).."-"..math.random(1,999999)))
         self.starts=(self.starts or 0)+1
         if self.starts>1 then self.session=string.sub(self.session,1,20).."-r"..self.starts end
@@ -453,7 +605,7 @@ function Sync.New(options)
     end
     function self:Stop(reason)
         self.enabled=false;self.peers={};self.incompatiblePeers={};self.outbox={};self.controls={};self.incoming={};self.completed={};self.decodes={};self.exports={}
-        self.dependencies={};self.sentOperations={};self.receipts={};self.receiptRanges=0;self.outgoing=nil;self.encoding=nil;self.request=nil;self.bufferBytes=0;self.discoveryAt=nil;self.announce=nil;self.combatPauseAt=nil;self.pausedAt=nil;self.pauseReason=nil
+        self.dependencies={};self.sentOperations={};self.receipts={};self.receiptRanges=0;self.outgoing=nil;self.encoding=nil;self.request=nil;self.bufferBytes=0;self.discoveryAt=nil;self.announce=nil;self.combatPauseAt=nil;self.pausedAt=nil;self.pauseReason=nil;self.catchupCandidates={}
         Status(reason or "disabled")
     end
     function self:RefreshRaidPolicy()
@@ -468,7 +620,9 @@ function Sync.New(options)
         local ready,reason=Ready()
         if not ready and reason~="directory-not-ready" then return false end
         if raidId and not Allowed(raidId) then return true end
-        self.generation=self.generation+1;self.announce=true;self.discoveryRemaining=2;self.discoveryAt=(self.pausedAt or Now())+3;return true
+        self.generation=self.generation+1;self.announce=true;self.discoveryRemaining=2;self.discoveryAt=(self.pausedAt or Now())+3
+        for _,peer in pairs(self.peers) do for id,progress in pairs(peer.advertised or {}) do if not raidId or id==raidId then progress.generation=self.generation;progress.activity=Now() end end end
+        return true
     end
     function self:Discover()
         if not Ready() then return false end
@@ -484,6 +638,7 @@ function Sync.New(options)
         for _,peer in pairs(peers) do
             peer.summary=nil;peer.offset=0;peer.cooldown=nil;peer.unavailable=nil;peer.blocked=nil;peer.interrupted=nil
             peer.contactConfirmed=nil;peer.connected=false;peer.needsSummary=true
+            peer.advertised=nil;peer.completionPending=nil;peer.inventory=nil
         end
         return self:Start()
     end
@@ -503,6 +658,7 @@ function Sync.New(options)
             if peer and fields[1]=="D" and Count(fields)==8 and string.sub(fields[3],1,string.len(peer.session)+1)==peer.session..":"
                 and Integer(tonumber(fields[5]),16384) and Integer(tonumber(fields[6]),16384) then
                 peer.seen=Now()
+                for _,progress in pairs(peer.advertised or {}) do progress.activity=Now() end
                 if self.request and self.request.peer==sender then self.request.activity=Now() end
             end
             return false,"other-recipient"
@@ -519,6 +675,7 @@ function Sync.New(options)
             self.incompatiblePeers[sender]=nil
             for _,session in ipairs(self.retiredSessions[sender] or {}) do if session==fields[3] then return false,"stale-session" end end
             local peer=self.peers[sender]
+            if peer and peer.session==fields[3] and (tonumber(peer.generation) or 0)>tonumber(fields[7]) then return false,"stale-generation" end
             if peer and peer.session and peer.session~=fields[3] then
                 RetireSession(sender,peer.session)
                 RemovePeer(sender,"peer-session-changed");peer=nil
@@ -532,7 +689,7 @@ function Sync.New(options)
                 for _,raid in pairs(self.receipts[sender] or {}) do for _,ranges in pairs(raid) do self.receiptRanges=self.receiptRanges-Count(ranges) end end
                 self.receipts[sender]=nil
             end
-            if peer.session~=fields[3] or peer.generation~=fields[7] or peer.unavailable or not peer.connected then peer.needsSummary=true;peer.offset=0 end
+            if peer.session~=fields[3] or peer.generation~=fields[7] or peer.unavailable or not peer.connected then peer.needsSummary=true;peer.offset=0;peer.inventory=nil end
             local returning=peer.unavailable or not peer.connected
             peer.session=fields[3];peer.generation=fields[7];peer.seen=Now();peer.cooldown=nil;peer.unavailable=nil;peer.interrupted=nil
             peer.presenceRevision=options.presenceRevision and options.presenceRevision() or nil
@@ -559,6 +716,8 @@ function Sync.New(options)
             local sent=self.sentOperations[fields[4]]
             if Count(fields)~=4 or fields[3]~=self.session or not sent or sent.peer~=sender or sent.peerSession~=peer.session then return false,"stale-receipt" end
             local newlyConfirmed=Confirm(sender,sent);self.sentOperations[fields[4]]=nil
+            local progress=peer.advertised and peer.advertised[sent.raidId]
+            if newlyConfirmed and progress then progress.confirmed=progress.confirmed+1;progress.lastOperationId=sent.operationId end
             if newlyConfirmed and options.onDelivered then options.onDelivered(sender,sent.operationId) end
             return true
         elseif fields[1]=="A" then
@@ -627,6 +786,7 @@ function Sync.New(options)
         local peer=self.peers[sender]
         if accepted and peer then
             peer.seen=Now()
+            for _,progress in pairs(peer.advertised or {}) do progress.activity=Now() end
             if self.request and self.request.peer==sender then self.request.activity=Now() end
         end
         if accepted and peer and string.sub(text,1,4)~="H~*~" then peer.contactConfirmed=true end
@@ -733,6 +893,7 @@ function Sync.New(options)
             local operation=message.payload.type=="operation" and message.payload.operation
             if operation and not Allowed(operation.raidId) then return end
             self.encoding={target=message.target,priority=message.priority,job=self.codec.BeginEncode(message.payload),
+                requestId=self.request and message.payload==self.request.payload and self.request.id or nil,
                 receipt=operation and {peer=message.target,peerSession=self.peers[message.target] and self.peers[message.target].session,
                     raidId=operation.raidId,origin=operation.origin,sequence=operation.sequence,operationId=operation.id} or nil}
         end
@@ -750,7 +911,7 @@ function Sync.New(options)
         if size<32 then Reject("chunk-envelope-limit");return end
         local total=math.ceil(string.len(text)/size)
         if total>16384 then Reject("chunk-count-limit");return end
-        self.outgoing={target=encoding.target,session=session,id=tostring(self.sequence),priority=encoding.priority,text=text,size=size,total=total,ack=0,sent=0,activity=Now(),attempts=0}
+        self.outgoing={target=encoding.target,session=session,id=tostring(self.sequence),priority=encoding.priority,text=text,size=size,total=total,ack=0,sent=0,activity=Now(),attempts=0,requestId=encoding.requestId}
         if encoding.receipt then
             if CountMap(self.sentOperations)>=128 then
                 local oldest
@@ -773,15 +934,23 @@ function Sync.New(options)
         self:RefreshPresence()
         local now=Now();self.tokens=math.min(Sync.limits.burst,self.tokens+math.max(0,now-self.lastTick)*Sync.limits.rate);self.lastTick=now
         for name in pairs(self.peers) do if not Authority(name) then RemovePeer(name) end end
+        for name,peer in pairs(self.peers) do
+            for id,progress in pairs(peer.advertised or {}) do
+                if not (Combat() and Priority(id)>1) and now-progress.activity>Sync.limits.timeout then InterruptPeer(name,"source-timeout");break end
+            end
+        end
         for key,transfer in pairs(self.incoming) do
             if not (Combat() and transfer.priority>1) and now-transfer.activity>Sync.limits.timeout then InterruptPeer(transfer.sender,"transfer-timeout") end
         end
         for key,cached in pairs(self.completed) do if not Combat() and now-cached.time>60 then self.completed[key]=nil end end
-        if self.request and not (Combat() and self.request.priority>1) and now-self.request.activity>Sync.limits.timeout then
+        if self.request and self.request.sent and not (Combat() and self.request.priority>1) and now-self.request.activity>Sync.limits.timeout then
             InterruptPeer(self.request.peer,"source-timeout")
             self.stats.retries=self.stats.retries+1
         end
-        if self.announce then Hello();self.announce=nil end
+        if self.announce then
+            Hello();self.announce=nil
+            for _,peer in pairs(self.peers) do peer.relayPending=nil end
+        end
         if self.discoveryAt and now>=self.discoveryAt then
             Hello();self.discoveryRemaining=self.discoveryRemaining-1
             self.discoveryAt=self.discoveryRemaining>0 and now+3 or nil
@@ -808,6 +977,21 @@ function Sync.New(options)
                 break
             end
         end
+        if not self.request then
+            for name,peer in pairs(self.peers) do
+                if peer.relayPending and not peer.blocked and not peer.unavailable and Hello(name) then peer.relayPending=nil end
+            end
+        end
+        FinishCatchup()
+        for name,peer in pairs(self.peers) do
+            if not peer.blocked and not peer.unavailable then
+                for id,generation in pairs(peer.completionPending or {}) do
+                    if Count(self.outbox)>=Sync.limits.outbox then break end
+                    self.sequence=self.sequence+1
+                    if Queue(name,{type="caught-up",request=self.sequence,raidId=id,generation=generation},1) then peer.completionPending[id]=nil end
+                end
+            end
+        end
         Schedule();Export();Encode()
         local outgoing=self.outgoing
         if outgoing and not (Combat() and outgoing.priority>1) and now-outgoing.activity>Sync.limits.retry then
@@ -826,6 +1010,11 @@ function Sync.New(options)
                 text=table.concat({"D",outgoing.target,outgoing.session,outgoing.id,tostring(index),tostring(outgoing.total),tostring(outgoing.priority),string.sub(outgoing.text,(index-1)*outgoing.size+1,index*outgoing.size)},"~")
                 if not Send(text) then break end
                 outgoing.sent=index;outgoing.activity=now
+                if outgoing.requestId and self.request and self.request.id==outgoing.requestId then
+                    -- Queueing behind another officer's transfer is local work,
+                    -- not time spent waiting for this recipient to respond.
+                    self.request.sent=true;self.request.activity=now
+                end
             else break end
         end
         if self.statusDirty then Status(self.reason) end
@@ -833,6 +1022,7 @@ function Sync.New(options)
     end
     function self:HasWork()
         if not self.enabled or self.pausedAt then return false end
+        if next(self.catchupCandidates) then return true end
         if self.statusDirty then return true end
         if Count(self.controls)>0 or self.announce or self.discoveryAt then return true end
         if self.request and (not Combat() or self.request.priority==1) then return true end
@@ -846,6 +1036,8 @@ function Sync.New(options)
             for _,peer in pairs(self.peers) do if not peer.blocked and not peer.unavailable then return true end end
         end
         for _,peer in pairs(self.peers) do
+            if not peer.blocked and not peer.unavailable and (next(peer.advertised or {}) or next(peer.completionPending or {})) then return true end
+            if peer.relayPending and not peer.blocked and not peer.unavailable then return true end
             if not peer.blocked and not peer.unavailable and peer.needsSummary then return true end
             if not peer.blocked and not peer.unavailable and peer.summary then
                 local missing=self.journal.GetMissingRanges(self.db,peer.summary,1)
@@ -897,6 +1089,7 @@ function Sync.New(options)
         if not self:HasWork() then return nil end
         local now=Now()
         if self.statusDirty then return now end
+        if next(self.catchupCandidates) then return now end
         local combat=Combat()
         if self.announce or (self.encoding and (not combat or self.encoding.priority==1)) then return now end
         for _,entry in ipairs(self.decodes) do if not combat or entry.priority==1 then return now end end
@@ -912,7 +1105,7 @@ function Sync.New(options)
         elseif outgoing and (not combat or outgoing.priority==1) then
             local retry=outgoing.activity+Sync.limits.retry;if not wake or retry<wake then wake=retry end
         end
-        if self.request and (not combat or self.request.priority==1) then
+        if self.request and self.request.sent and (not combat or self.request.priority==1) then
             local timeout=self.request.activity+Sync.limits.timeout;if not wake or timeout<wake then wake=timeout end
         end
         for _,transfer in pairs(self.incoming) do
@@ -921,10 +1114,16 @@ function Sync.New(options)
             end
         end
         for _,peer in pairs(self.peers) do
+            if not peer.blocked and not peer.unavailable then
+                if next(peer.completionPending or {}) and Count(self.outbox)<Sync.limits.outbox then return now end
+                for id,progress in pairs(peer.advertised or {}) do
+                    if not combat or Priority(id)==1 then local deadline=progress.activity+Sync.limits.timeout;if not wake or deadline<wake then wake=deadline end end
+                end
+            end
             if not self.request and not peer.blocked and not peer.unavailable then
                 if peer.cooldown and peer.cooldown>now then
                     if not wake or peer.cooldown<wake then wake=peer.cooldown end
-                elseif peer.needsSummary or next(self.dependencies) then return now
+                elseif peer.relayPending or peer.needsSummary or next(self.dependencies) then return now
                 elseif peer.summary then
                     local missing=self.journal.GetMissingRanges(self.db,peer.summary,1)
                     if missing and ((missing[1] and (not combat or Priority(missing[1].raidId)==1)) or (not missing[1] and peer.summary.nextOffset)) then return now end

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.34 — 2026-10-31
+
+- Reduce initial synchronization traffic with compact data messages and coalesced relay announcements, keeping the existing sending limit. Reload every officer client after updating.
+- Keep incomplete historical transfers out of active-session projections and report progress until the raid is complete; preserve existing local data during catch-up.
+
 ## 1.0.0-dev.33 — 2026-10-31
 
 - Preserve officer connections and transfers while the guild roster refreshes, then resume with fresh permissions. Recover automatically after a longer directory pause.

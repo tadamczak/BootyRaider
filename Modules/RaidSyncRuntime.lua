@@ -143,7 +143,7 @@ local function Restore(attendance)
     runtime.sessionController:RestoreActive();runtime.sessionController:Begin();runtime.historicalLoaded=true
     if attendance.syncEnded then Raider.raidSessionPaused=true;Raider.raidLiveTracking=false end
     runtime.CloseSessionPrompts()
-    attendance.syncRecoveryNotice="Recovered agreed data. Events missed by every recorder cannot be reconstructed."
+    attendance.syncRecoveryNotice=attendance.syncRecoveryNotice or "Recovered agreed data. Events missed by every recorder cannot be reconstructed."
     runtime.RefreshViews();return true
 end
 function SyncRuntime.Initialize(owner)
@@ -212,6 +212,8 @@ function SyncRuntime.RefreshAuthority()
             send=function(prefix,text,channel) return SendAddonMessage(prefix,text,channel) end,
             activeRaidId=function() return runtime.replica.GetJoinedRaidId() end,
             isRaidEnabled=function(id) return runtime.replica.IsRaidSyncEnabled(id) end,
+            getPendingRaidIds=function() return runtime.replica.GetPendingRaidIds() end,
+            onRaidCaughtUp=function(id) runtime.replica.OnRaidCaughtUp(id) end,
             priority=function(id)
                 local current=Raider.Database.GetRaidAttendance();if current and current.syncRaidId==id then return 1 end
                 local record=Raider.Services.RaidJournal.GetRecord(BootyRaiderDB,id,"saved:flags")
@@ -220,14 +222,17 @@ function SyncRuntime.RefreshAuthority()
             inCombat=Combat,
             validateOperation=Raider.Services.RaidReplica.ValidateOperation,
             validateCheckpoint=Raider.Services.RaidReplica.ValidateCheckpoint,
-            onApply=function(operation,reason) runtime.replica.OnOperation(operation,reason,false) end,
+            onApply=function(operation,reason,source) runtime.replica.OnOperation(operation,reason,false,source) end,
             onConnected=function(name) runtime.replica.LogSync("Connected to "..name..". Checking raid updates.") end,
             onDisconnected=function(name,reason) runtime.replica.LogSync("Lost connection to "..name.." ("..tostring(reason or "offline")..").") end,
-            onDelivered=function(name,id)
-                local operation=Raider.Services.RaidJournal.GetOperation(BootyRaiderDB,id)
+            onRaidDelivered=function(name,id,count,lastOperationId)
+                local operation=count==1 and lastOperationId and Raider.Services.RaidJournal.GetOperation(BootyRaiderDB,lastOperationId)
                 if operation and operation.kind~="raid.observe" and not operation.compacted then
                     local action=Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
                     runtime.replica.LogSync(name.." confirmed receipt: "..tostring(action))
+                elseif count>1 then
+                    local metadata=Raider.Services.RaidJournal.GetRecord(BootyRaiderDB,id,"raid:metadata")
+                    runtime.replica.LogSync(name.." confirmed raid "..tostring(metadata and metadata.value and metadata.value.id or id).." ("..count.." updates).")
                 end
             end,
             onStatus=function(status)
