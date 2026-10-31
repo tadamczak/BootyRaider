@@ -485,6 +485,7 @@ function Runtime.Stop()
 end
 local function ApplySettingChanges(keys)
     if not Runtime.initialized or not Raider.active then return end
+    if (keys.profile or keys.hideMinimapIcon) and Runtime.host and Runtime.host.standalone and Runtime.host.ApplySettings then Runtime.host.ApplySettings() end
     local native,tracking,autoLoot,csr,statistics=false,false,false,false,false
     for key in pairs(keys) do
         if (key=="profile" or key=="raidSyncEnabled") and Raider.Modules.RaidSyncRuntime then Raider.Modules.RaidSyncRuntime.RefreshAuthority() end

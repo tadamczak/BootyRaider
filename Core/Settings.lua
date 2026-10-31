@@ -196,7 +196,7 @@ function Settings.Get()
     local db=Raider.Database.Ensure()
     if not fields then
         fields={}
-        Field("raidSyncEnabled","Synchronize raids and CSR with other officers","checkbox",{"Addon UI","General"},nil,nil,nil,nil,
+        Field("raidSyncEnabled","Synchronize raids and CSR with other officers","checkbox",{"General"},nil,nil,nil,nil,
             "Share raid changes with authorized guild officers. Only saved, ended raids appear in Raid Stats and contribute to CSR.")
         Field("raidLiveTrackingEnabled","Live tracking","checkbox",{"Addon UI","Raid","General"},nil,nil,nil,nil,
             "Refresh the physical raid roster while the Raid view or Loot Master window is visible. Session loot recording remains active until the session is paused or ended.")
@@ -231,10 +231,12 @@ function Settings.Get()
             {"csrShowGroupFilter","Show Group By"},{"csrShowArchivedFilter","Show archived CSR filter"},{"csrShowAwardedFilter","Show awarded CSR filter"}}) do
             Field(option[1],option[2],"checkbox",{"Addon UI","CSR","Layout","Filters"})
         end
-        local chat=Field("chatActionLogs","Show action messages in chat","checkbox",{"Addon UI","General"})
+        local chat=Field("chatActionLogs","Show action messages in chat","checkbox",{"General"})
         chat.get=function() return Raider.Database.GetSetting("chatActionLogs") end
         chat.set=function(value) return Raider.Database.SetSetting("chatActionLogs",value) end
         chat.onChange=nil
+        local minimap=Field("hideMinimapIcon","Hide minimap icon","checkbox",{"General"})
+        minimap.default=false;minimap.standaloneOnly=true
         GroupFields("raidGroup",{"Addon UI","Raid","Layout","Group view"})
         local nativeTab=Field("useBootyRaidTab","Use BootyRaider as default Raid tab","checkbox",{"Game UI","Raid","Interface"})
         nativeTab.legacyKey=Raider.Database.GetLegacyPreferenceKey(nativeTab.key)

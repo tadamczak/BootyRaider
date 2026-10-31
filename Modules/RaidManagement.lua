@@ -1251,6 +1251,7 @@ function RaidManagement.CreateCompactGroupView(parent, dependencies)
     page.bootyGroupLayout = true; page.bootyGroupLeft = 0; page.bootyGroupTop = 0; page.bootyGroupBottom = 0
     page.isTestRaid = function() return false end
     page.getGroupSettings = dependencies.getGroupSettings
+    page.nativeRaidLayout = dependencies.nativeRaidLayout == true
     page.canManageGroups = dependencies.canManageGroups
     page.moveMemberToSlot = dependencies.moveMemberToSlot or function() return false end
     compactGroupSerial = compactGroupSerial + 1
@@ -1953,27 +1954,36 @@ function RaidManagement.CalculateGroupGeometry(width, height, columns, preferred
     }
 end
 
-function RaidManagement.CalculateGroupSlotColumns(slotWidth, reserveRoleIcon, reserveLootIcon, showLevel, showClass, offline, fitWidth)
+function RaidManagement.CalculateGroupSlotColumns(slotWidth, reserveRoleIcon, reserveLootIcon, showLevel, showClass, offline, fitWidth, nativeClassWidth, nativeLayout)
     if fitWidth then
         local width = math.max(1, tonumber(slotWidth) or 1)
         local padding = math.min(3, (width - 1) / 10)
         local right = math.min(3, (width - 1) / 10)
         local available = math.max(1, width - padding - right)
         local nameMinimum = math.min(16, available)
-        local role = reserveRoleIcon and available >= nameMinimum + 12
-        if role then available = available - 12 end
-        local loot = reserveLootIcon and available >= nameMinimum + 12
-        if loot then available = available - 12 end
+        -- The native Raid pane reserves its complete class caption before
+        -- giving the remaining width to the player name (stock minimum50px).
+        local classWidth = nativeClassWidth and showClass and math.max(0, math.min(nativeClassWidth, available - nameMinimum - 5)) or 0
+        if classWidth > 0 then available = available - classWidth - 5 end
+        local iconSize = nativeLayout and 14 or 10
+        local iconStep = iconSize + 2
+        local role = reserveRoleIcon and available >= nameMinimum + iconStep
+        if role then available = available - iconStep end
+        local loot = reserveLootIcon and available >= nameMinimum + iconStep
+        if loot then available = available - iconStep end
         local offlineWidth = offline and available >= nameMinimum + 46 and 42 or 0
         if offlineWidth > 0 then available = available - offlineWidth - 4 end
-        local levelWidth = showLevel and available >= nameMinimum + 29 and 24 or 0
+        local desiredLevel = nativeLayout and 22 or 24
+        local levelWidth = showLevel and available >= nameMinimum + desiredLevel + 5 and desiredLevel or 0
         if levelWidth > 0 then available = available - levelWidth - 5 end
         local preferredClass = math.max(36, math.min(64, math.floor(width * 0.25)))
-        local classWidth = showClass and available >= nameMinimum + preferredClass + 5 and preferredClass or 0
-        if classWidth > 0 then available = available - classWidth - 5 end
-        return { nameInset = padding + (role and 12 or 0) + (loot and 12 or 0), nameWidth = available,
+        if not nativeClassWidth then
+            classWidth = showClass and available >= nameMinimum + preferredClass + 5 and preferredClass or 0
+            if classWidth > 0 then available = available - classWidth - 5 end
+        end
+        return { nameInset = padding + (role and iconStep or 0) + (loot and iconStep or 0), nameWidth = available,
             classWidth = classWidth, levelWidth = levelWidth, offlineWidth = offlineWidth,
-            showRoleIcon = role, showLootIcon = loot, rightInset = right, iconInset = padding }
+            showRoleIcon = role, showLootIcon = loot, rightInset = right, iconInset = padding, iconSize = iconSize, iconStep = iconStep }
     end
     local width = math.max(80, tonumber(slotWidth) or 80)
     local nameInset = 5 + (reserveRoleIcon and 18 or 0) + (reserveLootIcon and 18 or 0)
@@ -2008,6 +2018,25 @@ local function SetGroupFont(fontString, size, settings)
     if path then
         if path~=currentPath or size~=currentSize or flags~=currentFlags then fontString:SetFont(path,size,flags) end
     else SetFontSize(fontString,size) end
+end
+
+local function NativeClassWidth(page, label)
+    local font, size, flags = label:GetFont()
+    if page.nativeClassFont ~= font or page.nativeClassSize ~= size or page.nativeClassFlags ~= flags then
+        page.nativeClassWidths = nil
+        page.nativeClassFont, page.nativeClassSize, page.nativeClassFlags = font, size, flags
+    end
+    local widths = page.nativeClassWidths or {};page.nativeClassWidths = widths
+    local text = label:GetText() or ""
+    if widths[text] then return widths[text] end
+    local measure = page.nativeClassMeasure
+    if not measure then
+        measure = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontNormalSmall")
+        measure:SetWidth(0);measure:Hide();page.nativeClassMeasure = measure
+    end
+    measure:SetFont(font, size, flags);measure:SetText(text)
+    widths[text] = math.max(50, math.ceil(measure:GetStringWidth()) + 2)
+    return widths[text]
 end
 
 function RaidManagement.FilterMembers(target, members, query, selectedClasses, selectedRanks)
@@ -2488,6 +2517,10 @@ local function OnGroupSlotMouseDown()
     if this.class:IsVisible() then ghost.class:Show() else ghost.class:Hide() end
     if this.offline:IsVisible() then ghost.offline:Show() else ghost.offline:Hide() end
     PositionGroupGhostText(this.name, ghost.name, this, ghost)
+    if page.nativeRaidLayout then
+        PositionGroupGhostText(this.crown, ghost.crown, this, ghost);ghost.crown:SetHeight(this.crown:GetHeight())
+        PositionGroupGhostText(this.lootMasterIcon, ghost.lootMasterIcon, this, ghost);ghost.lootMasterIcon:SetHeight(this.lootMasterIcon:GetHeight())
+    end
     if this.class:IsVisible() then PositionGroupGhostText(this.class, ghost.class, this, ghost) end
     if this.level:IsVisible() then PositionGroupGhostText(this.level, ghost.level, this, ghost) end
     if this.offline:IsVisible() then PositionGroupGhostText(this.offline, ghost.offline, this, ghost) end
@@ -2779,7 +2812,8 @@ function RaidManagement.RefreshGroupView(page)
             local showClass = not legacyCompact and settings.raidGroupShowClass
             local slotWidth = slot.bootyGroupWidth
             local showOffline = not online and (not page.getGroupSettings or not settings.raidGroupShowClass)
-            local columns = RaidManagement.CalculateGroupSlotColumns(slotWidth, showRoleIcon, showLootMasterIcon, showLevel, showClass, showOffline, true)
+            local nativeClassWidth = page.nativeRaidLayout and showClass and NativeClassWidth(page, slot.class) or nil
+            local columns = RaidManagement.CalculateGroupSlotColumns(slotWidth, showRoleIcon, showLootMasterIcon, showLevel, showClass, showOffline, true, nativeClassWidth, page.nativeRaidLayout)
             showRoleIcon, showLootMasterIcon = columns.showRoleIcon, columns.showLootIcon
             showLevel, showClass = columns.levelWidth > 0, columns.classWidth > 0
             if showRoleIcon and (tonumber(raidRank) or 0) == 2 then
@@ -2791,8 +2825,8 @@ function RaidManagement.RefreshGroupView(page)
             end
             local iconInset = columns.iconInset or 5
             slot.crown:ClearAllPoints(); slot.crown:SetPoint("LEFT", slot, "LEFT", iconInset, 0)
-            slot.crown:SetWidth(10); slot.crown:SetHeight(10); slot.lootMasterIcon:SetWidth(10); slot.lootMasterIcon:SetHeight(10)
-            slot.lootMasterIcon:ClearAllPoints(); slot.lootMasterIcon:SetPoint("LEFT", slot, "LEFT", iconInset + (showRoleIcon and 12 or 0), 0)
+            slot.crown:SetWidth(columns.iconSize); slot.crown:SetHeight(columns.iconSize); slot.lootMasterIcon:SetWidth(columns.iconSize); slot.lootMasterIcon:SetHeight(columns.iconSize)
+            slot.lootMasterIcon:ClearAllPoints(); slot.lootMasterIcon:SetPoint("LEFT", slot, "LEFT", iconInset + (showRoleIcon and columns.iconStep or 0), 0)
             if showLootMasterIcon then slot.lootMasterIcon:Show() else slot.lootMasterIcon:Hide() end
             local nameInset, nameWidth = columns.nameInset, columns.nameWidth
             local classWidth, levelWidth, offlineWidth = columns.classWidth, columns.levelWidth, columns.offlineWidth

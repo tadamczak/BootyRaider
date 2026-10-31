@@ -193,7 +193,7 @@ function Sync.Create(parent,api)
     end
     for _,button in pairs(controller.tabs) do button.bootyCaptionBottomInset=0;button.bootyLabelInsets={22,4};UI.ApplyButtonCaptionBaseline(button) end
     controller.officers=Label(frame,"",360,-36,470,36)
-    UI.AttachLabelTooltip(frame,controller.officers,"Connected officers",function() return controller.officersText or "No other officer connected." end)
+    UI.AttachLabelTooltip(frame,controller.officers,"Officer synchronization",function() return controller.officersText or "No other officer connected." end)
     controller.headings={}
     for _,title in ipairs({"#","Raid ID","Raid","Status","Sync status","Conflicts","Actions"}) do table.insert(controller.headings,Label(frame,title,10,-112,100,18)) end
     for _,heading in ipairs(controller.headings) do heading:SetTextColor(unpack(UI.Theme.colors.goldText)) end
@@ -529,10 +529,15 @@ function Sync.Create(parent,api)
         local gold=UI.Theme.colors.goldText
         local prefix=string.format("|cff%02x%02x%02xSync status:|r |cffffffff",math.floor(gold[1]*255),math.floor(gold[2]*255),math.floor(gold[3]*255))
         self.status:SetText(prefix..(status.syncStatus or "Up to date").."|r")
-        local names={}
-        for _,peer in ipairs(status.peers or {}) do if peer.available or peer.syncState=="error" then table.insert(names,peer.name.." - "..(peer.syncState or "pending")) end end
-        self.officerCount=table.getn(names)
-        self.officersText=self.officerCount>0 and (string.gsub(prefix,"Sync status:","Connected officers:")..table.concat(names,", ").."|r") or "No other officer connected."
+        local names={};self.officerCount=0;self.interruptedCount=0
+        for _,peer in ipairs(status.peers or {}) do
+            if peer.available then self.officerCount=self.officerCount+1 end
+            if peer.syncState=="interrupted" then self.interruptedCount=self.interruptedCount+1 end
+            if peer.available or peer.syncState=="pending" or peer.syncState=="error" or peer.syncState=="interrupted" then
+                table.insert(names,peer.name.." - "..(peer.syncState=="interrupted" and "Sync interrupted" or peer.status=="Connecting" and "Connecting" or peer.syncState or "pending"))
+            end
+        end
+        self.officersText=table.getn(names)>0 and (string.gsub(prefix,"Sync status:",self.officerCount==table.getn(names) and "Connected officers:" or "Officers:")..table.concat(names,", ").."|r") or "No other officer connected."
         self.officers:SetText(self.officersText)
         frame:LayoutContent(frame:GetWidth(),frame:GetHeight())
         local visiblePageSize=self.visiblePageSize or pageSize
@@ -581,7 +586,7 @@ function Sync.Create(parent,api)
         controller.officers:SetText(controller.officersText or "")
         local headerHeight=math.max(22,UI.MeasureTextHeight(controller.officers,officerWidth,true))
         if headerHeight>math.max(32,h-180) or w<600 and headerHeight>32 then
-            controller.officers:SetText(tostring(controller.officerCount or 0).." officers connected.")
+            controller.officers:SetText(tostring(controller.officerCount or 0).." officers connected."..((controller.interruptedCount or 0)>0 and (" "..controller.interruptedCount.." sync interrupted.") or ""))
             headerHeight=math.max(22,UI.MeasureTextHeight(controller.officers,officerWidth,true))
         end
         controller.officers:SetHeight(headerHeight)

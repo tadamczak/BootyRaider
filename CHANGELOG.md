@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-dev.32 — 2026-10-31
+
+- Recover interrupted synchronization without stale transfer queues; report Sync interrupted and reject packets from earlier connections. Officers must use this same synchronization build.
+- Fit full native raid class names and use matching role icons. Simplify /br commands, add a login hint and standalone minimap preference.
+- Capture current settings once as the protected BootyRaider Default profile. Keep Raid Stats/CSR editing restricted to guild officers and the guild master.
+
 ## 1.0.0-dev.31 — 2026-10-31
 
 - Keep Save Raid in the active session. Retain departed participants, join/leave times and their statistics/CSR through tracking, saving and synchronization.

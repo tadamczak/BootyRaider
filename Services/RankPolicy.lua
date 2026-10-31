@@ -32,10 +32,10 @@ function RankPolicy.HasOfficerAuthority(name)
     local directory = BootyLib and BootyLib.GuildDirectory
     local member = directory and directory.Find and name and directory.Find(name)
     local rank = member and string.lower(tostring(member.rank or ""))
-    return rank == "officer wukong" or rank == "mukla"
+    return member and member.rankIndex == 0 or rank == "officer wukong" or rank == "mukla"
 end
 function RankPolicy.CanManageHistory()
     local name = type(UnitName) == "function" and UnitName("player")
     if RankPolicy.HasOfficerAuthority(name) then return true end
-    return false, "Only Officer Wukong and Mukla can manage saved raid history."
+    return false, "Only guild officers and the guild master can change Raid Stats and CSR."
 end

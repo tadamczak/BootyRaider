@@ -109,39 +109,34 @@ local function CreateCSR(parent,host)
     Runtime.views.csr=view
     return RequestHistoryOnShow(view)
 end
+local function RollHelp()
+    Runtime.Print("/br roll <item link> [players] [Tmog OS MS RC SR] - start a custom roll.")
+    Runtime.Print("Players: space-separated names; omit for everyone. Types: choose one or more; omit for OS/MS/RC and eligible Tmog.")
+    Runtime.Print("Tmog: appearance; OS: off-spec; MS: main-spec; RC: Reycoin; SR: Soft Reserve. Requires raid leader, assistant or Loot Master.")
+end
+local function CommandHelp()
+    Runtime.Print("/br raid - Open Raid.")
+    Runtime.Print("/br stats - Open Raid Stats.")
+    Runtime.Print("/br csr - Open CSR.")
+    Runtime.Print("/br config - Open Settings.")
+    RollHelp()
+end
 function Raider.HandleCommand(text)
     if not Raider.active then Runtime.Print("BootyRaider is stopped. Resume it in Plugins or reload with the addon enabled.");return false end
     local _,_,command,arguments=string.find(tostring(text or ""),"^%s*(%S*)%s*(.-)%s*$")
     command=string.lower(command or "")
+    if command=="" then CommandHelp();return true end
     if command=="roll" then
+        if arguments=="" then RollHelp();return true end
         if not Raider.Services.LootRollRequest.CanOrganize() then
             Runtime.Print("Only the Loot Master, raid leader or an assistant can start a roll.");return false
         end
-        if arguments=="" then return Raider.Modules.MasterLootWindow.OpenNewRollDialog() end
         return Raider.Modules.MasterLootWindow.OpenLinkedItemRoll(arguments)
-    elseif command=="sync" or command=="conflicts" then
-        local record=Runtime.GetAttendance()
-        if arguments~="" then record=Raider.Services.RaidAudit.FindRaidId(arguments) or arguments end
-        local ok,result=Raider.Modules.RaidSync.Open(record,Runtime.host and Runtime.host.window)
-        if not ok then Runtime.Print(result) end
-        return ok
-    elseif command=="log" then
-        local record=Runtime.GetAttendance()
-        if arguments~="" then
-            local _,snapshot,statistic=Raider.Database.GetSavedRaidState(arguments)
-            if record and record.snapshotId==arguments then
-                -- Keep the active identity when its display ID matches.
-            else record=snapshot or statistic or Raider.Services.RaidAudit.FindRaidId(arguments) or arguments end
-        end
-        local owner=Runtime.host and Runtime.host.window
-        local ok,result=Raider.Modules.RaidLog.Open(record,owner)
-        if not ok then Runtime.Print(result) end
-        return ok
     elseif command=="stats" then return Runtime.OpenView("raidStatistics")
     elseif command=="csr" then return Runtime.OpenView("csr")
-    elseif command=="settings" then if Runtime.host and Runtime.host.OpenSettings then return Runtime.host.OpenSettings() end
-    elseif command=="" or command=="raid" then return Runtime.OpenView("raid") end
-    Runtime.Print("Use /br, /br stats, /br csr, /br sync [raid ID], /br log [raid ID], /br settings or /br roll [item] [players] [Tmog OS MS RC SR].")
+    elseif command=="config" then if Runtime.host and Runtime.host.OpenSettings then return Runtime.host.OpenSettings() end
+    elseif command=="raid" then return Runtime.OpenView("raid") end
+    CommandHelp()
     return false
 end
 local function QuickMenu(host)
@@ -219,7 +214,21 @@ function Raider.GetDatabaseStatistics()
     }}
 end
 
-local descriptor={id="raider",name="BootyRaider",label="Raid",namespace=Raider,version=Raider.version,apiVersion=1,OnHostReady=Runtime.Initialize,
+local function HostReady(host)
+    local ready,reason=Runtime.Initialize(host)
+    if ready==false then return ready,reason end
+    if not Runtime.defaultProfileCaptured then
+        BootyLib.Core.SettingsProfiles.Create({Raider.descriptor},{id="raider",scoped=true})
+        Runtime.defaultProfileCaptured=true
+    end
+    if not Runtime.loginGreetingShown then
+        BootyLib.Print(Raider.version..". Use /br to see available commands!","BootyRaider")
+        Runtime.loginGreetingShown=true
+    end
+    return true
+end
+local descriptor={id="raider",name="BootyRaider",label="Raid",namespace=Raider,version=Raider.version,apiVersion=1,OnHostReady=HostReady,
+    ownsCommands=true,protectedProfileName="BootyRaider Default",
     Initialize=Runtime.Initialize,Start=Runtime.Initialize,Stop=Runtime.Stop,IsBusy=Runtime.IsBusy,GetSettings=Raider.Settings.Get,
     OnActivationFailed=Runtime.OnActivationFailed,
     GetDatabase=Raider.Database.Ensure,GetProfilingTargets=Raider.GetProfilingTargets,GetDatabaseStatistics=Raider.GetDatabaseStatistics,GetQuickMenu=QuickMenu,ResetSettings=Raider.Settings.Reset,OnSettingChanged=Raider.OnSettingChanged,Command=Raider.HandleCommand,

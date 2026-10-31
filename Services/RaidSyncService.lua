@@ -1,6 +1,6 @@
 local Raider=BootyRaider
 Raider.Services=Raider.Services or {}
-local Sync={PREFIX="BRSYNC1",protocol=2,policy=2}
+local Sync={PREFIX="BRSYNC1",protocol=3,policy=2}
 Raider.Services.RaidSync=Sync
 -- Accommodate one incoming stream per supported peer while retaining the
 -- aggregate byte cap and incremental single-job codec budget.
@@ -14,6 +14,7 @@ local function Count(values) return table.getn(values) end
 local function Text(value,maximum)
     return type(value)=="string" and string.len(value)>0 and string.len(value)<=maximum and not string.find(value,"[%c|~]")
 end
+local function Session(value) return Text(value,32) and not string.find(value,":",1,true) end
 local function Integer(value,maximum)
     return type(value)=="number" and value==value and value>=0 and value<=maximum and value==math.floor(value)
 end
@@ -64,7 +65,7 @@ function Sync.New(options)
     options=options or {}
     local self={options=options,journal=options.journal or Raider.Services.RaidJournal,
         codec=options.codec or Raider.Services.RaidSyncCodec,db=options.db,enabled=false,
-        peers={},incompatiblePeers={},outbox={},controls={},incoming={},completed={},decodes={},exports={},dependencies={},sentOperations={},receipts={},receiptRanges=0,
+        peers={},incompatiblePeers={},retiredSessions={},outbox={},controls={},incoming={},completed={},decodes={},exports={},dependencies={},sentOperations={},receipts={},receiptRanges=0,
         sequence=0,generation=0,revision=0,tokens=Sync.limits.burst,bufferBytes=0,
         stats={sentBytes=0,receivedBytes=0,applied=0,duplicates=0,conflicts=0,retries=0,rejected=0}}
     local function Now() return options.now and options.now() or 0 end
@@ -121,7 +122,10 @@ function Sync.New(options)
     end
     local function Queue(target,payload,priority)
         if Count(self.outbox)>=Sync.limits.outbox then return false,"outbox-backpressure" end
+        local peer=self.peers[target]
+        if not peer or peer.unavailable or peer.blocked then return false,"handshake-pending" end
         payload.scope=self.scope
+        payload.recipientSession=peer.session
         table.insert(self.outbox,{target=target,payload=payload,priority=priority or 1})
         return true
     end
@@ -136,12 +140,7 @@ function Sync.New(options)
         local transfer=self.incoming[key]
         if transfer then self.bufferBytes=self.bufferBytes-transfer.bytes;self.incoming[key]=nil end
     end
-    local function RemovePeer(name,reason)
-        if self.peers[name] and self.peers[name].connected and options.onDisconnected then options.onDisconnected(name,reason) end
-        self.peers[name]=nil
-        local receipts=self.receipts[name]
-        for _,raid in pairs(receipts or {}) do for _,ranges in pairs(raid) do self.receiptRanges=self.receiptRanges-Count(ranges) end end
-        self.receipts[name]=nil
+    local function ClearPeerWork(name)
         if self.request and self.request.peer==name then self.request=nil end
         if self.outgoing and self.outgoing.target==name then self.outgoing=nil end
         if self.encoding and self.encoding.target==name then self.encoding=nil end
@@ -152,10 +151,50 @@ function Sync.New(options)
             if decode.sender==name then self.bufferBytes=self.bufferBytes-decode.bytes;table.remove(self.decodes,index) end
         end
         for key,transfer in pairs(self.incoming) do if transfer.sender==name then ReleaseIncoming(key) end end
+        for key in pairs(self.completed) do if string.sub(key,1,string.len(name)+1)==name..":" then self.completed[key]=nil end end
+        for id,sent in pairs(self.sentOperations) do if sent.peer==name then self.sentOperations[id]=nil end end
+        for _,dependency in pairs(self.dependencies) do if dependency.peer==name then dependency.peer=nil end end
         for index=Count(self.controls),1,-1 do
             local fields=Fields(self.controls[index]);if fields and fields[2]==name then table.remove(self.controls,index) end
         end
-        self.lastError=reason or "peer-authority-lost";self.revision=self.revision+1
+    end
+    local function Disconnect(peer,reason)
+        if peer.connected and options.onDisconnected then options.onDisconnected(peer.name,reason) end
+        peer.connected=false
+    end
+    local function InterruptPeer(name,reason)
+        local peer=self.peers[name]
+        if not peer then return end
+        ClearPeerWork(name);Disconnect(peer,reason)
+        peer.unavailable=true;peer.interrupted=reason;peer.needsSummary=nil;peer.summary=nil;peer.offset=0;peer.contactConfirmed=nil
+        self.lastError=reason;self.revision=self.revision+1;self.statusDirty=true
+    end
+    local function RemovePeer(name,reason)
+        local peer=self.peers[name]
+        if peer then Disconnect(peer,reason) end
+        ClearPeerWork(name);self.peers[name]=nil
+        local receipts=self.receipts[name]
+        for _,raid in pairs(receipts or {}) do for _,ranges in pairs(raid) do self.receiptRanges=self.receiptRanges-Count(ranges) end end
+        self.receipts[name]=nil
+        self.lastError=reason or "peer-authority-lost";self.revision=self.revision+1;self.statusDirty=true
+    end
+    local function RetireSession(name,session)
+        if not self.retiredSessions[name] and CountMap(self.retiredSessions)>=Sync.limits.peers then
+            for old in pairs(self.retiredSessions) do if not self.peers[old] then self.retiredSessions[old]=nil;break end end
+        end
+        local retired=self.retiredSessions[name] or {};self.retiredSessions[name]=retired
+        if Count(retired)>=8 then table.remove(retired,1) end
+        table.insert(retired,session)
+    end
+    local function PeerBusy(peer)
+        local name=peer.name
+        if peer.needsSummary or self.request and self.request.peer==name or self.outgoing and self.outgoing.target==name
+            or self.encoding and self.encoding.target==name then return true end
+        for _,queued in ipairs(self.outbox) do if queued.target==name then return true end end
+        for _,queued in ipairs(self.exports) do if queued.peer==name then return true end end
+        for _,queued in ipairs(self.decodes) do if queued.sender==name then return true end end
+        for _,queued in pairs(self.incoming) do if queued.sender==name then return true end end
+        return false
     end
     local function Confirm(sender,sent)
         local peers=self.receipts[sender] or {};self.receipts[sender]=peers
@@ -200,6 +239,10 @@ function Sync.New(options)
     local function Dispatch(peer,payload,receiptId,receiptSession)
         if peer.blocked then return true,"blocked-peer" end
         if type(payload)~="table" or payload.scope~=self.scope then return Reject("invalid-message-scope") end
+        -- A surviving sender can still have chunks addressed to our previous
+        -- client process. Request numbers alone restart at one after login.
+        if not Text(payload.recipientSession,32) then return Reject("invalid-recipient-session") end
+        if payload.recipientSession~=self.session then return true,"stale-recipient-session" end
         if not Integer(payload.request,9007199254740991) or payload.request<1 then return Reject("invalid-request") end
         local kind=payload.type
         local function Busy()
@@ -296,7 +339,8 @@ function Sync.New(options)
     end
 
     function self:GetStatus(raidId)
-        local peers,available,confirmed={},0,0
+        local peers,available,confirmed,interrupted={},0,0,false
+        local hasError=self.lastError and self.lastError~="source-timeout" and self.lastError~="transfer-timeout" and self.lastError~="peer-session-changed" or false
         local confirmedNames={}
         for name,peer in pairs(self.peers) do
             -- A validated message is newer evidence than the cached roster it
@@ -305,22 +349,21 @@ function Sync.New(options)
             local stale=options.isOnline and not options.isOnline(name) and not witnessed
                 or not options.isOnline and Now()-(peer.seen or 0)>120
             local authorized=Authority(name)
-            local fresh=not peer.blocked and not peer.unavailable and not stale and authorized
+            local busy=PeerBusy(peer)
+            local connecting=not peer.connected and not peer.blocked and not peer.unavailable and authorized and busy
+            local fresh=peer.connected and not peer.blocked and not peer.unavailable and not stale and authorized
             local receipts=self.receipts[name]
             local received=fresh and receipts and (raidId and receipts[raidId] and next(receipts[raidId])~=nil or not raidId and next(receipts)~=nil) and true or false
             if fresh then available=available+1 end
             if received then confirmed=confirmed+1;table.insert(confirmedNames,name) end
-            local status=not authorized and "No officer access" or peer.blocked and "Blocked" or peer.unavailable and "Unavailable" or stale and "Possibly stale"
+            if peer.interrupted then interrupted=true end
+            if peer.blocked then hasError=true end
+            local status=not authorized and "No officer access" or peer.blocked and "Blocked" or peer.interrupted and "Sync interrupted" or connecting and "Connecting" or peer.unavailable and "Unavailable" or stale and "Possibly stale"
                 or self.request and self.request.peer==name and "Synchronizing" or received and "Received changes" or "Available"
-            local busy=peer.needsSummary or self.request and self.request.peer==name or self.outgoing and self.outgoing.target==name
-            busy=busy or self.encoding and self.encoding.target==name
-            for _,queued in ipairs(self.outbox) do if queued.target==name then busy=true end end
-            for _,queued in ipairs(self.exports) do if queued.peer==name then busy=true end end
-            for _,queued in ipairs(self.decodes) do if queued.sender==name then busy=true end end
-            for _,queued in pairs(self.incoming) do if queued.sender==name then busy=true end end
-            local syncState=peer.blocked and "error" or not fresh and "offline" or busy and "pending" or "synced"
+            local syncState=peer.blocked and "error" or peer.interrupted and "interrupted" or connecting and "pending" or not fresh and "offline" or busy and "pending" or "synced"
             table.insert(peers,{name=name,status=status,syncState=syncState,activeRaidId=peer.activeRaidId,available=fresh,compatible=true,lastSeen=peer.seen,confirmed=received,
-                message=received and "This officer holds some raid data. Check Synchro Log for individual deliveries." or peer.blocked and "Received data was rejected. Retry after reviewing the cause." or nil})
+                message=peer.interrupted and "Sync interrupted. Stored changes are safe; retry when the officer is available."
+                    or received and "This officer holds some raid data. Check Synchro Log for individual deliveries." or peer.blocked and "Received data was rejected. Retry after reviewing the cause." or nil})
         end
         for name,peer in pairs(self.incompatiblePeers) do
             if not self.peers[name] then table.insert(peers,{name=name,status="Incompatible",compatible=false,lastSeen=peer.seen,message="Version, data schema or guild scope differs."}) end
@@ -337,7 +380,7 @@ function Sync.New(options)
             if self.encoding and self.encoding.receipt and self.encoding.receipt.raidId==raidId then pending=pending+1 end
             local sent=self.outgoing and self.sentOperations[self.outgoing.id];if sent and sent.raidId==raidId then pending=pending+1 end
             if self.request and (self.request.payload.raidId==raidId or self.request.payload.type=="summary-request") then pending=pending+1 end
-            for _,peer in pairs(self.peers) do if peer.needsSummary then pending=pending+1 end end
+            for _,peer in pairs(self.peers) do if not peer.unavailable and not peer.blocked and peer.needsSummary then pending=pending+1 end end
         end
         local message
         if not self.enabled then message=messages[self.reason] or "Synchronization is stopped."
@@ -348,7 +391,7 @@ function Sync.New(options)
         elseif pending>0 then message="Sending and receiving raid updates."
         else table.sort(confirmedNames);message="Raid updates checked with "..table.concat(confirmedNames,", ")..". See Synchro Log for received changes." end
         return {enabled=self.enabled,localOnly=confirmed==0,compatible=available>0 or CountMap(self.incompatiblePeers)==0,reason=self.reason,message=message,
-            lastError=self.lastError,scope=self.scope,revision=self.revision,
+            lastError=self.lastError,interrupted=interrupted,hasError=hasError,scope=self.scope,revision=self.revision,
             peers=peers,peerCount=Count(peers),availableCount=available,confirmedCount=confirmed,pending=pending,queued=Count(self.outbox),receiving=CountMap(self.incoming),
             bufferBytes=self.bufferBytes,request=self.request and self.request.payload.type or nil,
             sentBytes=self.stats.sentBytes,receivedBytes=self.stats.receivedBytes,applied=self.stats.applied,
@@ -365,16 +408,18 @@ function Sync.New(options)
         if not state then Status(failure);return false,failure end
         self.db.raidSyncScope=self.scope
         self.session=tostring(Value(options.session) or (math.floor(Now()*1000).."-"..math.random(1,999999)))
+        self.starts=(self.starts or 0)+1
+        if self.starts>1 then self.session=string.sub(self.session,1,20).."-r"..self.starts end
         if self.policyEpoch then self.session=string.sub(self.session,1,20).."-p"..tostring(self.policyEpoch) end
-        if not Text(self.session,32) then Status("invalid-session");return false,self.reason end
-        self.enabled=true;self.lastTick=Now();self.tokens=Sync.limits.burst;self.discoveryRemaining=2;self.discoveryAt=Now()+3
+        if not Session(self.session) then Status("invalid-session");return false,self.reason end
+        self.enabled=true;self.lastError=nil;self.lastTick=Now();self.tokens=Sync.limits.burst;self.discoveryRemaining=2;self.discoveryAt=Now()+3
         local queued,reason=Hello()
         if not queued then self:Stop(reason);return false,reason end
         Status("discovering");return true
     end
     function self:Stop(reason)
         self.enabled=false;self.peers={};self.incompatiblePeers={};self.outbox={};self.controls={};self.incoming={};self.completed={};self.decodes={};self.exports={}
-        self.dependencies={};self.sentOperations={};self.receipts={};self.receiptRanges=0;self.outgoing=nil;self.encoding=nil;self.request=nil;self.bufferBytes=0;self.discoveryAt=nil;self.combatPauseAt=nil
+        self.dependencies={};self.sentOperations={};self.receipts={};self.receiptRanges=0;self.outgoing=nil;self.encoding=nil;self.request=nil;self.bufferBytes=0;self.discoveryAt=nil;self.announce=nil;self.combatPauseAt=nil
         Status(reason or "disabled")
     end
     function self:RefreshRaidPolicy()
@@ -392,8 +437,20 @@ function Sync.New(options)
     end
     function self:Discover()
         if not Ready() then return false end
-        for _,peer in pairs(self.peers) do peer.needsSummary=true;peer.offset=0;peer.cooldown=nil;peer.unavailable=nil;peer.blocked=nil end
+        for _,peer in pairs(self.peers) do peer.needsSummary=true;peer.offset=0;peer.cooldown=nil;peer.unavailable=nil;peer.blocked=nil;peer.interrupted=nil end
+        self.lastError=nil;self.statusDirty=true
         self.announce=true;self.discoveryRemaining=2;self.discoveryAt=Now()+3;return true
+    end
+    function self:Retry()
+        if not Ready() then return false,self.reason end
+        local peers=self.peers
+        self:Stop("retrying")
+        self.peers=peers
+        for _,peer in pairs(peers) do
+            peer.summary=nil;peer.offset=0;peer.cooldown=nil;peer.unavailable=nil;peer.blocked=nil;peer.interrupted=nil
+            peer.contactConfirmed=nil;peer.connected=false;peer.needsSummary=true
+        end
+        return self:Start()
     end
     local function ReceivePacket(prefix,text,channel,sender)
         if prefix~=Sync.PREFIX then return false,"other-prefix" end
@@ -408,7 +465,7 @@ function Sync.New(options)
             -- GUILD transports share a single sender budget. Valid chunks to
             -- another recipient prove a selected source is working, not offline.
             local peer=self.peers[sender]
-            if peer and fields[1]=="D" and Count(fields)==8 and fields[3]==peer.session
+            if peer and fields[1]=="D" and Count(fields)==8 and string.sub(fields[3],1,string.len(peer.session)+1)==peer.session..":"
                 and Integer(tonumber(fields[5]),16384) and Integer(tonumber(fields[6]),16384) then
                 peer.seen=Now()
                 if self.request and self.request.peer==sender then self.request.activity=Now() end
@@ -417,7 +474,7 @@ function Sync.New(options)
         end
         self.stats.receivedBytes=self.stats.receivedBytes+string.len(text)+string.len(Sync.PREFIX);self.revision=self.revision+1
         if fields[1]=="H" then
-            if Count(fields)~=8 or not Text(fields[3],32) or tonumber(fields[4])~=Sync.protocol
+            if Count(fields)~=8 or not Session(fields[3]) or tonumber(fields[4])~=Sync.protocol
                 or tonumber(fields[5])~=self.journal.schema or tonumber(fields[6])~=Sync.policy
                 or not Integer(tonumber(fields[7]),9007199254740991) or DecodeScope(fields[8])~=self.scope then
                 if self.peers[sender] then RemovePeer(sender,"incompatible-peer") end
@@ -425,8 +482,10 @@ function Sync.New(options)
                 return Reject("incompatible-peer")
             end
             self.incompatiblePeers[sender]=nil
+            for _,session in ipairs(self.retiredSessions[sender] or {}) do if session==fields[3] then return false,"stale-session" end end
             local peer=self.peers[sender]
             if peer and peer.session and peer.session~=fields[3] then
+                RetireSession(sender,peer.session)
                 RemovePeer(sender,"peer-session-changed");peer=nil
             end
             local connected=not peer
@@ -438,15 +497,16 @@ function Sync.New(options)
                 for _,raid in pairs(self.receipts[sender] or {}) do for _,ranges in pairs(raid) do self.receiptRanges=self.receiptRanges-Count(ranges) end end
                 self.receipts[sender]=nil
             end
-            if peer.session~=fields[3] or peer.generation~=fields[7] then peer.needsSummary=true;peer.offset=0 end
-            peer.session=fields[3];peer.generation=fields[7];peer.seen=Now();peer.cooldown=nil;peer.unavailable=nil
+            if peer.session~=fields[3] or peer.generation~=fields[7] or peer.unavailable or not peer.connected then peer.needsSummary=true;peer.offset=0 end
+            local returning=peer.unavailable or not peer.connected
+            peer.session=fields[3];peer.generation=fields[7];peer.seen=Now();peer.cooldown=nil;peer.unavailable=nil;peer.interrupted=nil
             peer.presenceRevision=options.presenceRevision and options.presenceRevision() or nil
-            if self.lastError=="peer-session-changed" then self.lastError=nil end
+            if self.lastError=="peer-session-changed" or self.lastError=="source-timeout" or self.lastError=="transfer-timeout" then self.lastError=nil end
             if (connected or not peer.connected) and options.onConnected then options.onConnected(sender) end
             peer.connected=true
             -- Suppress echo bursts only after addressed traffic proves the
             -- peer knows us. Retry the greeting if our first reply was lost.
-            if fields[2]=="*" and (connected or not peer.contactConfirmed) then Hello(sender) end
+            if fields[2]=="*" and (connected or returning or not peer.contactConfirmed) then Hello(sender) end
             return true
         end
         local peer=self.peers[sender]
@@ -455,8 +515,7 @@ function Sync.New(options)
             return Reject("handshake-required")
         end
         if peer.blocked then return false,"blocked-peer" end
-        peer.seen=Now()
-        if self.request and self.request.peer==sender then self.request.activity=Now() end
+        if peer.unavailable then return false,"handshake-pending" end
         if fields[1]=="B" then
             local request=self.request
             if Count(fields)~=4 or fields[3]~=self.session or not request or request.peer~=sender or tostring(request.id)~=fields[4] then return false,"stale-busy" end
@@ -476,22 +535,27 @@ function Sync.New(options)
             if outgoing.ack==outgoing.total then self.outgoing=nil end
             return true
         elseif fields[1]=="D" then
-            -- Queued chunks from before a reload cannot belong to the new session.
-            if fields[3]~=peer.session then return false,"stale-session" end
+            -- Both endpoints identify their client process. Old addressed
+            -- chunks must not refresh activity or keep a new request alive.
+            local separator=string.find(fields[3] or "",":",1,true)
+            local sourceSession=separator and string.sub(fields[3],1,separator-1) or fields[3]
+            local targetSession=separator and string.sub(fields[3],separator+1)
+            if sourceSession~=peer.session then return false,"stale-session" end
+            if targetSession~=self.session then return false,"stale-recipient-session" end
             local index,total,priority=tonumber(fields[5]),tonumber(fields[6]),tonumber(fields[7])
-            if Count(fields)~=8 or fields[3]~=peer.session or not Text(fields[4],20) or not Integer(index,16384) or index<1
+            if Count(fields)~=8 or not Text(fields[4],20) or not Integer(index,16384) or index<1
                 or not Integer(total,16384) or total<index or not Integer(priority,3) or priority<1
                 or string.len(fields[8])==0 then return Reject("invalid-chunk") end
             local key=sender..":"..fields[3]..":"..fields[4]
             local completed=self.completed[key]
             if completed then
                 if completed.total~=total then return Reject("chunk-collision") end
-                Control(table.concat({"A",sender,fields[3],fields[4],tostring(total)},"~"));return true,"duplicate-chunk"
+                Control(table.concat({"A",sender,sourceSession,fields[4],tostring(total)},"~"));return true,"duplicate-chunk"
             end
             local transfer=self.incoming[key]
             if not transfer then
                 if CountMap(self.incoming)+Count(self.decodes)>=Sync.limits.incoming then return Reject("incoming-backpressure") end
-                transfer={sender=sender,id=fields[4],session=fields[3],total=total,priority=priority,chunks={},received=0,contiguous=0,bytes=0,activity=Now()}
+                transfer={sender=sender,id=fields[4],session=sourceSession,total=total,priority=priority,chunks={},received=0,contiguous=0,bytes=0,activity=Now()}
                 self.incoming[key]=transfer
             end
             if transfer.total~=total or transfer.priority~=priority then ReleaseIncoming(key);return Reject("chunk-collision") end
@@ -506,7 +570,7 @@ function Sync.New(options)
             transfer.activity=Now()
             while transfer.chunks[transfer.contiguous+1] do transfer.contiguous=transfer.contiguous+1 end
             if math.mod(transfer.contiguous,Sync.limits.window)==0 or transfer.contiguous==total or existing then
-                Control(table.concat({"A",sender,fields[3],fields[4],tostring(transfer.contiguous)},"~"))
+                Control(table.concat({"A",sender,sourceSession,fields[4],tostring(transfer.contiguous)},"~"))
             end
             if transfer.contiguous==total then
                 table.insert(self.decodes,{sender=sender,bytes=transfer.bytes,priority=priority,chunks=transfer.chunks,receiptId=transfer.id,receiptSession=transfer.session})
@@ -526,6 +590,10 @@ function Sync.New(options)
     function self:Receive(prefix,text,channel,sender)
         local accepted,reason=ReceivePacket(prefix,text,channel,sender)
         local peer=self.peers[sender]
+        if accepted and peer then
+            peer.seen=Now()
+            if self.request and self.request.peer==sender then self.request.activity=Now() end
+        end
         if accepted and peer and string.sub(text,1,4)~="H~*~" then peer.contactConfirmed=true end
         if accepted and peer and options.presenceRevision then peer.presenceRevision=options.presenceRevision() end
         if accepted and peer and not peer.connected then
@@ -539,7 +607,8 @@ function Sync.New(options)
         for name,peer in pairs(self.peers) do
             local witnessed=options.presenceRevision and peer.presenceRevision==options.presenceRevision()
             local offline=options.isOnline and not options.isOnline(name) and not witnessed
-            if peer.connected and (offline or peer.unavailable or not Authority(name)) then
+            if peer.connected and offline and PeerBusy(peer) then InterruptPeer(name,"source-timeout")
+            elseif peer.connected and (offline or peer.unavailable or not Authority(name)) then
                 peer.connected=false;self.revision=self.revision+1;self.statusDirty=true
                 if options.onDisconnected then options.onDisconnected(name,peer.unavailable and "no response" or "offline") end
             end
@@ -638,11 +707,14 @@ function Sync.New(options)
         self.encoding=nil
         if failure then Reject(failure);return end
         self.sequence=self.sequence+1
-        local size=math.min(160,Sync.limits.packet-string.len(encoding.target)-string.len(self.session)-44)
+        local recipient=self.peers[encoding.target]
+        if not recipient or recipient.unavailable or recipient.blocked then return end
+        local session=self.session..":"..recipient.session
+        local size=math.min(160,Sync.limits.packet-string.len(encoding.target)-string.len(session)-44)
         if size<32 then Reject("chunk-envelope-limit");return end
         local total=math.ceil(string.len(text)/size)
         if total>16384 then Reject("chunk-count-limit");return end
-        self.outgoing={target=encoding.target,id=tostring(self.sequence),priority=encoding.priority,text=text,size=size,total=total,ack=0,sent=0,activity=Now(),attempts=0}
+        self.outgoing={target=encoding.target,session=session,id=tostring(self.sequence),priority=encoding.priority,text=text,size=size,total=total,ack=0,sent=0,activity=Now(),attempts=0}
         if encoding.receipt then
             if CountMap(self.sentOperations)>=128 then
                 local oldest
@@ -666,14 +738,12 @@ function Sync.New(options)
         local now=Now();self.tokens=math.min(Sync.limits.burst,self.tokens+math.max(0,now-self.lastTick)*Sync.limits.rate);self.lastTick=now
         for name in pairs(self.peers) do if not Authority(name) then RemovePeer(name) end end
         for key,transfer in pairs(self.incoming) do
-            if not (Combat() and transfer.priority>1) and now-transfer.activity>Sync.limits.timeout then ReleaseIncoming(key) end
+            if not (Combat() and transfer.priority>1) and now-transfer.activity>Sync.limits.timeout then InterruptPeer(transfer.sender,"transfer-timeout") end
         end
         for key,cached in pairs(self.completed) do if not Combat() and now-cached.time>60 then self.completed[key]=nil end end
         if self.request and not (Combat() and self.request.priority>1) and now-self.request.activity>Sync.limits.timeout then
-            local peer=self.peers[self.request.peer]
-            if peer then peer.unavailable=true end
-            self:RefreshPresence()
-            self.request=nil;self.stats.retries=self.stats.retries+1;self.lastError="source-timeout"
+            InterruptPeer(self.request.peer,"source-timeout")
+            self.stats.retries=self.stats.retries+1
         end
         if self.announce then Hello();self.announce=nil end
         if self.discoveryAt and now>=self.discoveryAt then
@@ -707,9 +777,7 @@ function Sync.New(options)
         if outgoing and not (Combat() and outgoing.priority>1) and now-outgoing.activity>Sync.limits.retry then
             outgoing.sent=outgoing.ack;outgoing.activity=now;outgoing.attempts=outgoing.attempts+1;self.stats.retries=self.stats.retries+1
             if outgoing.attempts>3 then
-                local peer=self.peers[outgoing.target];if peer then peer.unavailable=true end
-                self:RefreshPresence()
-                self.outgoing=nil;outgoing=nil;self.lastError="transfer-timeout"
+                InterruptPeer(outgoing.target,"transfer-timeout");outgoing=nil
             end
         end
         for packet=1,Sync.limits.packetsPerTick do
@@ -719,7 +787,7 @@ function Sync.New(options)
                 table.remove(self.controls,1)
             elseif outgoing and (not Combat() or outgoing.priority==1) and outgoing.sent<outgoing.total and outgoing.sent<outgoing.ack+Sync.limits.window then
                 local index=outgoing.sent+1
-                text=table.concat({"D",outgoing.target,self.session,outgoing.id,tostring(index),tostring(outgoing.total),tostring(outgoing.priority),string.sub(outgoing.text,(index-1)*outgoing.size+1,index*outgoing.size)},"~")
+                text=table.concat({"D",outgoing.target,outgoing.session,outgoing.id,tostring(index),tostring(outgoing.total),tostring(outgoing.priority),string.sub(outgoing.text,(index-1)*outgoing.size+1,index*outgoing.size)},"~")
                 if not Send(text) then break end
                 outgoing.sent=index;outgoing.activity=now
             else break end

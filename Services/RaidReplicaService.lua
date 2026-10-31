@@ -452,7 +452,8 @@ function Replica.Create(options)
     function api.Discover()
         local allowed,reason=Authorized();if not allowed then return false,reason end
         if not state.transport then return false,"Synchronization is unavailable until the guild directory and client messaging are ready." end
-        local ok,failure=state.transport:Discover()
+        local retry=state.transport.Retry or state.transport.Discover
+        local ok,failure=retry(state.transport)
         if options.wake then options.wake() end
         return ok,failure
     end
@@ -1024,12 +1025,12 @@ function Replica.Create(options)
         end
         if lifecycle=="deleted" then message="The active session was deleted. Its saved snapshot is preserved." end
         if localFailure then message="Needs attention: a confirmed loot change is stored only locally. Save the raid to retry synchronization. "..tostring(localFailure) end
-        local syncStatus=transport.lastError and "Sync error! Send log" or (id and state.receivedRaids and state.receivedRaids[Canonical(id)] or not id and state.receivedSinceLoad) and "New data received. Please reload!"
+        local syncStatus=(transport.hasError or transport.lastError and not transport.interrupted) and "Sync error! Send log" or transport.interrupted and "Sync interrupted" or (id and state.receivedRaids and state.receivedRaids[Canonical(id)] or not id and state.receivedSinceLoad) and "New data received. Please reload!"
             or (transport.pending or 0)>0 and "Syncing…" or "Up to date"
         if id and not api.IsRaidSyncEnabled(id) then syncStatus="Sync off" end
         return {syncStatus=syncStatus,revision=state.revision+(transport.revision or 0),localOnly=transport.localOnly~=false,pending=transport.pending or 0,
             conflicts=conflicts,compatible=transport.compatible~=false,peers=type(transport.peers)=="table" and transport.peers or {},
-            raidName=metadata and metadata.id,retryAvailable=transport.lastError~=nil,lifecycle=lifecycle,lifecycleRevision=lifecycleRevision,
+            raidName=metadata and metadata.id,retryAvailable=transport.interrupted or transport.lastError~=nil,lifecycle=lifecycle,lifecycleRevision=lifecycleRevision,
             endedBy=endedBy,savedAndEnded=savedAndEnded,recordingGap=recordingGap,csrWithheld=blocked and true or false,needsAttention=localFailure and true or false,message=message}
     end
     local function RaidList()

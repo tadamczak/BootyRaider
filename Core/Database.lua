@@ -289,7 +289,7 @@ local ownedExact = {
     outOfFocusOpacity=true, reyCoinPanelWidth=true, reyCoinPanelHeight=true,
     masterLootWindowWidth=true, masterLootWindowHeight=true,
     lootRulesByRank=true, highlyContestedItems=true, highlyContestedItemsCustomized=true,
-    softReserveHistory=true, presentation=true, raidLootRulesVersion=true,
+    softReserveHistory=true, presentation=true, raidLootRulesVersion=true, hideMinimapIcon=true,
 }
 function Database.OwnsField(key)
     return type(key)=="string" and (ownedExact[key] or legacyOwnedKeys[key] or string.find(key,"^raid")

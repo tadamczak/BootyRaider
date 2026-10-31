@@ -230,6 +230,7 @@ function NativeRaidTab.Create(options)
         if panel.description.SetWordWrap then panel.description:SetWordWrap(true) end
         panel.description:SetText(RAID_DESCRIPTION or "Raids are groups of more than 5 people and are typically used to defeat unique challenges at high levels.\n\n|cffffffff- Raid members cannot earn credit toward most non-raid quests.\n\n- Raids grant substantially less experience for defeating monsters than normal groups.\n\n- Raids allow you to overcome challenges that might otherwise be nearly impossible.|r")
         groups = Raider.Modules.RaidManagement.CreateCompactGroupView(groupHost, {
+            nativeRaidLayout = true,
             ensureDatabase = options.ensureDatabase or Raider.Database.Ensure,
             getLootMasterInfo = Raider.Services.Raid.GetLootMasterInfo,
             getGroupSettings = function() return service.GetGroupSettings(groupSettings) end,
