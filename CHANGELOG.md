@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.33 — 2026-10-31
+
+- Preserve officer connections and transfers while the guild roster refreshes, then resume with fresh permissions. Recover automatically after a longer directory pause.
+- Disable manual roster refresh whenever Live tracking is enabled, including sessions outside a raid.
+
 ## 1.0.0-dev.32 — 2026-10-31
 
 - Recover interrupted synchronization without stale transfer queues; report Sync interrupted and reject packets from earlier connections. Officers must use this same synchronization build.

@@ -339,7 +339,7 @@ function RaidManagement.CreateChrome(page, callbacks)
     Raider.UI.Components.AttachPlaceholder(view.searchBox,"Search...")
     view.refreshButton = Raider.UI.Components.CreateIconButton(page, nil, "Interface\\Buttons\\UI-RotationRight-Button-Up", 24)
     view.refreshButton:SetPoint("LEFT", view.searchBox, "RIGHT", 4, 0); view.refreshButton:Hide()
-    Raider.UI.Components.AttachTooltip(view.refreshButton, "Refresh raid data", "Refresh the raid roster now. Disabled while Raid live tracking is active.")
+    Raider.UI.Components.AttachTooltip(view.refreshButton, "Refresh raid data", "Refresh the raid roster now. Disabled while Live tracking is enabled in Settings.")
     view.filterLabel = Raider.UI.Components.CreateLabel(page, nil, "OVERLAY", "GameFontNormalSmall")
     view.filterLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 6, -82); view.filterLabel:SetText(""); view.filterLabel:Hide()
     view.filterToolbar = Raider.UI.Components.CreateToolbarSurface(page, false, true); page.filterToolbar = view.filterToolbar; view.filterToolbar:Hide()
@@ -1332,6 +1332,7 @@ function RaidManagement.RefreshPage(renderer)
     local page, rows = renderer.page, renderer.rows
     renderer.countRefresh()
     RaidManagement.BeginRefresh(page, rows)
+    page.refreshControls.refreshButton:SetInactive(BootyRaiderDB.raidLiveTrackingEnabled)
     local pageWidth, pageHeight = PageSpan(page)
     -- A late anchored size notification must recognize the host's completed layout.
     page.layoutWidth, page.layoutHeight = pageWidth, pageHeight
@@ -3670,7 +3671,7 @@ function RaidManagement.CreateLifecycle(options)
     function lifecycle:SyncTrackingSetting(skipRefresh)
         local tracking = options.isPresentationActive() and options.isInRaid() and options.getScanReady() and options.getTrackingEnabled()
         options.setLiveTracking(tracking and true or false)
-        options.page.refreshControls.refreshButton:SetInactive(tracking)
+        options.page.refreshControls.refreshButton:SetInactive(BootyRaiderDB.raidLiveTrackingEnabled)
         if tracking then options.saveRaidRoster() end
         if not skipRefresh and options.isPresentationActive() then options.refresh() end
     end
@@ -3680,7 +3681,6 @@ function RaidManagement.CreateLifecycle(options)
         RaidManagement.HideSoftReserveWarnings(options.page)
         local detached = options.isDetachedActive and options.isDetachedActive()
         if not detached then options.setLiveTracking(false); self:CancelRosterUpdate() end
-        options.page.refreshControls.refreshButton:SetInactive(false)
         if options.page.filterController then options.page.filterController:Hide() end
         if options.page.memberMenu then options.page.memberMenu:Hide() end
         if options.page.memberMenuDismiss then options.page.memberMenuDismiss:Hide() end
@@ -4289,7 +4289,7 @@ function RaidManagement.AttachActionHandlers(options)
     controls.searchBox:SetScript("OnTextChanged", function() options.refresh() end)
     Raider.UI.Components.AttachPlaceholder(controls.searchBox,"Search...")
     controls.refreshButton:SetScript("OnClick", function()
-        if this.inactive or not options.isInRaid() then return end
+        if this.inactive or BootyRaiderDB.raidLiveTrackingEnabled or not options.isInRaid() then return end
         if options.hasPendingRaidTransition and options.hasPendingRaidTransition() then
             options.page.ShowSessionTransitionPrompt("different-raid-context|refresh")
             return
@@ -4297,7 +4297,7 @@ function RaidManagement.AttachActionHandlers(options)
         this:SetInactive(true)
         if options.refreshCurrentRaid then options.refreshCurrentRaid() else options.saveRaidRoster() end
         options.setScanReady(true); options.refresh()
-        this:SetInactive(false)
+        this:SetInactive(BootyRaiderDB.raidLiveTrackingEnabled)
     end)
     controls.scan:SetScript("OnClick", function()
         newRaidDialog:Open()

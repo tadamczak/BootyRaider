@@ -10,8 +10,21 @@ local function Now() return type(GetTime)=="function" and GetTime() or time() en
 local function RecordLog(id,kind,database) return Raider.Services.RaidAudit.IsLogRecording(id,database) end
 local function Combat() return type(UnitAffectingCombat)=="function" and UnitAffectingCombat("player") and true or false end
 local function Scope()
-    local snapshot=BootyLib.GuildDirectory and BootyLib.GuildDirectory.GetSnapshot()
-    return snapshot and snapshot.realmName.."|"..snapshot.guildName or nil
+    -- A bounded directory refresh temporarily has no snapshot. Membership and
+    -- scope are live client facts; officer authority still requires fresh rows.
+    local member=type(IsInGuild)=="function" and IsInGuild()
+    if member==false or member==0 then return nil end
+    local guild=type(GetGuildInfo)=="function" and GetGuildInfo("player")
+    if type(guild)~="string" or guild=="" then
+        -- The client may report membership before the guild name is ready.
+        -- Keep only the paused session identity; this never authorizes traffic.
+        return member and runtime and runtime.raidSync and runtime.raidSync.scope or nil
+    end
+    local realm=type(GetRealmName)=="function" and GetRealmName() or "UnknownRealm"
+    return realm.."|"..guild
+end
+local function DirectoryReady()
+    return BootyLib.GuildDirectory and BootyLib.GuildDirectory.GetSnapshot()~=nil
 end
 local function Authority(name,scope)
     if not Raider.active or not runtime or Raider.Database.GetSetting("raidSyncEnabled")==false or scope~=Scope() then return false end
@@ -174,14 +187,26 @@ end
 function SyncRuntime.RefreshAuthority()
     if not runtime or not runtime.replica then return false end
     local scope=Scope()
-    if not Raider.active or type(SendAddonMessage)~="function" or Raider.Database.GetSetting("raidSyncEnabled")==false or not LocalAuthority() then
+    if not Raider.active or type(SendAddonMessage)~="function" or Raider.Database.GetSetting("raidSyncEnabled")==false then
         if runtime.raidSync then runtime.raidSync:Stop("officer-authority-or-messaging-unavailable") end
         SyncRuntime.Wake();return false
     end
-    if runtime.raidSync and runtime.raidSync.scope~=scope then runtime.raidSync:Stop("guild-scope-changed");runtime.raidSync=nil end
+    if runtime.raidSync and runtime.raidSync.scope~=scope then
+        runtime.raidSync:Stop("guild-scope-changed");runtime.raidSync=nil;onlineOfficers=nil
+    end
+    if not scope then SyncRuntime.Wake();return false,"guild-scope-unavailable" end
+    if not DirectoryReady() then
+        if runtime.raidSync then runtime.raidSync:RefreshReadiness() end
+        SyncRuntime.Wake();return false,"directory-not-ready"
+    end
+    if not LocalAuthority() then
+        if runtime.raidSync then runtime.raidSync:Stop("officer-authority-or-messaging-unavailable") end
+        SyncRuntime.Wake();return false
+    end
     if not runtime.raidSync then
         runtime.raidSync=Raider.Services.RaidSync.Create({db=Raider.Database.Ensure(),journal=Raider.Services.RaidJournal,
             codec=Raider.Services.RaidSyncCodec,now=Now,actor=function() return UnitName("player") end,scope=Scope,authorize=Authority,
+            isDirectoryReady=DirectoryReady,
             isOnline=function(name) local member=BootyLib.GuildDirectory.Find(name);return member and member.online~=false end,
             presenceRevision=BootyLib.GuildDirectory.GetGeneration,
             send=function(prefix,text,channel) return SendAddonMessage(prefix,text,channel) end,
@@ -212,6 +237,7 @@ function SyncRuntime.RefreshAuthority()
         runtime.replica.SetTransport(runtime.raidSync)
     end
     local ok,reason=runtime.raidSync:Start()
+    if not ok then SyncRuntime.Wake();return false,reason end
     runtime.raidSync:RefreshPresence()
     local names={};local snapshot=BootyLib.GuildDirectory.GetSnapshot()
     for _,member in ipairs(snapshot and snapshot.members or {}) do

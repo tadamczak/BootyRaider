@@ -47,6 +47,7 @@ end
 local messages={
     ["disabled"]="Synchronization is off.",
     ["unavailable"]="Synchronization is waiting for the guild directory and client messaging.",
+    ["directory-not-ready"]="Checking current guild officer access. Synchronization will resume when the guild list is ready.",
     ["guild-scope-changed"]="Guild changed. Previous guild data will not be sent.",
     ["guild-scope-mismatch"]="Saved data belongs to another guild. Synchronization is stopped.",
     ["officer-authority-required"]="Current guild officer access is required.",
@@ -73,7 +74,11 @@ function Sync.New(options)
         self.reason=reason;self.revision=self.revision+1;self.statusDirty=nil
         if options.onStatus then options.onStatus(self:GetStatus()) end
     end
+    local function DirectoryReady()
+        return not options.isDirectoryReady or Value(options.isDirectoryReady)==true
+    end
     local function Authority(name)
+        if not DirectoryReady() then return false end
         return type(options.authorize)=="function" and options.authorize(name,self.scope)==true
     end
     local function Allowed(raidId)
@@ -104,9 +109,35 @@ function Sync.New(options)
     local function Ready()
         if not self.enabled then return false,"disabled" end
         if Value(options.scope)~=self.scope then self:Stop("guild-scope-changed");return false,"guild-scope-changed" end
+        if not DirectoryReady() then
+            if not self.pausedAt then self.pausedAt=Now();self.pauseReason=self.reason;Status("directory-not-ready") end
+            return false,"directory-not-ready"
+        end
         if not Authority(self.actor) then self:Stop("officer-authority-required");return false,"officer-authority-required" end
+        if self.pausedAt then
+            -- Directory captures are incremental. They cannot authorize work,
+            -- but their duration is not evidence that a peer stopped responding.
+            local duration=math.max(0,Now()-self.pausedAt)
+            if duration>=Sync.limits.retry*4 then
+                -- Another officer may already have discarded partial chunks.
+                -- Recheck missing durable operations with one fresh handshake.
+                -- Clear the pause first: Retry also checks Ready.
+                self.pausedAt=nil;self.pauseReason=nil
+                return self:Retry()
+            end
+            if self.request then self.request.activity=self.request.activity+duration;self.request.started=self.request.started+duration end
+            if self.outgoing then self.outgoing.activity=self.outgoing.activity+duration end
+            for _,transfer in pairs(self.incoming) do transfer.activity=transfer.activity+duration end
+            for _,receipt in pairs(self.completed) do receipt.time=receipt.time+duration end
+            for _,peer in pairs(self.peers) do if peer.cooldown then peer.cooldown=peer.cooldown+duration end end
+            if self.discoveryAt then self.discoveryAt=self.discoveryAt+duration end
+            if self.combatPauseAt then self.combatPauseAt=self.combatPauseAt+duration end
+            self.lastTick=self.lastTick+duration;self.pausedAt=nil
+            local reason=self.pauseReason;self.pauseReason=nil;Status(reason or "discovering")
+        end
         return true
     end
+    function self:RefreshReadiness() return Ready() end
     local function Reject(reason)
         self.stats.rejected=self.stats.rejected+1;self.lastError=reason;self.revision=self.revision+1;self.statusDirty=true;return false,reason
     end
@@ -340,6 +371,7 @@ function Sync.New(options)
 
     function self:GetStatus(raidId)
         local peers,available,confirmed,interrupted={},0,0,false
+        local paused=self.pausedAt~=nil or self.enabled and not DirectoryReady()
         local hasError=self.lastError and self.lastError~="source-timeout" and self.lastError~="transfer-timeout" and self.lastError~="peer-session-changed" or false
         local confirmedNames={}
         for name,peer in pairs(self.peers) do
@@ -358,9 +390,9 @@ function Sync.New(options)
             if received then confirmed=confirmed+1;table.insert(confirmedNames,name) end
             if peer.interrupted then interrupted=true end
             if peer.blocked then hasError=true end
-            local status=not authorized and "No officer access" or peer.blocked and "Blocked" or peer.interrupted and "Sync interrupted" or connecting and "Connecting" or peer.unavailable and "Unavailable" or stale and "Possibly stale"
+            local status=paused and "Checking officer access" or not authorized and "No officer access" or peer.blocked and "Blocked" or peer.interrupted and "Sync interrupted" or connecting and "Connecting" or peer.unavailable and "Unavailable" or stale and "Possibly stale"
                 or self.request and self.request.peer==name and "Synchronizing" or received and "Received changes" or "Available"
-            local syncState=peer.blocked and "error" or peer.interrupted and "interrupted" or connecting and "pending" or not fresh and "offline" or busy and "pending" or "synced"
+            local syncState=peer.blocked and "error" or peer.interrupted and "interrupted" or paused and "pending" or connecting and "pending" or not fresh and "offline" or busy and "pending" or "synced"
             table.insert(peers,{name=name,status=status,syncState=syncState,activeRaidId=peer.activeRaidId,available=fresh,compatible=true,lastSeen=peer.seen,confirmed=received,
                 message=peer.interrupted and "Sync interrupted. Stored changes are safe; retry when the officer is available."
                     or received and "This officer holds some raid data. Check Synchro Log for individual deliveries." or peer.blocked and "Received data was rejected. Retry after reviewing the cause." or nil})
@@ -384,6 +416,7 @@ function Sync.New(options)
         end
         local message
         if not self.enabled then message=messages[self.reason] or "Synchronization is stopped."
+        elseif paused then message=messages["directory-not-ready"]
         elseif self.lastError and messages[self.lastError] then message=messages[self.lastError]
         elseif self.lastError then message="Received data was rejected. Review the blocked officer and retry."
         elseif available==0 then message="Waiting for another officer to come online. Your raid is kept on this character."
@@ -391,17 +424,18 @@ function Sync.New(options)
         elseif pending>0 then message="Sending and receiving raid updates."
         else table.sort(confirmedNames);message="Raid updates checked with "..table.concat(confirmedNames,", ")..". See Synchro Log for received changes." end
         return {enabled=self.enabled,localOnly=confirmed==0,compatible=available>0 or CountMap(self.incompatiblePeers)==0,reason=self.reason,message=message,
-            lastError=self.lastError,interrupted=interrupted,hasError=hasError,scope=self.scope,revision=self.revision,
+            lastError=self.lastError,interrupted=interrupted,hasError=hasError,paused=paused or nil,scope=self.scope,revision=self.revision,
             peers=peers,peerCount=Count(peers),availableCount=available,confirmedCount=confirmed,pending=pending,queued=Count(self.outbox),receiving=CountMap(self.incoming),
             bufferBytes=self.bufferBytes,request=self.request and self.request.payload.type or nil,
             sentBytes=self.stats.sentBytes,receivedBytes=self.stats.receivedBytes,applied=self.stats.applied,
             duplicates=self.stats.duplicates,conflicts=self.stats.conflicts,retries=self.stats.retries,rejected=self.stats.rejected}
     end
     function self:Start()
-        if self.enabled then return true end
+        if self.enabled then return Ready() end
         self.actor=Value(options.actor);self.scope=Value(options.scope)
         if type(self.db)~="table" or not self.journal or not self.codec or type(options.send)~="function" or type(options.now)~="function"
             or not Text(self.actor,96) or not Scope(self.scope) then Status("unavailable");return false,"unavailable" end
+        if not DirectoryReady() then Status("directory-not-ready");return false,self.reason end
         if not Authority(self.actor) then Status("officer-authority-required");return false,self.reason end
         if self.db.raidSyncScope and self.db.raidSyncScope~=self.scope then Status("guild-scope-mismatch");return false,self.reason end
         local state,failure=self.journal.Ensure(self.db)
@@ -419,7 +453,7 @@ function Sync.New(options)
     end
     function self:Stop(reason)
         self.enabled=false;self.peers={};self.incompatiblePeers={};self.outbox={};self.controls={};self.incoming={};self.completed={};self.decodes={};self.exports={}
-        self.dependencies={};self.sentOperations={};self.receipts={};self.receiptRanges=0;self.outgoing=nil;self.encoding=nil;self.request=nil;self.bufferBytes=0;self.discoveryAt=nil;self.announce=nil;self.combatPauseAt=nil
+        self.dependencies={};self.sentOperations={};self.receipts={};self.receiptRanges=0;self.outgoing=nil;self.encoding=nil;self.request=nil;self.bufferBytes=0;self.discoveryAt=nil;self.announce=nil;self.combatPauseAt=nil;self.pausedAt=nil;self.pauseReason=nil
         Status(reason or "disabled")
     end
     function self:RefreshRaidPolicy()
@@ -431,9 +465,10 @@ function Sync.New(options)
         return self:Start()
     end
     function self:NotifyChanged(raidId)
-        if not Ready() then return false end
+        local ready,reason=Ready()
+        if not ready and reason~="directory-not-ready" then return false end
         if raidId and not Allowed(raidId) then return true end
-        self.generation=self.generation+1;self.announce=true;self.discoveryRemaining=2;self.discoveryAt=Now()+3;return true
+        self.generation=self.generation+1;self.announce=true;self.discoveryRemaining=2;self.discoveryAt=(self.pausedAt or Now())+3;return true
     end
     function self:Discover()
         if not Ready() then return false end
@@ -604,6 +639,7 @@ function Sync.New(options)
     end
 
     function self:RefreshPresence()
+        if not Ready() then return false end
         for name,peer in pairs(self.peers) do
             local witnessed=options.presenceRevision and peer.presenceRevision==options.presenceRevision()
             local offline=options.isOnline and not options.isOnline(name) and not witnessed
@@ -796,7 +832,7 @@ function Sync.New(options)
         return self:HasWork()
     end
     function self:HasWork()
-        if not self.enabled then return false end
+        if not self.enabled or self.pausedAt then return false end
         if self.statusDirty then return true end
         if Count(self.controls)>0 or self.announce or self.discoveryAt then return true end
         if self.request and (not Combat() or self.request.priority==1) then return true end
