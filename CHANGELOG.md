@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1-dev.2 — 2026-10-31
+
+- Save long raids as journal differences instead of resending already recorded loot.
+- Wait for returning officers before retrying their transfers; avoid repeated discovery while recording alone.
+- Reduce loot projection allocations and defer journal maintenance until outside a raid.
+
 ## 1.0.1-dev.1 — 2026-10-31
 
 - Shorten README to essential features, installation and basic usage.

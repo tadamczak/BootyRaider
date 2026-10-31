@@ -446,6 +446,20 @@ function Audit.Save(attendance,entry,snapshot,endSession,copySource)
         end
     end
     if copySource then ReplaceSavedContent(attendance,changes) end
+    -- Save reconciles the complete live view, but the wire operation contains
+    -- only differences. Filter after replacement deletions have been derived.
+    -- Keep disputed records so the journal still enforces conflict resolution.
+    if raid then
+        local delta={}
+        for _,change in ipairs(changes) do
+            local current=raid.records[change.key]
+            if not current or current.conflicted or current.deleted~=change.deleted
+                or not Raider.Services.RaidJournal.Equal(current.value,change.value) then
+                table.insert(delta,change)
+            end
+        end
+        changes=delta
+    end
     local disabledCopy=copySource and not attendance.syncRaidId and db.raidSyncDisabled and db.raidSyncDisabled[copySource.syncRaidId]
     if disabledCopy then db.raidSyncDisabled[Audit.EnsureIdentity(attendance)]=true end
     local ok,operation=Audit.Commit(attendance,"raid.save",changes,{subject=attendance.snapshotId or "",

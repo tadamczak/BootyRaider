@@ -592,6 +592,15 @@ function Journal.GetOperation(db, id)
     return Clone(state.operations[id])
 end
 
+-- Allocation duplicate detection only needs provenance, not a copy of every
+-- change (and its before/after values) in the originating operation.
+function Journal.GetOperationOrigin(db, id)
+    local state, failure = Journal.Ensure(db)
+    if not state then return nil, failure end
+    local operation=state.operations[id]
+    return operation and operation.origin
+end
+
 function Journal.GetRevision(db, raidId)
     local state, failure = Journal.Ensure(db)
     if not state then return nil, failure end

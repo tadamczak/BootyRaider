@@ -60,6 +60,7 @@ function SyncRuntime.CanJoinRaid(id)
 end
 local function MaintenanceReady()
     return maintenanceArmed and next(maintenance)~=nil and not Combat()
+        and not Raider.Services.Raid.IsInRaid()
         and runtime and runtime.raidSync and not runtime.raidSync:HasWork()
 end
 local function HasWork()
@@ -81,8 +82,10 @@ local function CompactOne()
     local confirmed=runtime.raidSync:GetConfirmedFrontiers(id)
     local report,reason=Raider.Services.RaidJournal.Compact(BootyRaiderDB,id,confirmed)
     if not report then runtime.Print("Raid checkpoint: "..tostring(reason));return end
-    if (report.pendingConfirmation or 0)==0 then compactedAt[id]=table.getn(raid.operationIds or {})
-    else
+    -- Count the attempted batch too: an unconfirmed history must not be scanned
+    -- again after each subsequent loot event.
+    compactedAt[id]=table.getn(raid.operationIds or {})
+    if (report.pendingConfirmation or 0)>0 then
         -- Retry on a later receipt; one waiting raid must not starve maintenance
         -- for other raids, nor keep an idle frame handler installed.
         waitingConfirmation[id]=true
@@ -131,7 +134,8 @@ function SyncRuntime.Tick()
 end
 local function Update() SyncRuntime.Tick() end
 function SyncRuntime.OnRosterUpdate()
-    if HiddenRecording() then rosterAt=Now()+0.25;SyncRuntime.Wake() else rosterAt=nil end
+    if HiddenRecording() then rosterAt=Now()+0.25 else rosterAt=nil end
+    SyncRuntime.Wake()
 end
 function SyncRuntime.Wake()
     if runtime and runtime.events and Raider.active and HasWork() then nextWake=nil;runtime.events:SetScript("OnUpdate",Update) end
@@ -226,6 +230,7 @@ function SyncRuntime.RefreshAuthority()
             onConnected=function(name) runtime.replica.LogSync("Connected to "..name..". Checking raid updates.") end,
             onDisconnected=function(name,reason) runtime.replica.LogSync("Lost connection to "..name.." ("..tostring(reason or "offline")..").") end,
             onRaidDelivered=function(name,id,count,lastOperationId)
+                ArmMaintenance()
                 local operation=count==1 and lastOperationId and Raider.Services.RaidJournal.GetOperation(BootyRaiderDB,lastOperationId)
                 if operation and operation.kind~="raid.observe" and not operation.compacted then
                     local action=Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
@@ -238,24 +243,27 @@ function SyncRuntime.RefreshAuthority()
             onStatus=function(status)
                 if status.lastError and status.lastError~=lastSyncError then runtime.replica.LogSync(status.message.." ["..status.lastError.."]") end
                 lastSyncError=status.lastError
-                runtime.replica._state.revision=runtime.replica._state.revision+1;statusChanged=true;ArmMaintenance();SyncRuntime.Wake() end})
+                runtime.replica._state.revision=runtime.replica._state.revision+1;statusChanged=true;SyncRuntime.Wake() end})
         runtime.replica.SetTransport(runtime.raidSync)
     end
     local ok,reason=runtime.raidSync:Start()
     if not ok then SyncRuntime.Wake();return false,reason end
     runtime.raidSync:RefreshPresence()
-    local names={};local snapshot=BootyLib.GuildDirectory.GetSnapshot()
+    local names={};local added=false;local snapshot=BootyLib.GuildDirectory.GetSnapshot()
     for _,member in ipairs(snapshot and snapshot.members or {}) do
-        if member.online~=false and Authority(member.name,scope) then table.insert(names,member.name) end
+        if member.online~=false and member.name~=UnitName("player") and Authority(member.name,scope) then
+            names[member.name]=true
+            if not onlineOfficers or not onlineOfficers[member.name] then added=true end
+        end
     end
-    table.sort(names);local signature=table.concat(names,",")
-    if ok and signature~=onlineOfficers then onlineOfficers=signature;runtime.raidSync:Discover() end
+    onlineOfficers=names
+    if ok and added then runtime.raidSync:Discover() end
     SyncRuntime.Wake();return ok,reason
 end
 function SyncRuntime.Receive(prefix,text,channel,sender)
     if runtime and runtime.raidSync then
         local accepted=runtime.raidSync:Receive(prefix,text,channel,sender)
-        if accepted then statusChanged=true;ArmMaintenance() end
+        if accepted then statusChanged=true end
         SyncRuntime.Wake()
     end
 end

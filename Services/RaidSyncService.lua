@@ -175,7 +175,7 @@ function Sync.New(options)
     local function QueueCompletion(peer,id)
         local inventory=peer.inventory
         local entry=inventory and inventory.raids[id]
-        if entry and entry.closed and not entry.sent and not peer.blocked and not peer.unavailable then
+        if entry and entry.closed and not entry.sent and peer.connected and not peer.blocked and not peer.unavailable then
             local inspected,missingFound=0,false
             for key,range in pairs(entry.ranges) do
                 local missing=self.journal.GetMissingRanges(self.db,{schema=1,entries={range}},1)
@@ -226,7 +226,7 @@ function Sync.New(options)
                 for _,peer in pairs(self.peers) do
                     local entry=peer.inventory and peer.inventory.raids[id]
                     if entry then
-                        if not peer.blocked and not peer.unavailable then
+                        if peer.connected and not peer.blocked and not peer.unavailable then
                             if entry.closed and not peer.needsSummary then known=true else complete=false end
                         end
                     end
@@ -628,7 +628,12 @@ function Sync.New(options)
         local ready,reason=Ready()
         if not ready and reason~="directory-not-ready" then return false end
         if raidId and not Allowed(raidId) then return true end
-        self.generation=self.generation+1;self.announce=true;self.discoveryRemaining=2;self.discoveryAt=(self.pausedAt or Now())+3
+        self.generation=self.generation+1
+        -- New loot is not a reason to rediscover absent officers three times.
+        -- A returning client announces itself; connected peers get one update.
+        for _,peer in pairs(self.peers) do
+            if peer.connected and not peer.unavailable and not peer.blocked then self.announce=true;break end
+        end
         for _,peer in pairs(self.peers) do for id,progress in pairs(peer.advertised or {}) do if not raidId or id==raidId then progress.generation=self.generation;progress.activity=Now() end end end
         return true
     end
@@ -827,9 +832,9 @@ function Sync.New(options)
         -- bulk transfers still yield to discovery of new live-raid data.
         for id,dependency in pairs(self.dependencies) do
             local chosen=self.peers[dependency.peer or ""]
-            if not chosen or chosen.blocked or chosen.unavailable or (chosen.cooldown and chosen.cooldown>now) then
+            if not chosen or not chosen.connected or chosen.blocked or chosen.unavailable or (chosen.cooldown and chosen.cooldown>now) then
                 chosen=nil
-                for _,peer in pairs(self.peers) do if not peer.blocked and not peer.unavailable and (not peer.cooldown or peer.cooldown<=now) then chosen=peer;break end end
+                for _,peer in pairs(self.peers) do if peer.connected and not peer.blocked and not peer.unavailable and (not peer.cooldown or peer.cooldown<=now) then chosen=peer;break end end
             end
             if chosen and (not Combat() or Priority(dependency.raidId)==1) then
                 Request(chosen,{type="operation-request",id=id},Priority(dependency.raidId));return
@@ -837,7 +842,7 @@ function Sync.New(options)
         end
         local chosen,range,priority
         for _,peer in pairs(self.peers) do
-            if not peer.blocked and not peer.unavailable and peer.summary and (not peer.cooldown or peer.cooldown<=now) then
+            if peer.connected and not peer.blocked and not peer.unavailable and peer.summary and (not peer.cooldown or peer.cooldown<=now) then
                 local missing,failure=self.journal.GetMissingRanges(self.db,peer.summary,Sync.limits.range)
                 if not missing then Reject(failure);peer.summary=nil
                 else
@@ -856,7 +861,7 @@ function Sync.New(options)
             return
         end
         for _,peer in pairs(self.peers) do
-            if not peer.blocked and not peer.unavailable and peer.needsSummary and (not peer.cooldown or peer.cooldown<=now) then
+            if peer.connected and not peer.blocked and not peer.unavailable and peer.needsSummary and (not peer.cooldown or peer.cooldown<=now) then
                 Request(peer,{type="summary-request",offset=peer.offset or 0},1);return
             end
         end
@@ -993,12 +998,12 @@ function Sync.New(options)
         end
         if not self.request then
             for name,peer in pairs(self.peers) do
-                if peer.relayPending and not peer.blocked and not peer.unavailable and Hello(name) then peer.relayPending=nil end
+                if peer.relayPending and peer.connected and not peer.blocked and not peer.unavailable and Hello(name) then peer.relayPending=nil end
             end
         end
         FinishCatchup()
         for name,peer in pairs(self.peers) do
-            if not peer.blocked and not peer.unavailable then
+            if peer.connected and not peer.blocked and not peer.unavailable then
                 for id,generation in pairs(peer.completionPending or {}) do
                     if Count(self.outbox)>=Sync.limits.outbox then break end
                     self.sequence=self.sequence+1
@@ -1056,16 +1061,16 @@ function Sync.New(options)
         for _,entry in ipairs(self.outbox) do if not Combat() or entry.priority==1 then return true end end
         for _,entry in ipairs(self.exports) do if not Combat() or entry.priority==1 then return true end end
         if next(self.dependencies) and not Combat() then
-            for _,peer in pairs(self.peers) do if not peer.blocked and not peer.unavailable then return true end end
+            for _,peer in pairs(self.peers) do if peer.connected and not peer.blocked and not peer.unavailable then return true end end
         end
         for _,peer in pairs(self.peers) do
-            if not peer.blocked and not peer.unavailable then
+            if peer.connected and not peer.blocked and not peer.unavailable then
                 if next(peer.completionPending or {}) then return true end
                 for id,progress in pairs(peer.advertised or {}) do if progress.transferring and progress.sent and (not Combat() or Priority(id)==1) then return true end end
             end
-            if peer.relayPending and not peer.blocked and not peer.unavailable then return true end
-            if not peer.blocked and not peer.unavailable and peer.needsSummary then return true end
-            if not peer.blocked and not peer.unavailable and peer.summary then
+            if peer.relayPending and peer.connected and not peer.blocked and not peer.unavailable then return true end
+            if peer.connected and not peer.blocked and not peer.unavailable and peer.needsSummary then return true end
+            if peer.connected and not peer.blocked and not peer.unavailable and peer.summary then
                 local missing=self.journal.GetMissingRanges(self.db,peer.summary,1)
                 if missing and missing[1] and (not Combat() or Priority(missing[1].raidId)==1) then return true end
                 if missing and not missing[1] and peer.summary.nextOffset then return true end
@@ -1140,13 +1145,13 @@ function Sync.New(options)
             end
         end
         for _,peer in pairs(self.peers) do
-            if not peer.blocked and not peer.unavailable then
+            if peer.connected and not peer.blocked and not peer.unavailable then
                 if next(peer.completionPending or {}) and Count(self.outbox)<Sync.limits.outbox then return now end
                 for id,progress in pairs(peer.advertised or {}) do
                     if progress.transferring and progress.sent and (not combat or Priority(id)==1) then local deadline=progress.activity+Sync.limits.timeout;if not wake or deadline<wake then wake=deadline end end
                 end
             end
-            if not self.request and not peer.blocked and not peer.unavailable then
+            if not self.request and peer.connected and not peer.blocked and not peer.unavailable then
                 if peer.cooldown and peer.cooldown>now then
                     if not wake or peer.cooldown<wake then wake=peer.cooldown end
                 elseif peer.relayPending or peer.needsSummary or next(self.dependencies) then return now

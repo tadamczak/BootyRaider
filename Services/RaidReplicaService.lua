@@ -520,7 +520,7 @@ function Replica.Create(options)
 
     local function Ambiguities(id)
         local groups,results={},{}
-        for key,record in pairs(AllRecords(id)) do
+        for key,record in pairs(Raid(id) and Raid(id).records or {}) do
             if string.find(key,"^loot:") and not record.deleted and record.value then
                 local value=record.value
                 local group=Lower(value.recipient).."|"..Lower(value.item)
@@ -530,14 +530,14 @@ function Replica.Create(options)
         for _,group in pairs(groups) do
             table.sort(group,function(a,b)return a.key<b.key end)
             local first=group[1]
-            local original=first and J.GetOperation(db,first.record.revision)
+            local original=first and J.GetOperationOrigin(db,first.record.revision)
             for index=2,table.getn(group) do
-                local candidate=group[index];local operation=J.GetOperation(db,candidate.record.revision)
+                local candidate=group[index];local operation=J.GetOperationOrigin(db,candidate.record.revision)
                 local decision=Record(id,"allocation:"..string.sub(candidate.key,6))
                 local resolved=decision and decision.observed and decision.observed[1]==first.record.revision and decision.observed[2]==candidate.record.revision
-                if original and operation and original.origin~=operation.origin and not resolved then
+                if original and operation and original~=operation and not resolved then
                     table.insert(results,{id="duplicate:"..candidate.key,kind="loot",subject="Possible duplicate: "..tostring(candidate.record.value.item),
-                        first=first,second=candidate,heads={first.record.revision,candidate.record.revision},variantCount=2})
+                        first=Copy(first),second=Copy(candidate),heads={first.record.revision,candidate.record.revision},variantCount=2})
                 end
             end
         end
@@ -580,7 +580,9 @@ function Replica.Create(options)
 
     local function Build(id)
         id=Canonical(id)
-        local records=AllRecords(id)
+        -- Projection reads canonical records and copies values into its output;
+        -- cloning the entire journal here doubled long-session allocation work.
+        local records=Raid(id) and Raid(id).records or {}
         for _,record in pairs(records) do
             if record.pendingCheckpoint then return nil,"Waiting for checkpoint data. The previous agreed raid is retained." end
         end
