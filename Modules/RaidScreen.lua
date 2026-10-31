@@ -198,6 +198,11 @@ function Screen.Create(parent, host)
     function controller:Show() if not Raider.active then return end;SizePage();lifecycle:Show() end
     function controller:Hide() page:Hide();lifecycle:Hide() end
     function controller:Refresh() Refresh() end
+    function controller:RefreshLoot(names)
+        if page:IsVisible() then Raid.RefreshLootRows(list.rows,names,false) end
+        if page.lootMasterController then page.lootMasterController.RefreshLoot(names) end
+        if page.reyCoinPanel and page.reyCoinPanel:IsVisible() and page.RefreshReyCoinList then page.RefreshReyCoinList() end
+    end
     function controller:HideSessionTransitionPrompt() page.HideSessionTransitionPrompt() end
     function controller:CancelSessionSave() page.CancelSessionSave() end
     function controller:OnResize() SizePage();Refresh() end

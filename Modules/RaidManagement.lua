@@ -572,12 +572,6 @@ local normalHeaderWidths = { 155, 70, 85, 138, 55 }
 local lootHeaderPositions = { 3, 0, 105, 170, 250 }
 local lootHeaderWidths = { 90, 0, 55, 72, 35 }
 
-local function SortLootByName(a, b)
-    local aName, bName = string.lower(a.name or ""), string.lower(b.name or "")
-    if aName == bName then return (tonumber(a.recordId) or 0) > (tonumber(b.recordId) or 0) end
-    return aName < bName
-end
-
 local raidActionSpecs = { { "Leader", "leader" }, { "Assist", "assistant" }, { "Loot Master", "lootmaster" }, { "Remove", "remove" }, { "Report", "report" }, { "Ignore", "ignore" } }
 local listHeaderSpecs = {
     { "Name", "name", 12, 155 },
@@ -2380,8 +2374,7 @@ function RaidManagement.ExpandListRow(row, member, lootMasterMode, requestedHeig
     row.lootPanel:Show()
     row.presence[1].value:SetText(member.joinedAt and date("%Y-%m-%d %H:%M:%S",member.joinedAt) or "Not recorded")
     row.presence[2].value:SetText(member.leftAt and date("%Y-%m-%d %H:%M:%S",member.leftAt) or "Still in raid")
-    local loot = member.loot or {}
-    table.sort(loot, SortLootByName)
+    local loot = Raider.Services.Raid.GetLootDisplayOrder(member.loot or {})
     local visibleLootRows = row.visibleLootRows or table.getn(row.lootRows)
     FauxScrollFrame_Update(row.lootScroll, table.getn(loot), visibleLootRows, 24)
     if table.getn(loot) > visibleLootRows then
@@ -2399,7 +2392,8 @@ function RaidManagement.ExpandListRow(row, member, lootMasterMode, requestedHeig
             local itemId = tonumber(item.itemId) or tonumber(Match(tostring(item.link or ""), "item:(%d+)"))
             local realName, realLink, _, _, _, _, _, _, _, refreshedTexture = GetItemInfo(itemId or item.link)
             if itemId and type(GetItemIcon) == "function" then refreshedTexture = GetItemIcon(itemId) or refreshedTexture end
-            if realName then item.name = realName end; if realLink then item.link = realLink end; if refreshedTexture then item.icon = refreshedTexture end
+            if realName and realName~=item.name then item.name=realName;Raider.Services.Raid.LootDisplayChanged(member.loot,item) end
+            if realLink then item.link = realLink end; if refreshedTexture then item.icon = refreshedTexture end
             lootRow.icon:SetTexture(item.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
             lootRow.name:SetText((itemId and Raider.UI.Components.GetItemLabel(itemId) or (item.name or "Unknown item")) .. ((tonumber(item.count) or 1) > 1 and (" x " .. item.count) or ""))
             lootRow.hit.itemId = itemId; lootRow.hit.itemName = item.name; lootRow.hit.itemLink = item.link; lootRow.hit.itemCount = item.count; lootRow.hit.rollHistory = item.rollHistory; lootRow.hit.labelSuffix = (tonumber(item.count) or 1) > 1 and (" x " .. item.count) or ""; lootRow.hit:Show(); lootRow.icon:Show(); lootRow.name:Show()
@@ -2408,6 +2402,15 @@ function RaidManagement.ExpandListRow(row, member, lootMasterMode, requestedHeig
         end
     end
     return expandedHeight
+end
+
+function RaidManagement.RefreshLootRows(rows,names,lootMasterMode)
+    for _,row in ipairs(rows) do
+        local member=row.displayedMember
+        if member and row:IsVisible() and row.lootPanel:IsShown() and names[string.lower(member.name)] then
+            RaidManagement.ExpandListRow(row,member,lootMasterMode,row:GetHeight())
+        end
+    end
 end
 
 function RaidManagement.CollapseListRow(row, visibleIndex, lootMasterMode, rowStep)
@@ -3907,6 +3910,9 @@ function RaidManagement.CreateLootMasterController(options)
         RaidManagement.RefreshListView(compact, rows, members, selectedName, sortKey, true, options.getSettings())
         compact.listHeaderUI.level:Hide(); compact.listHeaderUI.levelButton:Hide()
         compact.listHeaderUI.online:Hide(); compact.listHeaderUI.onlineButton:Hide()
+    end
+    controller.RefreshLoot = function(names)
+        if window:IsVisible() and not window.minimized and compact then RaidManagement.RefreshLootRows(rows,names,true) end
     end
 
     local function BuildMenu(button, captions, sources)

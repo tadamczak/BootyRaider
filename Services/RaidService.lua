@@ -27,6 +27,51 @@ local pendingLootExpiry
 -- Weak keys release replaced loot lists. Values contain records only, never
 -- their list/member/attendance (Lua 5.0 weak tables are not ephemerons).
 local ordinaryLootIndexes = setmetatable({}, { __mode = "k" })
+local lootDisplayIndexes = setmetatable({}, { __mode = "k" })
+
+local function LootOrder(a,b)
+    local aName,bName=string.lower(a.name or ""),string.lower(b.name or "")
+    if aName==bName then return (tonumber(a.recordId) or 0)>(tonumber(b.recordId) or 0) end
+    return aName<bName
+end
+local function LootSortKey(loot) return string.lower(loot.name or "").."\031"..tostring(loot.recordId or 0) end
+function RaidService.GetLootDisplayOrder(list)
+    local index=lootDisplayIndexes[list]
+    if index and next(index.pending) then
+        -- Item-cache enrichment can rename several visible rows while they are
+        -- being drawn. Apply reordering only before the next read of the view.
+        for loot in pairs(index.pending) do
+            if index.keys[loot] then
+                for position,value in ipairs(index.order) do if value==loot then table.remove(index.order,position);break end end
+                index.keys[loot]=nil
+            end
+        end
+        for loot,removed in pairs(index.pending) do
+            if removed~=true then
+                local first,last=1,table.getn(index.order)+1
+                while first<last do
+                    local middle=math.floor((first+last)/2)
+                    if LootOrder(index.order[middle],loot) then first=middle+1 else last=middle end
+                end
+                table.insert(index.order,first,loot);index.keys[loot]=LootSortKey(loot)
+            end
+            index.pending[loot]=nil
+        end
+    end
+    if not index or table.getn(index.order)~=table.getn(list) then
+        index={order={},keys={},pending={}}
+        for _,loot in ipairs(list) do table.insert(index.order,loot);index.keys[loot]=LootSortKey(loot) end
+        table.sort(index.order,LootOrder);lootDisplayIndexes[list]=index
+    end
+    return index.order
+end
+function RaidService.LootDisplayChanged(list,loot,removed)
+    local index=lootDisplayIndexes[list]
+    if not index then return end
+    local key=not removed and LootSortKey(loot)
+    if not removed and index.keys[loot]==key then index.pending[loot]=nil;return end
+    index.pending[loot]=removed==true
+end
 
 local function ItemPayload(link)
     local _, _, payload = string.find(tostring(link or ""), "|H(item:[^|]+)|h")
@@ -60,6 +105,9 @@ local function OrdinaryLootIndex(lootList)
     ordinaryLootIndexes[lootList] = index
     return index
 end
+
+-- Remote corrections can change a receipt in place without replacing its list.
+function RaidService.InvalidateLootIndex(lootList) ordinaryLootIndexes[lootList]=nil end
 
 local function NotifyPendingReyCoinChanged()
     if RaidService.onReyCoinChanged then RaidService.onReyCoinChanged() end
@@ -980,6 +1028,7 @@ function RaidService.RecordReyCoinTrade(pending, recipient)
             else
                 loot = table.remove(senderMember.loot, candidateIndex)
                 ordinaryLootIndexes[senderMember.loot] = nil
+                RaidService.LootDisplayChanged(senderMember.loot,loot,true)
             end
         end
     end
@@ -1003,6 +1052,7 @@ function RaidService.RecordReyCoinTrade(pending, recipient)
     loot.awardHistoryKey = loot.awardHistoryKey or pending.historyKey
     recipientMember.loot = recipientMember.loot or {}
     table.insert(recipientMember.loot, loot)
+    RaidService.LootDisplayChanged(recipientMember.loot,loot)
     local audit=Raider.Services.RaidAudit
     if audit then
         local ok,reason=audit.Trade(attendance,senderMember,remainder,recipientMember,loot)
@@ -1464,7 +1514,7 @@ function RaidService.RecordLoot(message, confirmedAward,confirmedSoftReserve)
             previous.syncRecordId=proposed.syncRecordId
         end
         previous.count = count
-        return true
+        return true,member.name
     end
     local _, _, _, _, _, _, _, _, _, itemTexture = GetItemInfo(itemLink)
     attendance.nextLootRecordId = (tonumber(attendance.nextLootRecordId) or 0) + 1
@@ -1486,7 +1536,8 @@ function RaidService.RecordLoot(message, confirmedAward,confirmedSoftReserve)
     end
     table.insert(member.loot, loot)
     if ordinaryIndex then ordinaryIndex[payload] = loot end
-    return true
+    RaidService.LootDisplayChanged(member.loot,loot)
+    return true,member.name
 end
 
 function RaidService.RecordPendingAwardReceipt(recipient, itemLink,softReserve)

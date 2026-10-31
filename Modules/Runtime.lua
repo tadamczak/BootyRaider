@@ -31,6 +31,12 @@ function Runtime.RefreshViews()
     local _,view
     for _,view in pairs(Runtime.views) do if view.Refresh then view:Refresh() end end
 end
+function Runtime.RefreshLootViews(id,names)
+    local attendance=Runtime.GetAttendance()
+    local view=Runtime.views.raid
+    if attendance and attendance.syncRaidId==id and view and view.RefreshLoot then view:RefreshLoot(names) end
+    if Raider.Modules.RaidLog then Raider.Modules.RaidLog.RefreshVisible() end
+end
 function Runtime.WantsGuildDirectory()
     if not Raider.active then return false end
     if Raider.Modules.RaidSyncRuntime and Raider.Modules.RaidSyncRuntime.WantsDirectory() then return true end
@@ -303,7 +309,8 @@ local function Dispatch()
             or Runtime.IsTestRaid() or not Raider.Services.Raid.IsInRaid() then return end
         local attendance=Raider.Database.GetRaidAttendance()
         if Raider.Services.RaidRes.HasSession(attendance) then
-            if Raider.Services.Raid.RecordLoot(arg1) then Runtime.RefreshViews() end
+            local recorded,name=Raider.Services.Raid.RecordLoot(arg1)
+            if recorded then Raider.Modules.RaidSyncRuntime.QueueLootRefresh(attendance.syncRaidId,name and {[string.lower(name)]=true}) end
         end
     else
         Runtime.worldContext.Update()

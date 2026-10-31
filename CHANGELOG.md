@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1-dev.3 — 2026-10-31
+
+- Update live loot records without rebuilding the entire raid history on every drop.
+- Combine burst loot updates and refresh only visible affected player details; keep loot sorting separate from stored receipts.
+
 ## 1.0.1-dev.2 — 2026-10-31
 
 - Save long raids as journal differences instead of resending already recorded loot.

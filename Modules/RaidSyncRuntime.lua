@@ -4,6 +4,7 @@ Raider.Modules.RaidSyncRuntime=SyncRuntime
 local runtime,nextWake,changed,statusChanged,registered,rosterAt,lastRosterFailure
 local lastSyncError
 local statusRefreshAt
+local lootRefresh,lootRefreshAt={},nil
 local onlineOfficers
 local maintenance,waitingConfirmation,compactedAt,maintenanceArmed={},{},{},false
 local function Now() return type(GetTime)=="function" and GetTime() or time() end
@@ -64,7 +65,7 @@ local function MaintenanceReady()
         and runtime and runtime.raidSync and not runtime.raidSync:HasWork()
 end
 local function HasWork()
-    return changed or statusChanged or rosterAt or MaintenanceReady() or runtime and runtime.replica and runtime.replica.HasWork()
+    return changed or statusChanged or lootRefreshAt or rosterAt or MaintenanceReady() or runtime and runtime.replica and runtime.replica.HasWork()
         or runtime and runtime.raidSync and runtime.raidSync:HasWork()
 end
 local function QueueMaintenance(id)
@@ -118,21 +119,36 @@ function SyncRuntime.Tick()
     end
     runtime.replica.Flush(1)
     CompactOne()
+    if lootRefreshAt and now>=lootRefreshAt and not changed then
+        for id,names in pairs(lootRefresh) do runtime.RefreshLootViews(id,names);lootRefresh[id]=nil end
+        lootRefreshAt=nil
+    end
     if changed or statusChanged and (not statusRefreshAt or now>=statusRefreshAt) then
         local refresh=changed;changed=false;statusChanged=false
         statusRefreshAt=now+0.25
         local view=runtime.views.raid
         if view and view.page and view.page:IsVisible() and Raider.Modules.RaidManagement.RefreshSyncStatus then Raider.Modules.RaidManagement.RefreshSyncStatus(view.page) end
-        if refresh then runtime.RefreshViews() end
+        if refresh then
+            lootRefresh={};lootRefreshAt=nil
+            runtime.RefreshViews()
+        end
         if Raider.Modules.RaidSync then Raider.Modules.RaidSync.RefreshVisible() end
     end
     if runtime.replica.HasWork() then nextWake=now else nextWake=runtime.raidSync and runtime.raidSync:NextWake() end
     if rosterAt and (not nextWake or rosterAt<nextWake) then nextWake=rosterAt end
+    if lootRefreshAt and (not nextWake or lootRefreshAt<nextWake) then nextWake=lootRefreshAt end
     if statusChanged and (not nextWake or (statusRefreshAt or now)<nextWake) then nextWake=statusRefreshAt or now end
     if changed or MaintenanceReady() then nextWake=now end
     if not HasWork() then runtime.events:SetScript("OnUpdate",nil);nextWake=nil end
 end
 local function Update() SyncRuntime.Tick() end
+function SyncRuntime.QueueLootRefresh(id,names)
+    if not id then return end
+    lootRefresh[id]=lootRefresh[id] or {}
+    for name in pairs(names or {}) do lootRefresh[id][name]=true end
+    lootRefreshAt=lootRefreshAt or Now()+0.05
+    SyncRuntime.Wake()
+end
 function SyncRuntime.OnRosterUpdate()
     if HiddenRecording() then rosterAt=Now()+0.25 else rosterAt=nil end
     SyncRuntime.Wake()
@@ -170,7 +186,10 @@ function SyncRuntime.Initialize(owner)
                 end
                 return false
             end,
-            restore=Restore,onChanged=function(id) changed=true;QueueMaintenance(id) end,
+            restore=Restore,onChanged=function(id,names,kind)
+                if kind=="loot" then SyncRuntime.QueueLootRefresh(id,names) else changed=true end
+                QueueMaintenance(id)
+            end,
             onSessionDeleted=function(previous,id) runtime.OnSessionDeleted(previous,id) end,
             onAttendance=function(previous,attendance)
                 Raider.Services.Raid.PreserveLootSession(previous,attendance)
@@ -274,5 +293,6 @@ function SyncRuntime.Stop()
         if registered then runtime.events:UnregisterEvent("CHAT_MSG_ADDON");runtime.events:UnregisterEvent("PLAYER_REGEN_ENABLED") end
     end
     lastSyncError=nil;onlineOfficers=nil;registered=nil;nextWake=nil;rosterAt=nil;changed=nil;statusChanged=nil;statusRefreshAt=nil;maintenanceArmed=false;lastRosterFailure=nil
+    lootRefresh={};lootRefreshAt=nil
     if Raider.Modules.RaidSync then Raider.Modules.RaidSync.Close() end
 end

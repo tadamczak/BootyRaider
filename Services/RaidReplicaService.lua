@@ -236,6 +236,9 @@ function Replica.Create(options)
     local state={revision=0,dirty={},deferred={},receivedCounts={},receivedSources={},catalogEntries={},dirtyNames={},aliases={},aliasSources={},mergeConflicts={},metadata={},transport=nil,projected={},waiting={}}
     local api={}
     local CatalogEntry
+    -- Transient indexes belong to materialized live sessions, never SavedVariables.
+    -- A structural change/checkpoint invalidates them and uses the full projection.
+    local lootCaches,lootChanges={},{}
     local function DirectlyFollows(operation,previous)
         for _,change in ipairs(operation.changes or {}) do
             if change.base==previous.id then return true end
@@ -389,11 +392,16 @@ function Replica.Create(options)
         for key,record in pairs(AllRecords(id)) do values.heads[key]=record.heads or {record.revision} end
         return values
     end
-    local function Queue(id,names)
+    local function Queue(id,names,lootKeys)
         id=Canonical(id)
+        if lootKeys and lootCaches[id] then
+            lootChanges[id]=lootChanges[id] or {}
+            for key in pairs(lootKeys) do lootChanges[id][key]=true end
+            if state.conflictCache then state.conflictCache[id]=nil end
+        else lootCaches[id]=nil;lootChanges[id]=nil;state.conflictCache=nil end
         if CatchingUp(id) then state.deferred[id]=true
         else state.catalog=nil;state.dirty[id]=true end
-        state.conflictCache=nil;state.revision=state.revision+1
+        state.revision=state.revision+1
         if not names then state.dirtyNames[id]=false
         elseif state.dirtyNames[id]~=false then
             state.dirtyNames[id]=state.dirtyNames[id] or {}
@@ -474,6 +482,7 @@ function Replica.Create(options)
             local _,_,name=string.find(change.key,"^sr:(.+)$")
             if not name then _,_,name=string.find(change.key,"^member:(.+)$") end
             if not name then _,_,name=string.find(change.key,"^saved:member:(.+)$") end
+            if not name then _,_,name=string.find(change.key,"^entitlement:(.+)$") end
             if name then names[name]=true
             elseif string.find(change.key,"^loot:") then
                 if change.value then names[Lower(change.value.recipient)]=true end
@@ -481,7 +490,22 @@ function Replica.Create(options)
             elseif string.find(change.key,"^csr:") and change.value then names[Lower(change.value.player)]=true
             elseif not string.find(change.key,"^recorder:") then all=true end
         end
-        Queue(operation.raidId,not all and names or nil)
+        local cache=lootCaches[operation.raidId]
+        local raid=Raid(operation.raidId)
+        local lootKeys
+        if cache and status=="applied" and not catchingUp and cache.records==raid.records
+            -- Local trades may remove/replace array entries before publication.
+            -- Reconcile those rare structural edits instead of indexing a tail.
+            and (not localChange or operation.kind~="loot.correct")
+            and cache.count+1==table.getn(raid.operationIds or {}) then
+            lootKeys={}
+            for _,change in ipairs(operation.changes or {}) do
+                if string.find(change.key,"^loot:") or string.find(change.key,"^entitlement:") then lootKeys[change.key]=true
+                else lootKeys=nil;break end
+            end
+            if lootKeys then cache.count=table.getn(raid.operationIds) end
+        end
+        Queue(operation.raidId,not all and names or nil,lootKeys)
         if localChange and state.transport and state.transport.NotifyChanged then state.transport:NotifyChanged(operation.raidId) end
         if options.wake then options.wake() end
     end
@@ -936,6 +960,177 @@ function Replica.Create(options)
             srCustomChanges=Copy(attendance.srCustomChanges),srCustomReview=Copy(attendance.softReserveImport.customReview),
             unmatched=Copy(attendance.softReserveImport.unmatchedReservations),source=attendance.softReserveImport.origin or "officer-sync"}
     end
+    local function LootGroup(value) return Lower(value.recipient).."|"..Lower(value.item) end
+    local function IndexLootGroup(cache,key,record)
+        local previous=cache.allocations[key]
+        if previous then
+            local group=cache.groups[previous.group]
+            group[previous.origin]=group[previous.origin]-1
+            if group[previous.origin]==0 then group[previous.origin]=nil end
+            if not next(group) then cache.groups[previous.group]=nil end
+            cache.allocations[key]=nil
+        end
+        if record and not record.deleted and record.value then
+            local group=LootGroup(record.value)
+            local origin=J.GetOperationOrigin(db,record.revision)
+            if not origin then return false end
+            cache.groups[group]=cache.groups[group] or {}
+            cache.groups[group][origin]=(cache.groups[group][origin] or 0)+1
+            cache.allocations[key]={group=group,origin=origin,recipient=Lower(record.value.recipient)}
+        end
+        return true
+    end
+    local function IndexLootList(member,statistic)
+        local list=statistic and member.lootItems or member.loot
+        return {member=member,list=list or {},items={},count=0,statistic=statistic}
+    end
+    local function CatchUpLootList(index)
+        local count=table.getn(index.list)
+        if count<index.count then index.items={};index.count=0 end
+        -- Local receipt recording appends before its queued projection. The UI
+        -- sorts a separate view, so only this new tail needs indexing.
+        for position=index.count+1,count do
+            local loot=index.list[position]
+            if loot.syncRecordId then index.items[loot.syncRecordId]=loot end
+        end
+        index.count=count
+    end
+    local function IndexLootTarget(target,statistic)
+        if not target then return end
+        local result={value=target,members={},nextRecordId=0}
+        for collection=1,2 do
+            for _,member in ipairs(collection==1 and target.members or target.departedMembers or {}) do
+                local index=IndexLootList(member,statistic);CatchUpLootList(index)
+                result.members[Lower(member.name)]=index
+                for _,loot in ipairs(index.list) do result.nextRecordId=math.max(result.nextRecordId,tonumber(loot.recordId) or 0) end
+            end
+        end
+        return result
+    end
+    local function ActiveTarget(id)
+        local active=db.raidAttendance
+        return active and active.syncRaidId==id and active or nil
+    end
+    local function PrimeLootCache(id,attendance)
+        lootCaches[id]=nil;lootChanges[id]=nil
+        local raid=Raid(id)
+        local active=ActiveTarget(id)
+        if not attendance or attendance.syncConflictCount~=0 or attendance.syncDisputed or attendance.syncLocalAuditFailure
+            or active and active.syncLocalAuditFailure
+            or state.aliases[id] or next(state.aliasSources[id] or {}) or Record(id,"raid:lifecycle")~="active" then return end
+        local cache={records=raid.records,count=table.getn(raid.operationIds or {}),allocations={},groups={}}
+        cache.active=IndexLootTarget(active)
+        cache.snapshot=IndexLootTarget(ExistingHistory("softReserveHistory",id))
+        cache.statistic=IndexLootTarget(ExistingHistory("raidStatistics",id),true)
+        for key,record in pairs(raid.records) do
+            if string.find(key,"^loot:") and not IndexLootGroup(cache,key,record) then return end
+        end
+        lootCaches[id]=cache
+    end
+    local function InvalidateReceiptIndex(list)
+        local service=Raider.Services.Raid
+        if service and service.InvalidateLootIndex then service.InvalidateLootIndex(list) end
+    end
+    local function PatchLoot(index,id,value,target)
+        CatchUpLootList(index)
+        local previous=index.items[id]
+        if previous and previous.auditFailure then return end
+        local oldCount=previous and previous.count or 0
+        if not value then
+            if previous then
+                for position,loot in ipairs(index.list) do
+                    if loot==previous then table.remove(index.list,position);break end
+                end
+                index.items[id]=nil;index.count=table.getn(index.list)
+                InvalidateReceiptIndex(index.list)
+                if Raider.Services.Raid and Raider.Services.Raid.LootDisplayChanged then Raider.Services.Raid.LootDisplayChanged(index.list,previous,true) end
+            end
+        else
+            local loot=previous
+            if not loot then
+                loot={syncRecordId=id};index.items[id]=loot;table.insert(index.list,loot);index.count=index.count+1
+                if not index.statistic then
+                    target.nextRecordId=math.max(target.nextRecordId,target.value.nextLootRecordId or 0)+1
+                    loot.recordId=target.nextRecordId
+                    if target.value.nextLootRecordId then target.value.nextLootRecordId=loot.recordId end
+                end
+                InvalidateReceiptIndex(index.list)
+            elseif loot.link~=value.link or loot.ordinaryReceipt~=(value.ordinary or nil) or loot.awardHistoryKey~=value.historyKey then
+                InvalidateReceiptIndex(index.list)
+            end
+            loot.itemId=type(value.item)=="number" and value.item or nil
+            loot.name=value.name or tostring(value.item);loot.count=value.count;loot.timestamp=value.timestamp
+            if not index.statistic then loot.link=value.link;loot.ordinaryReceipt=value.ordinary or nil;loot.awardHistoryKey=value.historyKey end
+            if Raider.Services.Raid and Raider.Services.Raid.LootDisplayChanged then Raider.Services.Raid.LootDisplayChanged(index.list,loot) end
+        end
+        if index.statistic then index.member.lootCount=(index.member.lootCount or 0)-oldCount+(value and value.count or 0) end
+    end
+    local function PatchLootProjection(id,affected)
+        local cache,changes=lootCaches[id],lootChanges[id]
+        local raid=Raid(id)
+        if not cache or not changes or cache.records~=raid.records or cache.count~=table.getn(raid.operationIds or {})
+            or raid.conflicts and next(raid.conflicts) then return false end
+        if cache.active and cache.active.value.syncLocalAuditFailure then return false end
+        if (cache.active and cache.active.value)~=ActiveTarget(id)
+            or (cache.snapshot and cache.snapshot.value)~=ExistingHistory("softReserveHistory",id)
+            or (cache.statistic and cache.statistic.value)~=ExistingHistory("raidStatistics",id) then return false end
+        local targets={cache.active,cache.snapshot,cache.statistic}
+        -- Validate the entire batch before changing any visible/persisted view.
+        -- Structural/conflicting edits retain the full reconciliation path.
+        local previousOwners={}
+        for key in pairs(changes) do
+            local record=raid.records[key]
+            if not record or record.conflicted or record.pendingCheckpoint then return false end
+            local value=not record.deleted and record.value
+            if string.find(key,"^loot:") then
+                if raid.records["allocation:"..string.sub(key,6)] then return false end
+                local previous=cache.allocations[key];previousOwners[key]=previous and previous.recipient
+                if not IndexLootGroup(cache,key,record) then return false end
+                if value then
+                    local origins=cache.groups[LootGroup(value)];local origin=next(origins)
+                    if next(origins,origin) then return false end
+                end
+            end
+            local name=value and Lower(value.recipient or value.name) or string.sub(key,13)
+            for targetIndex=1,3 do
+                local target=targets[targetIndex]
+                if target then
+                    local member=value and target.members[name]
+                    if value and (not member or member.member.entitlementAuditFailure) then return false end
+                    if member and member.list~=(member.statistic and member.member.lootItems or member.member.loot) then return false end
+                end
+            end
+        end
+        for key in pairs(changes) do
+            local record=raid.records[key];local value=not record.deleted and record.value
+            if string.find(key,"^loot:") then
+                local recordId=string.sub(key,6);local previous=previousOwners[key];local recipient=value and Lower(value.recipient)
+                if previous then affected[previous]=true end
+                if recipient then affected[recipient]=true end
+                for targetIndex=1,3 do
+                    local target=targets[targetIndex]
+                    if target then
+                        if previous and previous~=recipient and target.members[previous] then PatchLoot(target.members[previous],recordId,nil,target) end
+                        if recipient then PatchLoot(target.members[recipient],recordId,value,target) end
+                    end
+                end
+            else
+                local name=string.sub(key,13);affected[name]=true
+                for targetIndex=1,2 do
+                    local target=targets[targetIndex];local index=target and target.members[name]
+                    if index then
+                        local member=index.member
+                        member.srConsumedAt=value and next(value.srConsumedAt or {}) and Copy(value.srConsumedAt) or nil
+                        member.reyCoinUsedAt=value and value.reyCoinUsedAt;member.reyCoinItemLink=value and value.reyCoinItemLink
+                        member.syncEntitlementDisputed=nil
+                    end
+                end
+            end
+        end
+        lootChanges[id]=nil
+        state.conflictCache=state.conflictCache or {};state.conflictCache[id]={}
+        return true
+    end
     function api.Flush(limit,onlyRaid)
         local used=0
         for _,id in ipairs(onlyRaid and {onlyRaid} or Keys(state.dirty)) do
@@ -944,6 +1139,11 @@ function Replica.Create(options)
             else
             state.dirty[id]=nil;used=used+1
             local affected=state.dirtyNames[id];state.dirtyNames[id]=nil
+            local lootNames=affected or {}
+            local incremental=PatchLootProjection(id,lootNames)
+            if incremental then
+                if options.onChanged then options.onChanged(id,lootNames,"loot") end
+            else
             local removed=api.IsSessionDeleted(id)
             if removed then
                 local active=db.raidAttendance
@@ -1031,7 +1231,9 @@ function Replica.Create(options)
                 state.projected[id]=true
             end
             state.catalogEntries[id]=CatalogEntry and CatalogEntry(id) or nil;state.catalog=nil
+            PrimeLootCache(id,attendance)
             if options.onChanged then options.onChanged(id) end
+            end
             end
         end
         return used
