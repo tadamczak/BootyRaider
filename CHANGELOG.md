@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0 — 2026-10-31
+
+- First production release of raid sessions, loot tools, Soft Reserves, Raid Stats and CSR, standalone or in Booty Suite.
+- Synchronize authorized officers, recover interrupted sessions and review saved-raid conflicts; private raids remain independent.
+- Retain departed participants, named reserves and completed history, with compact CSR views and an isolated Test Lab.
+- Bound background synchronization and hidden UI work. Preserve existing journal data and preferences.
+- Requires BootyLib 0.1.0. Update all synchronizing officers together. Pre-journal test raid/CSR data is reset once.
+
 ## 1.0.0-dev.36 — 2026-10-31
 
 - Keep private raid offers from blocking other synchronized raids or falsely timing out their officers.
