@@ -302,16 +302,19 @@ local function CopyIds(values)
     return copy
 end
 
+local participantFields={"members","departedMembers"}
 local function FindMember(attendance, name)
-    for _, member in ipairs(attendance and attendance.members or {}) do
-        if NormalizeName(member.name) == NormalizeName(name) then return member end
+    for _,field in ipairs(participantFields) do
+        for _, member in ipairs(attendance and attendance[field] or {}) do
+            if NormalizeName(member.name) == NormalizeName(name) then return member end
+        end
     end
 end
 
 local function RecordChange(attendance, member, kind)
     attendance.srCustomChanges = attendance.srCustomChanges or {}
     local change = {name = member.name, kind = kind}
-    if kind == "items" then change.itemIds = CopyIds(member.srItemIds); change.sourceName = member.srSourceName
+    if kind == "items" then change.itemIds = CopyIds(member.srItemIds); change.sourceName = member.srSourceName; change.optOut = member.srOptOut
     else change.allowed = member.srException == true end
     attendance.srCustomChanges[kind .. ":" .. NormalizeName(member.name)] = change
 end
@@ -321,7 +324,7 @@ local function CopyChanges(source)
     local copy = {}
     for key, change in pairs(source) do
         copy[key] = {name = change.name, kind = change.kind, allowed = change.allowed,
-            sourceName = change.sourceName, itemIds = change.itemIds and CopyIds(change.itemIds)}
+            sourceName = change.sourceName, itemIds = change.itemIds and CopyIds(change.itemIds), optOut = change.optOut}
     end
     return copy
 end
@@ -335,7 +338,7 @@ function RaidResService.GetCustomChanges(attendance)
     for key, source in pairs(attendance and attendance.srCustomChanges or {}) do byKey[key] = source end
     for _, source in pairs(byKey) do
         table.insert(changes, {name = source.name, kind = source.kind, itemIds = source.itemIds and CopyIds(source.itemIds),
-            sourceName = source.sourceName, allowed = source.allowed})
+            sourceName = source.sourceName, allowed = source.allowed, optOut = source.optOut})
     end
     table.sort(changes, function(a,b) if a.name == b.name then return a.kind < b.kind end return a.name < b.name end)
     return changes
@@ -344,17 +347,19 @@ end
 local function UpdateMissing(attendance)
     local missing = {}
     for _, member in ipairs(attendance.members) do
-        if table.getn(member.srItemIds or {}) == 0 then table.insert(missing, member.name) end
+        if not member.srOptOut and table.getn(member.srItemIds or {}) == 0 then table.insert(missing, member.name) end
     end
     table.sort(missing); EnsureSnapshotImport(attendance).missingNames = missing
 end
 
-local function AssignItems(member, ids, sourceName)
+local function AssignItems(member, ids, sourceName, optOut)
     local labels = {}
     for index = 1, table.getn(ids) do labels[index] = tostring(ids[index]) end
     member.srItemIds = table.getn(ids) > 0 and CopyIds(ids) or nil
     member.sr = table.concat(labels, ", ")
     member.srSourceName = table.getn(ids) > 0 and (sourceName or member.name) or nil
+    member.srOptOut = optOut == true and true or nil
+    if member.srOptOut then member.srException = nil end
 end
 
 function RaidResService.SetMemberReservations(attendance, name, ids, exception)
@@ -411,13 +416,15 @@ function RaidResService.ReapplyCustomChanges(attendance, importInfo, selected)
             if selected[index] and change.kind == kind then
                 local member = FindMember(attendance, change.name)
                 if kind == "items" then
-                    AssignItems(member, change.itemIds, change.sourceName)
+                    AssignItems(member, change.itemIds, change.sourceName, change.optOut)
                     -- Reassigning a previously unmatched import must not leave
                     -- a second copy under its source name after reimport.
                     if change.sourceName and NormalizeName(change.sourceName) ~= NormalizeName(member.name) then
-                        for _, other in ipairs(attendance.members) do
-                            if other ~= member and NormalizeName(other.srSourceName) == NormalizeName(change.sourceName) then
-                                AssignItems(other, {}); RecordChange(attendance, other, "items")
+                        for _,field in ipairs(participantFields) do
+                            for _, other in ipairs(attendance[field] or {}) do
+                                if other ~= member and NormalizeName(other.srSourceName) == NormalizeName(change.sourceName) then
+                                    AssignItems(other, {}); RecordChange(attendance, other, "items")
+                                end
                             end
                         end
                         for position = table.getn(importInfo.unmatchedReservations or {}), 1, -1 do
@@ -429,7 +436,10 @@ function RaidResService.ReapplyCustomChanges(attendance, importInfo, selected)
                         for _, reservation in ipairs(importInfo.unmatchedReservations or {}) do table.insert(importInfo.unmatchedNames,reservation.name) end
                         table.sort(importInfo.unmatchedNames)
                     end
-                else member.srException = change.allowed == true and true or nil end
+                else
+                    if change.allowed and member.srOptOut then return false,"No Soft Reserve cannot also be a loot-right exception." end
+                    member.srException = change.allowed == true and true or nil
+                end
                 RecordChange(attendance, member, kind)
             end
         end
@@ -456,13 +466,15 @@ function RaidResService.Import(encoded, attendance, srUrl)
 
     -- Prepare every member result and metadata before replacing any live SR.
     -- Parser/schema failures, including a bad later row, leave history untouched.
-    local matched, missingNames, updates = 0, {}, {}
+    local matched, missingNames, updates, included = 0, {}, {}, {}
     local memberIndex
-    for memberIndex = 1, table.getn(attendance.members) do
-        local member = attendance.members[memberIndex]
-        if type(member) ~= "table" or type(member.name) ~= "string" or member.name == "" then
+    for _,field in ipairs(participantFields) do
+      for memberIndex = 1, table.getn(attendance[field] or {}) do
+        local member = attendance[field][memberIndex]
+        if type(member) ~= "table" or type(member.name) ~= "string" or member.name == "" or included[NormalizeName(member.name)] then
             return nil, "The raid roster contains an invalid member. Refresh it before importing Soft Reserves."
         end
+        included[NormalizeName(member.name)]=true
         local reservation = byName[NormalizeName(member.name)]
         local update = { member = member, sr = "" }
         if reservation and table.getn(reservation.itemIds) > 0 then
@@ -476,10 +488,11 @@ function RaidResService.Import(encoded, attendance, srUrl)
             byName[NormalizeName(member.name)] = nil
             matched = matched + 1
         else
-            missingNames[table.getn(missingNames) + 1] = member.name
+            if field=="members" then missingNames[table.getn(missingNames) + 1] = member.name end
             if reservation then byName[NormalizeName(member.name)] = nil end
         end
         table.insert(updates, update)
+      end
     end
     local unmatchedNames, unmatchedReservations, unmatched = {}, {}, 0
     for _, reservation in pairs(byName) do
@@ -509,6 +522,7 @@ function RaidResService.Import(encoded, attendance, srUrl)
         local update = updates[memberIndex]
         update.member.sr, update.member.srItemIds, update.member.srSourceName = update.sr, update.itemIds, update.sourceName
         update.member.srException = nil
+        update.member.srOptOut = nil
     end
     attendance.srCustomChanges = nil
     attendance.softReserveImport = importInfo
@@ -527,16 +541,28 @@ function RaidResService.ApplyAssignments(attendance, assignments)
     for index = 1, table.getn(members) do membersByName[NormalizeName(members[index].name)] = members[index] end
     for index = 1, table.getn(reservations) do reservationsByName[NormalizeName(reservations[index].name)] = reservations[index] end
 
+    -- false is an explicit no-reserve choice, never an item or an import name.
+    for memberName,choice in pairs(assignments) do
+        if choice == false and not membersByName[NormalizeName(memberName)] then
+            return false,"This player is no longer in the session roster. Reopen Fix SR."
+        end
+    end
+
     local assignedReservations = {}
     local memberName, reservationName
     for memberName, reservationName in pairs(assignments) do
         local member = membersByName[NormalizeName(memberName)]
-        local reservation = reservationsByName[NormalizeName(reservationName)]
-        if member and reservation and not assignedReservations[NormalizeName(reservation.name)] then
+        local reservation = type(reservationName)=="string" and reservationsByName[NormalizeName(reservationName)] or nil
+        if member and reservationName == false then
+            local hadException = member.srException or attendance.srCustomChanges and attendance.srCustomChanges["exception:"..NormalizeName(member.name)]
+            AssignItems(member, {}, nil, true)
+            RecordChange(attendance, member, "items")
+            if hadException then RecordChange(attendance, member, "exception") end
+        elseif member and reservation and not assignedReservations[NormalizeName(reservation.name)] then
             local labels = {}
             for index = 1, table.getn(reservation.itemIds or {}) do labels[index] = tostring(reservation.itemIds[index]) end
             if table.getn(labels) > 0 then
-                member.sr = table.concat(labels, ", "); member.srItemIds = reservation.itemIds; member.srSourceName = reservation.name
+                AssignItems(member, reservation.itemIds, reservation.name)
                 RecordChange(attendance, member, "items")
                 assignedReservations[NormalizeName(reservation.name)] = true
             end
@@ -553,7 +579,7 @@ function RaidResService.ApplyAssignments(attendance, assignments)
     end
     local remainingMissing, missingCount = {}, 0
     for index = 1, table.getn(members) do
-        if not members[index].srItemIds or table.getn(members[index].srItemIds) == 0 then
+        if not members[index].srOptOut and (not members[index].srItemIds or table.getn(members[index].srItemIds) == 0) then
             missingCount = missingCount + 1; remainingMissing[missingCount] = members[index].name
         end
     end
@@ -578,11 +604,8 @@ function RaidResService.RemoveMemberReservation(attendance, memberName)
     local members = attendance and attendance.members
     local importInfo = attendance and attendance.softReserveImport
     if type(members) ~= "table" or not importInfo then return false end
-    local member
+    local member=FindMember(attendance,memberName)
     local index
-    for index = 1, table.getn(members) do
-        if NormalizeName(members[index].name) == NormalizeName(memberName) then member = members[index]; break end
-    end
     if not member or not member.srItemIds or table.getn(member.srItemIds) == 0 then return false end
     local releasedItemIds = {}
     for index = 1, table.getn(member.srItemIds) do releasedItemIds[index] = member.srItemIds[index] end
@@ -613,7 +636,7 @@ function RaidResService.RemoveMemberReservation(attendance, memberName)
     for index = 1, table.getn(missing) do
         if NormalizeName(missing[index]) == NormalizeName(member.name) then alreadyMissing = true; break end
     end
-    if not alreadyMissing then table.insert(missing, member.name); table.sort(missing) end
+    if not member.leftAt and not alreadyMissing then table.insert(missing, member.name); table.sort(missing) end
     importInfo.missingNames = missing
     SyncMutation(attendance)
     return true
@@ -676,8 +699,10 @@ function RaidResService.Reconcile(previousAttendance, attendance)
             reservationsByName[NormalizeName(reservation.name)] = { name = reservation.name, itemIds = reservation.itemIds }
         end
     end
-    for index = 1, table.getn(previousAttendance.members or {}) do
-        local member = previousAttendance.members[index]
+    for collectionIndex=1,2 do
+      local collection=collectionIndex==1 and previousAttendance.members or previousAttendance.departedMembers
+      for index = 1, table.getn(collection or {}) do
+        local member = collection[index]
         local key = NormalizeName(member.name)
         local assigned = member.srItemIds and table.getn(member.srItemIds) > 0
         -- nil means a new roster member, false means an existing member with
@@ -687,6 +712,7 @@ function RaidResService.Reconcile(previousAttendance, attendance)
         if assigned then
             reservationsByName[key] = { name = member.srSourceName or member.name, itemIds = member.srItemIds }
         end
+      end
     end
 
     local missingNames = {}
@@ -700,7 +726,10 @@ function RaidResService.Reconcile(previousAttendance, attendance)
             reservationsByName[key] = nil
             reservation = nil
         end
-        if member.srItemIds and table.getn(member.srItemIds) > 0 then
+        if member.srOptOut then
+            reservationsByName[key]=nil
+            member.sr="";member.srItemIds=nil;member.srSourceName=nil;member.srException=nil
+        elseif member.srItemIds and table.getn(member.srItemIds) > 0 then
             reservationsByName[key] = nil
         elseif reservation and previousAssignmentState[key] ~= false then
             member.srItemIds = reservation.itemIds
@@ -715,6 +744,9 @@ function RaidResService.Reconcile(previousAttendance, attendance)
         end
     end
 
+    -- An observed participant's SR stays with that participant after leaving;
+    -- it is not a second, unassigned reservation available to another player.
+    for _,member in ipairs(attendance.departedMembers or {}) do reservationsByName[NormalizeName(member.name)]=nil end
     local unmatchedNames, unmatchedReservations = {}, manualReservations
     for index = 1, table.getn(manualReservations) do table.insert(unmatchedNames, manualReservations[index].name) end
     local _, reservation
@@ -728,7 +760,7 @@ function RaidResService.Reconcile(previousAttendance, attendance)
     for _, change in pairs(attendance.srCustomChanges or {}) do
         local member = FindMember(attendance, change.name)
         if member then
-            if change.kind == "exception" then member.srException = change.allowed == true and true or nil end
+            if change.kind == "exception" and not member.srOptOut then member.srException = change.allowed == true and true or nil end
         end
     end
     previousImport.missingNames = missingNames; previousImport.unmatchedNames = unmatchedNames; previousImport.unmatchedReservations = unmatchedReservations
@@ -753,7 +785,7 @@ end
 -- Saved raids own their durable loot records. Runtime award queues, lookup
 -- indexes and UI objects stay with their controllers and are never copied.
 local lootScalarFields = { "recordId", "sourceRecordId", "syncRecordId", "auditFailure", "itemId", "name", "link", "icon", "count", "timestamp", "ordinaryReceipt", "awardHistoryKey", "tradedFrom", "tradedTo" }
-local memberScalarFields = { "name", "raidRank", "subgroup", "level", "class", "classFile", "zone", "online", "guildRank", "guildMember", "sr", "srSourceName", "srException" }
+local memberScalarFields = { "name", "raidRank", "subgroup", "level", "class", "classFile", "zone", "online", "guildRank", "guildMember", "joinedAt", "leftAt", "sr", "srSourceName", "srException", "srOptOut" }
 local function CopyLootRecords(source)
     local records, index, fieldIndex = {}, nil, nil
     for index = 1, table.getn(source or {}) do
@@ -809,12 +841,6 @@ local function CopySavedMember(member, snapshot)
     savedMember.reyCoinItemLink = type(member.reyCoinItemLink) == "string" and member.reyCoinItemLink or nil
     savedMember.srConsumedAt = CopyConsumedReserves(member.srConsumedAt)
     return savedMember
-end
-
-local function HasRecordedLootState(member)
-    return member and ((member.loot and table.getn(member.loot) > 0)
-        or (tonumber(member.reyCoinUsedAt) or 0) > 0
-        or (member.srConsumedAt and next(member.srConsumedAt) ~= nil))
 end
 
 local function CopySaveOptions(options)
@@ -874,15 +900,18 @@ function RaidResService.BuildSnapshot(attendance)
     local index, itemIndex, savedNames = nil, nil, {}
     for index = 1, table.getn(attendance.members or {}) do
         local member = attendance.members[index]
-        local savedMember = CopySavedMember(member, snapshot)
-        if savedMember.srItemIds then snapshot.assignedCount = snapshot.assignedCount + 1 end
-        savedNames[string.lower(member.name or "")] = true
-        table.insert(snapshot.members, savedMember)
+        local key=string.lower(member.name or "")
+        if key~="" and not savedNames[key] then
+            local savedMember = CopySavedMember(member, snapshot)
+            if savedMember.srItemIds then snapshot.assignedCount = snapshot.assignedCount + 1 end
+            savedNames[key] = true
+            table.insert(snapshot.members, savedMember)
+        end
     end
     for index = 1, table.getn(attendance.departedMembers or {}) do
         local member = attendance.departedMembers[index]
         local key = string.lower(member.name or "")
-        if key ~= "" and not savedNames[key] and HasRecordedLootState(member) then
+        if key ~= "" and not savedNames[key] then
             snapshot.departedMembers = snapshot.departedMembers or {}
             table.insert(snapshot.departedMembers, CopySavedMember(member, snapshot))
             savedNames[key] = true
@@ -939,6 +968,12 @@ function RaidResService.RestoreSnapshot(snapshot,prepareOnly)
         end
         for index = 1, table.getn(snapshot.missingNames or {}) do table.insert(members, { name = snapshot.missingNames[index], subgroup = 0, level = 0, class = "", classFile = "", zone = "", online = false, guildRank = "", sr = "", loot = {} }) end
     end
+    local uniqueMembers,savedNames={},{}
+    for _,member in ipairs(members) do
+        local key=string.lower(member.name or "")
+        if key~="" and not savedNames[key] then table.insert(uniqueMembers,member);savedNames[key]=true end
+    end
+    members=uniqueMembers
     local unmatched, unmatchedNames, missingNames = {}, {}, {}
     for index = 1, table.getn(snapshot.unmatched or {}) do
         local source, ids = snapshot.unmatched[index], {}
@@ -948,12 +983,10 @@ function RaidResService.RestoreSnapshot(snapshot,prepareOnly)
     for index = 1, table.getn(snapshot.missingNames or {}) do missingNames[index] = snapshot.missingNames[index] end
     local departedMembers
     if hasLootHistory then
-        local savedNames = {}
-        for index = 1, table.getn(members) do savedNames[string.lower(members[index].name or "")] = true end
         for index = 1, table.getn(snapshot.departedMembers or {}) do
             local source = snapshot.departedMembers[index]
             local key = string.lower(source.name or "")
-            if key ~= "" and not savedNames[key] and HasRecordedLootState(source) then
+            if key ~= "" and not savedNames[key] then
                 local member = CopySavedMember(source, { nextLootRecordId = nextLootRecordId })
                 member.loot = member.loot or {}
                 local lootIndex
@@ -999,7 +1032,7 @@ local function CopyReserveData(value)
     for key,item in pairs(value) do copy[key]=CopyReserveData(item) end
     return copy
 end
-local reserveFields={"sr","srItemIds","srSourceName","srException"}
+local reserveFields={"sr","srItemIds","srSourceName","srException","srOptOut"}
 local function AuditedReserveMutation(name,kind)
     local mutate=RaidResService[name]
     if name=="Import" then
@@ -1014,23 +1047,28 @@ local function AuditedReserveMutation(name,kind)
         end
         local staged={}
         for key,value in pairs(attendance) do staged[key]=value end
-        staged._auditStaged=true;staged.members={}
+        staged._auditStaged=true
         staged.softReserveImport=CopyReserveData(attendance.softReserveImport)
         staged.srCustomChanges=CopyReserveData(attendance.srCustomChanges)
-        for index,member in ipairs(attendance.members) do
-            local copy={}
-            for key,value in pairs(member) do copy[key]=value end
-            copy.srItemIds=CopyReserveData(member.srItemIds)
-            staged.members[index]=copy
+        for _,field in ipairs(participantFields) do
+            staged[field]={}
+            for index,member in ipairs(attendance[field] or {}) do
+                local copy={}
+                for key,value in pairs(member) do copy[key]=value end
+                copy.srItemIds=CopyReserveData(member.srItemIds)
+                staged[field][index]=copy
+            end
         end
         local first=a
         if name=="ReapplyCustomChanges" then first=staged.softReserveImport end
         local result,reason=mutate(staged,first,b,c)
         if result==false or result==nil or result==0 then return result,reason end
         local changed,changedMembers=0,{}
-        for index,member in ipairs(staged.members) do
-            if not Raider.Services.RaidJournal.Equal(audit.SRValue(member,staged),audit.SRValue(attendance.members[index],attendance)) then
-                changed=changed+1;changedMembers[changed]=member
+        for _,field in ipairs(participantFields) do
+            for index,member in ipairs(staged[field]) do
+                if not Raider.Services.RaidJournal.Equal(audit.SRValue(member,staged),audit.SRValue(attendance[field][index],attendance)) then
+                    changed=changed+1;changedMembers[changed]=member
+                end
             end
         end
         local oldSource=attendance.softReserveImport or {}
@@ -1042,8 +1080,10 @@ local function AuditedReserveMutation(name,kind)
             if not ok then return false,failure end
         end
         attendance.syncRaidId=staged.syncRaidId
-        for index,member in ipairs(attendance.members) do
-            for _,field in ipairs(reserveFields) do member[field]=staged.members[index][field] end
+        for _,collection in ipairs(participantFields) do
+            for index,member in ipairs(attendance[collection] or {}) do
+                for _,field in ipairs(reserveFields) do member[field]=staged[collection][index][field] end
+            end
         end
         if attendance.softReserveImport and staged.softReserveImport then
             for key in pairs(attendance.softReserveImport) do attendance.softReserveImport[key]=nil end

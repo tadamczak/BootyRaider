@@ -59,7 +59,11 @@ Only current guild ranks **Officer Wukong** and **Mukla** can archive/activate C
 
 **Settings → Addon UI → CSR → General** offers **Use class colors**. **Layout** controls class icons and visibility of each filter. These options are enabled by default. Hiding all filters removes the filter toolbar; hidden filters retain their selected values. Expand controls appear before the class/item icon and name.
 
-Save Raid offers a reload to write data to disk. This waits until other Booty products have no active raid or recording. A failed startup or Stop reports its reason and retains raid data.
+**Save Raid** keeps the current session open, with its tracking and selected player unchanged. **Leave Session** returns to the raid list; **End & Save** also saves and ends the shared raid. Save Raid offers a reload to write data to disk. This waits until other Booty products have no active raid or recording. A failed startup or Stop reports its reason and retains raid data.
+
+Players who leave remain in the session list with **Left raid** status. Expand a player to see **Joined raid** and **Left raid** timestamps above their loot. Rejoining preserves the first join time. Saving after players leave keeps their attendance, SR and loot for the completed raid's statistics and CSR. A new session starts from the current physical roster.
+
+In **Raid members without SR → Fix SR**, select **No Soft Reserve** on the right and click one or more players, then save. This acknowledges their lack of an SR and clears the warning without granting an item or CSR. Assigning an item replaces that choice. It participates in the review of manual changes after another import.
 
 A partially available physical raid roster cannot start a ready session or replace a complete roster. An intentional start outside a raid creates an empty session; a roster disappearing during a raid start still fails safely. If New Raid fails, the dialog retains your input so you can try again when the roster is available.
 
@@ -93,7 +97,7 @@ Auto Loot Inclusions follows Raid Type: Molten Core includes Lava Core and Fiery
 
 The SR editor retains resolved item names and quality colours across selection, filtering and reopening for the current login. The missing-rights confirmation uses a short, fully visible message.
 
-Raid Log shows project-gold timestamps, original nicknames and concise before → after changes. Its minimum size is 520 × 200; the number of visible rows follows its height. Open it from Raid Leader Tools, the log icon beside a saved raid, or `/br log [raid ID]`. Imports appear as one summary; unchanged saves, UI activity and routine observations do not spam the log. Conflict decisions preserve the earlier proposals and their status. SR resolution entries name the raid, player and chosen item. Compare raids provides a Details button for each difference, with separate named panes for both recordings.
+Raid Log shows project-gold timestamps and values aligned with their column headings. Details show **Who**, **Action** and **Time**, followed by **Before** and **After** columns with gold labels. SR changes identify the player and previous/new item, with item tooltips and link clicks. Its minimum size is 520 × 200; the number of visible rows follows its height. Open it from Raid Leader Tools, the log icon beside a saved raid, or `/br log [raid ID]`. Imports appear as one summary; unchanged saves, UI activity and routine observations do not spam the log. Conflict decisions preserve the earlier proposals and their status. SR resolution entries name the raid, player and chosen item. Compare raids provides a Details button for each difference, with separate named panes for both recordings.
 
 ## Officer synchronization
 

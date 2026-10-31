@@ -46,6 +46,7 @@ function RaidStatistics.BuildEntry(attendance, saveOptions)
         for lootIndex = 1, table.getn(member.loot or {}) do lootCount = lootCount + (tonumber(member.loot[lootIndex].count) or 1) end
         local savedMember = {
             name = member.name, class = member.class or "", guildRank = member.guildRank ~= "" and member.guildRank or "Guest",
+            joinedAt = member.joinedAt, leftAt = member.leftAt,
             lootRank = ResolveLootRank(member),
             attendance = 1, srCount = table.getn(member.srItemIds or {}), lootCount = lootCount, srItems = {}, lootItems = {},
         }

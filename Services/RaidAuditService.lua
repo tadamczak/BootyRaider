@@ -71,37 +71,50 @@ end
 function Audit.SRValue(member,attendance)
     local items = {}
     for index, item in ipairs(member.srItemIds or {}) do items[index] = item end
-    local value={name=member.name, items=items, exception=member.srException==true,sourceName=member.srSourceName}
+    local value={name=member.name, items=items, exception=member.srException==true,sourceName=member.srSourceName,optOut=member.srOptOut==true and true or nil}
     local custom=attendance and attendance.srCustomChanges
     local key=string.lower(member.name or "")
     local itemChange=custom and custom["items:"..key]
     local exceptionChange=custom and custom["exception:"..key]
     if itemChange or exceptionChange then
         value.custom={}
-        if itemChange then value.custom.items={itemIds=ReserveItems(itemChange.itemIds),sourceName=itemChange.sourceName} end
+        if itemChange then value.custom.items={itemIds=ReserveItems(itemChange.itemIds),sourceName=itemChange.sourceName,optOut=itemChange.optOut} end
         if exceptionChange then value.custom.exception={allowed=exceptionChange.allowed==true} end
     end
     return value
 end
-function Audit.MemberChanges(members,attendance)
-    local changes = {}
-    for _, member in ipairs(members or {}) do
+function Audit.MemberChanges(members,attendance,departedMembers)
+    local changes, included = {}, {}
+    for collectionIndex=1,2 do
+      local collection=collectionIndex==1 and members or departedMembers
+      for _, member in ipairs(collection or {}) do
         local key = string.lower(member.name or "")
-        if key ~= "" then
+        if key ~= "" and not included[key] then
             table.insert(changes,{key="sr:"..key,value=Audit.SRValue(member,attendance)})
             table.insert(changes,{key="member:"..key,value=Audit.MemberValue(member)})
+            included[key]=true
         end
+      end
     end
     return changes
 end
 function Audit.MemberValue(member)
     return {name=member.name,class=member.class or "",classFile=member.classFile or "",guildRank=member.guildRank or "",
-        guildMember=member.guildMember,level=member.level,subgroup=member.subgroup,raidRank=member.raidRank,online=member.online,zone=member.zone}
+        guildMember=member.guildMember,level=member.level,subgroup=member.subgroup,raidRank=member.raidRank,online=member.online,zone=member.zone,
+        joinedAt=member.joinedAt,leftAt=member.leftAt}
 end
 function Audit.ObserveRoster(attendance)
     if not attendance or not attendance.syncRaidId or IsTest() then return true end
-    local changes={}
-    for _,member in ipairs(attendance.members or {}) do table.insert(changes,{key="member:"..string.lower(member.name),value=Audit.MemberValue(member)}) end
+    local changes,included={},{}
+    for collectionIndex=1,2 do
+        local collection=collectionIndex==1 and attendance.members or attendance.departedMembers
+        for _,member in ipairs(collection or {}) do
+            local key=string.lower(member.name)
+            if not included[key] then
+                table.insert(changes,{key="member:"..key,value=Audit.MemberValue(member)});included[key]=true
+            end
+        end
+    end
     local actor=type(UnitName)=="function" and UnitName("player") or "Unknown"
     table.insert(changes,{key="recorder:"..string.lower(actor),value={name=actor,state="active"}})
     return Audit.Commit(attendance,"raid.observe",changes,nil,false)
@@ -164,7 +177,7 @@ function Audit.ImportValue(importInfo)
         value.review={}
         for _,change in ipairs(importInfo.customReview) do
             table.insert(value.review,{name=change.name,kind=change.kind,sourceName=change.sourceName,allowed=change.allowed,
-                itemIds=change.itemIds and ReserveItems(change.itemIds)})
+                itemIds=change.itemIds and ReserveItems(change.itemIds),optOut=change.optOut})
         end
     end
     if type(importInfo.rollForExport)=="string" and importInfo.rollForExport~="" then
@@ -184,7 +197,7 @@ function Audit.Reserves(attendance,kind,members,detail,importInfo)
     return Audit.Commit(attendance,kind,changes,detail)
 end
 function Audit.Start(attendance)
-    local changes = Audit.MemberChanges(attendance.members,attendance)
+    local changes = Audit.MemberChanges(attendance.members,attendance,attendance.departedMembers)
     if attendance.softReserveImport then table.insert(changes,{key="import:sr",value=Audit.ImportValue(attendance.softReserveImport)}) end
     table.insert(changes,{key="raid:metadata",value=Audit.Metadata(attendance)})
     table.insert(changes,{key="raid:lifecycle",value="active"})
@@ -275,7 +288,8 @@ function Audit.PrepareSavedMemberChanges(record,members,changes)
             end
             local value=Copy(sr or {})
             value.name=member.name;value.items=items;value.exception=sr and sr.exception==true or false
-            value.sourceName=value.sourceName or member.name;value.custom=value.custom or {}
+            value.optOut=nil
+            value.sourceName=table.getn(items)>0 and (value.sourceName or member.name) or nil;value.custom=value.custom or {}
             value.custom.items={itemIds=Copy(items),sourceName=value.sourceName}
             table.insert(changes,{key="sr:"..name,value=value})
         end
@@ -403,25 +417,13 @@ local function ReplaceSavedContent(attendance,changes)
     end
 end
 function Audit.Save(attendance,entry,snapshot,endSession,copySource)
-    local changes=Audit.MemberChanges(attendance.members,attendance)
-    if copySource then
-        local included={}
-        for _,member in ipairs(attendance.members or {}) do included[string.lower(member.name)]=true end
-        for _,member in ipairs(attendance.departedMembers or {}) do
-            local key=string.lower(member.name)
-            if not included[key] then
-                included[key]=true
-                table.insert(changes,{key="member:"..key,value=Audit.MemberValue(member)})
-                table.insert(changes,{key="sr:"..key,value=Audit.SRValue(member,attendance)})
-            end
-        end
-    end
+    local changes=Audit.MemberChanges(attendance.members,attendance,attendance.departedMembers)
     if attendance.softReserveImport then table.insert(changes,{key="import:sr",value=Audit.ImportValue(attendance.softReserveImport)}) end
     local prepared,reason=PrepareLiveLoot(attendance,changes)
     if not prepared then return false,reason end
     AppendEntitlements(changes,attendance)
     table.insert(changes,{key="raid:metadata",value=Audit.Metadata(attendance)})
-    table.insert(changes,Recorder(endSession and "ended" or "saved"))
+    table.insert(changes,Recorder(endSession and "ended" or "active"))
     local db=Store()
     local raid=attendance.syncRaidId and db.raidJournal.raids[attendance.syncRaidId]
     if copySource or not raid then
@@ -440,7 +442,7 @@ function Audit.Save(attendance,entry,snapshot,endSession,copySource)
             local ids=prepared.ids[string.lower(member.name or "")] or {}
             for index,loot in ipairs(lootItems or {}) do if ids[index] then loot.syncRecordId=ids[index] end end
             table.insert(changes,{key="saved:member:"..string.lower(member.name),value={name=member.name,class=member.class,guildRank=member.guildRank,
-                lootRank=member.lootRank,attendance=member.attendance,srItems=member.srItems,lootItems=lootItems}})
+                lootRank=member.lootRank,attendance=member.attendance,joinedAt=member.joinedAt,leftAt=member.leftAt,srItems=member.srItems,lootItems=lootItems}})
         end
     end
     if copySource then ReplaceSavedContent(attendance,changes) end
@@ -462,11 +464,7 @@ function Audit.Save(attendance,entry,snapshot,endSession,copySource)
     return ok,operation
 end
 function Audit.StartFromSnapshot(attendance)
-    local changes=Audit.MemberChanges(attendance.members,attendance)
-    for _,member in ipairs(attendance.departedMembers or {}) do
-        table.insert(changes,{key="member:"..string.lower(member.name),value=Audit.MemberValue(member)})
-        table.insert(changes,{key="sr:"..string.lower(member.name),value=Audit.SRValue(member,attendance)})
-    end
+    local changes=Audit.MemberChanges(attendance.members,attendance,attendance.departedMembers)
     if attendance.softReserveImport then table.insert(changes,{key="import:sr",value=Audit.ImportValue(attendance.softReserveImport)}) end
     local prepared,reason=PrepareLiveLoot(attendance,changes)
     if not prepared then return false,reason end

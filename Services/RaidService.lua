@@ -90,7 +90,10 @@ local function ArchiveLootMember(member)
     return { name=member.name, class=member.class, classFile=member.classFile,
         level=member.level, guildRank=member.guildRank, guildMember=member.guildMember,
         sr=member.sr, srItemIds=member.srItemIds, srSourceName=member.srSourceName,
+        srException=member.srException, srOptOut=member.srOptOut,
+        joinedAt=member.joinedAt, leftAt=member.leftAt,
         loot=member.loot, srConsumedAt=member.srConsumedAt,
+        entitlementAuditFailure=member.entitlementAuditFailure,
         reyCoinUsedAt=member.reyCoinUsedAt, reyCoinItemLink=member.reyCoinItemLink }
 end
 
@@ -349,7 +352,7 @@ function RaidService.GetSoftReserveIssues(attendance, rules)
             local rule = rules and rules[rank]
             local canReserve = (rule and rule.sr) or (not rule and defaultSoftReserveRanks[rank])
             local hasReserve = member.srItemIds and table.getn(member.srItemIds) > 0
-            if canReserve and not hasReserve and importInfo then
+            if canReserve and not hasReserve and not member.srOptOut and importInfo then
                 table.insert(issues.missingNames, member.name)
             elseif hasReserve and table.getn(RaidService.GetInvalidSoftReserveItemIds(member, rules)) > 0 then
                 table.insert(issues.invalidNames, member.name)
@@ -1186,12 +1189,6 @@ function RaidService.RefreshGuildRanks(attendance)
     return changed
 end
 
-local function HasRecordedLootState(member)
-    return member and ((member.loot and table.getn(member.loot) > 0)
-        or (tonumber(member.reyCoinUsedAt) or 0) > 0
-        or (member.srConsumedAt and next(member.srConsumedAt) ~= nil))
-end
-
 function RaidService.ResetRecordedLoot(attendance)
     if attendance then
         if Raider.Services.RaidAudit then
@@ -1207,16 +1204,12 @@ function RaidService.ResetRecordedLoot(attendance)
         end
         RaidService.ResetReyCoinUsage(attendance,true)
         attendance.syncLocalAuditFailure=nil
-        for memberIndex = table.getn(attendance.departedMembers or {}), 1, -1 do
-            if not HasRecordedLootState(attendance.departedMembers[memberIndex]) then table.remove(attendance.departedMembers, memberIndex) end
-        end
-        if attendance.departedMembers and table.getn(attendance.departedMembers) == 0 then attendance.departedMembers = nil end
     else RaidService.ResetReyCoinUsage(attendance) end
     RaidService.ResetLootSession()
     return true
 end
 
-function RaidService.CaptureRoster(requirePhysicalRoster)
+function RaidService.CaptureRoster(requirePhysicalRoster, freshSession)
     Raider.Diagnostics.Count("scans")
     Raider.Database.Ensure()
     if type(GetNumRaidMembers) ~= "function" or type(GetRaidRosterInfo) ~= "function" then
@@ -1228,17 +1221,19 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
     end
     local guildMembers, pendingGuild, authoritativeGuild = CurrentGuildMembers()
 
-    local previousLoot, previousReserves, previousReyCoin, previousReyCoinItems, previousSrConsumed, previousGuild = {}, {}, {}, {}, {}, {}
+    local previousLoot, previousReserves, previousReyCoin, previousReyCoinItems, previousSrConsumed, previousGuild, previousJoins = {}, {}, {}, {}, {}, {}, {}
     local currentRaidName = GetRealZoneText() or ""
     local previousAttendance = Raider.Database.GetRaidAttendance()
-    local activeSession = Raider.Services.RaidRes and Raider.Services.RaidRes.HasSession(previousAttendance)
-    -- Zone transitions can briefly expose an empty roster or a graveyard zone.
-    -- Preserve that session, but never report old members as a successful scan.
-    if total == 0 and (activeSession or requirePhysicalRoster) then
+    local activeSession = not freshSession and Raider.Services.RaidRes and Raider.Services.RaidRes.HasSession(previousAttendance)
+    -- Starting or explicitly refreshing a physical raid still needs a complete
+    -- nonempty roster. Live tracking may observe a stable disband without
+    -- deleting the session or any participant's history.
+    if total == 0 and requirePhysicalRoster then
         return nil, "The physical raid roster is not ready. Previous session data was retained."
     end
-    local preservePrevious = previousAttendance and previousAttendance.members
+    local preservePrevious = not freshSession and previousAttendance and previousAttendance.members
         and (activeSession or previousAttendance.raidName == currentRaidName)
+    local scanTimestamp = time()
     if preservePrevious then
         local previousIndex, collectionIndex
         for collectionIndex = 1, 2 do
@@ -1247,7 +1242,8 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
                 local previousMember = collection[previousIndex]
                 local key = string.lower(previousMember.name or "")
                 previousLoot[key] = previousMember.loot or {}
-                previousReserves[key] = { text = previousMember.sr or "", itemIds = previousMember.srItemIds, sourceName = previousMember.srSourceName, exception = previousMember.srException }
+                previousReserves[key] = { text = previousMember.sr or "", itemIds = previousMember.srItemIds, sourceName = previousMember.srSourceName, exception = previousMember.srException, optOut = previousMember.srOptOut, entitlementAuditFailure = previousMember.entitlementAuditFailure }
+                previousJoins[key] = previousMember.joinedAt or previousAttendance.sessionStartedAt or previousAttendance.scannedAt or scanTimestamp
                 previousReyCoin[key] = previousMember.reyCoinUsedAt
                 previousReyCoinItems[key] = previousMember.reyCoinItemLink
                 previousSrConsumed[key] = previousMember.srConsumedAt
@@ -1275,6 +1271,7 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         table.insert(members, {
             raidIndex = raidIndex,
             name = name,
+            joinedAt = previousJoins[string.lower(name)] or scanTimestamp,
             raidRank = tonumber(raidRank) or 0,
             subgroup = subgroup or 0,
             level = level or 0,
@@ -1291,6 +1288,8 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
             srItemIds = previousReserve and previousReserve.itemIds or nil,
             srSourceName = previousReserve and previousReserve.sourceName or nil,
             srException = previousReserve and previousReserve.exception or nil,
+            srOptOut = previousReserve and previousReserve.optOut or nil,
+            entitlementAuditFailure = previousReserve and previousReserve.entitlementAuditFailure or nil,
             srConsumedAt = previousSrConsumed[string.lower(name)],
             reyCoinUsedAt = previousReyCoin[string.lower(name)],
             reyCoinItemLink = previousReyCoinItems[string.lower(name)],
@@ -1303,8 +1302,8 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         return nil, "The physical raid roster changed during capture. Previous data was retained; retry the scan."
     end
 
-    -- A departing player leaves the physical roster, but their confirmed loot
-    -- remains part of this session. Rejoins move that same aggregate back above.
+    -- Every participant remains part of this session, including people without
+    -- loot or an SR. Rejoins move their existing history back to the live roster.
     local departedMembers
     if preservePrevious then
         local archivedNames, collectionIndex, previousIndex = {}, nil, nil
@@ -1313,16 +1312,18 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
             for previousIndex = 1, table.getn(collection or {}) do
                 local member = collection[previousIndex]
                 local key = string.lower(member.name or "")
-                if key ~= "" and not presentNames[key] and not archivedNames[key] and HasRecordedLootState(member) then
+                if key ~= "" and not presentNames[key] and not archivedNames[key] then
                     departedMembers = departedMembers or {}
-                    table.insert(departedMembers, collectionIndex == 1 and ArchiveLootMember(member) or member)
+                    local departed = ArchiveLootMember(member)
+                    departed.joinedAt = previousJoins[key]
+                    departed.leftAt = member.leftAt or math.max(scanTimestamp, departed.joinedAt)
+                    table.insert(departedMembers, departed)
                     archivedNames[key] = true
                 end
             end
         end
     end
 
-    local scanTimestamp = time()
     local attendance = {
         addonVersion = Raider.version,
         scannedAt = scanTimestamp,
@@ -1331,12 +1332,12 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         updatedBy = UnitName("player"),
         members = members,
         departedMembers = departedMembers,
-        snapshotId = previousAttendance and previousAttendance.snapshotId or nil,
+        snapshotId = preservePrevious and previousAttendance.snapshotId or nil,
         syncRaidId = preservePrevious and previousAttendance.syncRaidId or nil,
         _sessionDraft = preservePrevious and previousAttendance._sessionDraft or nil,
-        _loadedSnapshotId = previousAttendance and previousAttendance._loadedSnapshotId or nil,
-        sessionStartedAt = previousAttendance and previousAttendance.sessionStartedAt or nil,
-        lastSavedAt = previousAttendance and previousAttendance.lastSavedAt or nil,
+        _loadedSnapshotId = preservePrevious and previousAttendance._loadedSnapshotId or nil,
+        sessionStartedAt = preservePrevious and previousAttendance.sessionStartedAt or nil,
+        lastSavedAt = preservePrevious and previousAttendance.lastSavedAt or nil,
         softReserveImport = preservePrevious and previousAttendance.softReserveImport or nil,
         srCustomChanges = preservePrevious and previousAttendance.srCustomChanges or nil,
         lootRules = preservePrevious and previousAttendance.lootRules or nil,
@@ -1347,6 +1348,7 @@ function RaidService.CaptureRoster(requirePhysicalRoster)
         endedAt = preservePrevious and previousAttendance.endedAt or nil,
         displayName = preservePrevious and previousAttendance.displayName or nil,
         nextLootRecordId = preservePrevious and previousAttendance.nextLootRecordId or 0,
+        syncLocalAuditFailure = preservePrevious and previousAttendance.syncLocalAuditFailure or nil,
     }
     -- Publish provenance only after the entire capture succeeds. Departed
     -- copies retain knowledge without borrowing another snapshot's rank fields.

@@ -132,7 +132,7 @@ function Session:CapturePendingRaid(getPendingId, getPendingName)
     local count, attendance
     if solo then
         count, attendance = 0, {members = {}, scannedAt = dependencies.now(), updatedBy = UnitName("player")}
-    else count, attendance = dependencies.raid.CaptureRoster(true) end
+    else count, attendance = dependencies.raid.CaptureRoster(true, true) end
     if count == nil then return nil, attendance end
     if count <= 0 and not solo then return nil, "The physical raid roster is not ready. Retry or cancel the new session." end
     if attendance and getPendingId() then
@@ -221,6 +221,7 @@ end
 
 function Session:Complete(saveOptions)
     local dependencies = self.dependencies
+    local keepSession = false
     if dependencies.testRaid.IsActive() then
         dependencies.testRaid.Stop()
     else
@@ -294,9 +295,14 @@ function Session:Complete(saveOptions)
             if not removed then return false, reason or "The previous raid statistics could not be removed." end
         end
         self.preparedSave = nil
-        dependencies.database.StoreRaidAttendance(nil)
+        if request.endSession then dependencies.database.StoreRaidAttendance(nil)
+        else
+            staged._sessionDraft = true
+            dependencies.database.StoreRaidAttendance(staged)
+            keepSession = true
+        end
     end
-    return true
+    return true, nil, keepSession
 end
 
 function Session:LoadSnapshot(snapshotId)

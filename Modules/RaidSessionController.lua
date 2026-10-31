@@ -40,8 +40,12 @@ function RaidSessionController.Create(dependencies)
     end
 
     function controller:Complete(saveOptions)
-        local saved, failure = session:Complete(saveOptions)
+        local saved, failure, keepSession = session:Complete(saveOptions)
         if not saved then return false, failure end
+        if keepSession then
+            dependencies.showSavedPopup()
+            return true
+        end
         state.raidSessionDraft = false; state.raidSessionPaused = true; state.raidLiveTracking = false
         state.raidScanReady = false; state.raidSessionContinuedContext = nil
         state.raidSessionTransitionPending = false; state.raidSessionMismatchContext = nil

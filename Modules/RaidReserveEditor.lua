@@ -155,7 +155,10 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
     frame.exceptionLabel:SetPoint("LEFT", frame.exception, "RIGHT", 4, 0)
     frame.exceptionLabel:SetText("Allow to SR without loot rights")
     local function CurrentMember()
-        for _,member in ipairs(frame.attendance and frame.attendance.members or {}) do if member.name==frame.memberName then return member end end
+        for collectionIndex=1,2 do
+            local members=frame.attendance and (collectionIndex==1 and frame.attendance.members or frame.attendance.departedMembers)
+            for _,member in ipairs(members or {}) do if member.name==frame.memberName then return member end end
+        end
     end
     local function Save(confirmed)
         local audit=Raider.Services.RaidAudit
@@ -235,6 +238,7 @@ function Management.CreateReserveReview(page, getAttendance, refresh)
     frame.list=PagedList(frame,12,616,function(row,change)
         local detail
         if change.kind=="exception" then detail=change.allowed and "Allow SR exception" or "Remove SR exception"
+        elseif change.optOut then detail="No Soft Reserve"
         else
             local labels={}
             for _,id in ipairs(change.itemIds or {}) do table.insert(labels,ItemText(id)) end

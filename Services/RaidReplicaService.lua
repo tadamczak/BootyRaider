@@ -33,14 +33,19 @@ local function List(value,limit,validate)
     end
     return count==table.getn(value)
 end
-local memberFields={name="string",class="string",classFile="string",guildRank="string",guildMember="boolean",level="number",subgroup="number",raidRank="number",online="boolean",zone="string"}
+local memberFields={name="string",class="string",classFile="string",guildRank="string",guildMember="boolean",level="number",subgroup="number",raidRank="number",online="boolean",zone="string",joinedAt="number",leftAt="number"}
+local function MemberTimes(member)
+    return Optional(member.joinedAt,"number") and Optional(member.leftAt,"number")
+        and (not member.joinedAt or not member.leftAt or member.leftAt>=member.joinedAt)
+end
 local function CustomReserve(value)
     if value==nil then return true end
     if type(value)~="table" then return false end
     for kind,change in pairs(value) do
         if kind=="items" then
-            if type(change)~="table" or not List(change.itemIds,40,Item) or not Optional(change.sourceName,"string",128) then return false end
-            for field in pairs(change) do if field~="itemIds" and field~="sourceName" then return false end end
+            if type(change)~="table" or not List(change.itemIds,40,Item) or not Optional(change.sourceName,"string",128)
+                or not (change.optOut==nil or change.optOut==true) or change.optOut and (table.getn(change.itemIds)>0 or change.sourceName~=nil) then return false end
+            for field in pairs(change) do if field~="itemIds" and field~="sourceName" and field~="optOut" then return false end end
         elseif kind=="exception" then
             if not Fields(change,{allowed="boolean"}) or type(change.allowed)~="boolean" then return false end
         else return false end
@@ -50,9 +55,10 @@ end
 local function CustomReview(values)
     return List(values or {},400,function(change)
         if type(change)~="table" or not Text(change.name,96) or not Optional(change.sourceName,"string",128) then return false end
-        for key in pairs(change) do if key~="name" and key~="kind" and key~="sourceName" and key~="allowed" and key~="itemIds" then return false end end
-        if change.kind=="items" then return change.allowed==nil and List(change.itemIds,40,Item) end
-        return change.kind=="exception" and change.itemIds==nil and type(change.allowed)=="boolean"
+        for key in pairs(change) do if key~="name" and key~="kind" and key~="sourceName" and key~="allowed" and key~="itemIds" and key~="optOut" then return false end end
+        if change.kind=="items" then return change.allowed==nil and List(change.itemIds,40,Item) and (change.optOut==nil or change.optOut==true)
+            and (not change.optOut or table.getn(change.itemIds)==0 and change.sourceName==nil) end
+        return change.kind=="exception" and change.itemIds==nil and change.optOut==nil and type(change.allowed)=="boolean"
     end)
 end
 local function ImportExport(chunks)
@@ -79,7 +85,7 @@ local function ArchivedHistory(value,statistic)
     if type(value)~="table" or not Text(value.id) or not Text(value.syncRaidId,300) or not Text(value.raidName)
         or not Optional(value.savedAt,"number") or not Optional(value.startedAt,"number") or not Optional(value.endedAt,"number") then return false end
     local function Member(member)
-        if type(member)~="table" or not Text(member.name,96) then return false end
+        if type(member)~="table" or not Text(member.name,96) or not MemberTimes(member) then return false end
         if statistic then
             return List(member.srItems or {},40,function(item)return type(item)=="table" and Item(item.itemId or item.name) end)
                 and List(member.lootItems or {},512,ArchivedItem)
@@ -146,6 +152,7 @@ function Replica.ValidateOperation(operation)
                 for _,item in ipairs(value.items) do if not Item(item) then return false,"invalid-reserve-item" end end
                 if not List(value.items,40,Item) or string.sub(key,4)~=Lower(value.name) then return false,"invalid-reserve-identity" end
                 if not Optional(value.sourceName,"string",128) or not CustomReserve(value.custom) then return false,"invalid-reserve-custom-intent" end
+                if not (value.optOut==nil or value.optOut==true) or value.optOut and (table.getn(value.items)>0 or value.exception or value.sourceName~=nil) then return false,"invalid-reserve-opt-out" end
             elseif string.find(key,"^entitlement:") then
                 if type(value)~="table" or not Text(value.name,96) or string.sub(key,13)~=Lower(value.name)
                     or type(value.srConsumedAt)~="table" or not Optional(value.reyCoinUsedAt,"number")
@@ -162,11 +169,11 @@ function Replica.ValidateOperation(operation)
                 if not Optional(value.name,"string") or not Optional(value.link,"string",1024) or not Optional(value.ordinary,"boolean")
                     or not Optional(value.historyKey,"string",300) or not Optional(value.timestamp,"number") then return false,"invalid-allocation-context" end
             elseif string.find(key,"^member:") then
-                if not Fields(value,memberFields) or not Text(value.name,96) or string.sub(key,8)~=Lower(value.name) then return false,"invalid-member" end
+                if not Fields(value,memberFields) or not Text(value.name,96) or not MemberTimes(value) or string.sub(key,8)~=Lower(value.name) then return false,"invalid-member" end
             elseif string.find(key,"^saved:member:") then
                 if type(value)~="table" or not Text(value.name,96) or string.sub(key,14)~=Lower(value.name)
                     or not Optional(value.class,"string") or not Optional(value.guildRank,"string") or not Optional(value.lootRank,"string")
-                    or not Optional(value.attendance,"number",1000000) then return false,"invalid-saved-member" end
+                    or not Optional(value.attendance,"number",1000000) or not MemberTimes(value) then return false,"invalid-saved-member" end
                 if archiveKey and (not List(value.srItems or {},40,ArchivedItem) or not List(value.lootItems or {},512,ArchivedItem)) then return false,"invalid-archived-member-items" end
             elseif key=="raid:alias-decision" then
                 if type(value)~="table" or not List(value.members,128,function(id)return Text(id,300) end) or table.getn(value.members)<2
@@ -377,9 +384,9 @@ function Replica.Create(options)
         local latest=latestId and J.GetOperation(db,latestId)
         if latestId~=nil and operation.kind~="raid.observe" and LaterChange(operation,latest) then state.latestOperations[operation.raidId]=operation.id end
         if not localChange then state.receivedSinceLoad=true;state.receivedRaids=state.receivedRaids or {};state.receivedRaids[operation.raidId]=true end
-        if localChange and operation.kind=="raid.save" and operation.detail and operation.detail.saveAs then
-            -- Saving a copy closes the local workspace; it does not join that
-            -- separate session and must not prevent reopening either snapshot.
+        if localChange and operation.kind=="raid.save" and operation.detail and operation.detail.endSession then
+            -- Only End & Save closes the workspace. Save As keeps the local
+            -- participant attached to the newly saved copy.
             db.syncJoinedRaidId=nil
         elseif localChange and (operation.kind=="raid.start" or operation.kind=="raid.reopen" or operation.kind=="raid.save") then db.syncJoinedRaidId=operation.raidId end
         if not localChange and operation.kind~="raid.observe" then
@@ -543,11 +550,12 @@ function Replica.Create(options)
             local record=records[key];local value=not record.deleted and record.value
             if value and string.find(key,"^sr:") then
                 local member=Member(value.name);member.srItemIds=Copy(value.items or {});member.srException=value.exception and true or nil
+                member.srOptOut=value.optOut==true and true or nil
                 local labels={};for _,item in ipairs(member.srItemIds) do table.insert(labels,tostring(item)) end;member.sr=table.concat(labels,", ")
                 member.srSourceName=table.getn(member.srItemIds)>0 and (value.sourceName or member.name) or nil
                 for kind,change in pairs(value.custom or {}) do
                     attendance.srCustomChanges=attendance.srCustomChanges or {}
-                    attendance.srCustomChanges[kind..":"..Lower(member.name)]={name=member.name,kind=kind,itemIds=Copy(change.itemIds),sourceName=change.sourceName,allowed=change.allowed}
+                    attendance.srCustomChanges[kind..":"..Lower(member.name)]={name=member.name,kind=kind,itemIds=Copy(change.itemIds),sourceName=change.sourceName,allowed=change.allowed,optOut=change.optOut}
                 end
             elseif value and string.find(key,"^entitlement:") then
                 local member=Member(value.name)
@@ -564,12 +572,12 @@ function Replica.Create(options)
             end
         end
         table.sort(attendance.members,function(a,b)return Lower(a.name)<Lower(b.name) end)
-        local imported=Record(id,"import:sr") or {}
-        attendance.softReserveImport={id=imported.id or metadata.id,origin=imported.origin or "officer-sync",url=imported.url or "",
+        local imported=Record(id,"import:sr") or {id=metadata.id,origin="officer-sync"}
+        attendance.softReserveImport={id=imported.id,origin=imported.origin,url=imported.url or "",
             rollForExport=table.concat(imported.exportChunks or {}),customReview=Copy(imported.review),
             unmatchedReservations=Copy(imported.unmatched or {}),unmatchedNames={},missingNames={}}
         for _,reserve in ipairs(attendance.softReserveImport.unmatchedReservations) do table.insert(attendance.softReserveImport.unmatchedNames,reserve.name) end
-        for _,member in ipairs(attendance.members) do if table.getn(member.srItemIds)==0 then table.insert(attendance.softReserveImport.missingNames,member.name) end end
+        for _,member in ipairs(attendance.members) do if not member.leftAt and not member.srOptOut and table.getn(member.srItemIds)==0 then table.insert(attendance.softReserveImport.missingNames,member.name) end end
         local conflicts=Conflicts(id);attendance.syncConflictCount=table.getn(conflicts)
         attendance.syncDisputedMembers={}
         for _,conflict in ipairs(conflicts) do
@@ -586,6 +594,12 @@ function Replica.Create(options)
                 else attendance.syncDisputed=true end
             end
         end
+        local participants=attendance.members
+        attendance.members={}
+        for _,member in ipairs(participants) do
+            if member.leftAt then table.insert(attendance.departedMembers,member)
+            else table.insert(attendance.members,member) end
+        end
         local flags=Record(id,"saved:flags") or {}
         local statistic={id=metadata.id,syncRaidId=id,displayName=metadata.displayName,raidName=metadata.raidName,
             syncLifecycle=Record(id,"raid:lifecycle") or "active",syncSaved=Record(id,"saved:statistic")==true,
@@ -594,10 +608,10 @@ function Replica.Create(options)
             attendanceEnabled=flags.attendanceEnabled~=false,csrEnabled=flags.csrEnabled==true,
             statisticsEnabled=attendance.saveOptions.saveRaidStatistics~=false,csrArchived={},
             syncDisputed=attendance.syncDisputed,syncDisputedMembers=Copy(attendance.syncDisputedMembers)}
-        for _,member in ipairs(attendance.members) do
+        for _,member in ipairs(participants) do
             local saved,savedRecord=Record(id,"saved:member:"..Lower(member.name))
             local target={name=member.name,class=member.class or member.classFile or "",guildRank=member.guildRank,lootRank=member.guildRank,
-                attendance=1,srItems={},lootItems={},srCount=table.getn(member.srItemIds),lootCount=0}
+                attendance=1,joinedAt=member.joinedAt,leftAt=member.leftAt,srItems={},lootItems={},srCount=table.getn(member.srItemIds),lootCount=0}
             if saved then
                 target.class=saved.class or target.class;target.guildRank=saved.guildRank or target.guildRank
                 target.lootRank=saved.lootRank or target.guildRank;target.attendance=saved.attendance or 0
@@ -836,7 +850,7 @@ function Replica.Create(options)
         return {version=4,id=attendance.snapshotId,syncRaidId=attendance.syncRaidId,raidName=attendance.raidName,displayName=attendance.displayName,
             startedAt=attendance.sessionStartedAt,createdAt=attendance.createdAt,endedAt=attendance.endedAt,
             modifiedAt=attendance.modifiedAt,duration=attendance.duration,
-            savedAt=attendance.lastSavedAt,updatedAt=attendance.lastSavedAt,members=Copy(attendance.members),
+            savedAt=attendance.lastSavedAt,updatedAt=attendance.lastSavedAt,members=Copy(attendance.members),departedMembers=Copy(attendance.departedMembers),
             lootRules=Copy(attendance.lootRules),saveOptions=Copy(attendance.saveOptions),raidResId=attendance.softReserveImport.id or attendance.snapshotId,
             srUrl=attendance.softReserveImport.url,rollForExport=attendance.softReserveImport.rollForExport,
             srCustomChanges=Copy(attendance.srCustomChanges),srCustomReview=Copy(attendance.softReserveImport.customReview),
@@ -884,12 +898,14 @@ function Replica.Create(options)
                         end
                     end
                     local projectedMembers={}
-                    for _,member in ipairs(copied.members) do
+                    for collectionIndex=1,2 do
+                      local collection=collectionIndex==1 and copied.members or copied.departedMembers
+                      for _,member in ipairs(collection or {}) do
                         projectedMembers[Lower(member.name)]=member
                         local previous=localMembers[Lower(member.name)]
                         -- Physical roster positions belong to this client. The
                         -- journal's alphabetical projection is not a native index.
-                        if previous and previous.raidIndex then
+                        if not member.leftAt and previous and previous.raidIndex then
                             member.raidIndex=previous.raidIndex;member.dead=previous.dead
                             member.subgroup=previous.subgroup;member.online=previous.online
                             member.raidRank=previous.raidRank;member.zone=previous.zone;member.level=previous.level
@@ -905,6 +921,7 @@ function Replica.Create(options)
                             if failedLoot[loot.syncRecordId] then table.remove(member.loot,index)
                             elseif previousLoot then loot.icon=previousLoot.icon;loot.rollHistory=previousLoot.rollHistory end
                         end
+                      end
                     end
                     -- Confirmed physical receipts survive an unrelated remote
                     -- projection until Save successfully journals their facts.
@@ -913,7 +930,7 @@ function Replica.Create(options)
                         local member=projectedMembers[name]
                         if not member then
                             member=Copy(failure.member);member.loot={}
-                            table.insert(copied.members,member);projectedMembers[name]=member
+                            table.insert(member.leftAt and copied.departedMembers or copied.members,member);projectedMembers[name]=member
                         end
                         table.insert(member.loot,Copy(failure.loot))
                         copied.syncLocalAuditFailure=failure.loot.auditFailure

@@ -346,7 +346,7 @@ function Runtime.Initialize(host)
     Raider.active=true
     if Raider.Diagnostics.Wrap and not Runtime.diagnosticsWrapped then
         Raider.Services.Raid.SaveRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.SaveRoster,1)
-        Raider.Services.Raid.CaptureRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.CaptureRoster,1)
+        Raider.Services.Raid.CaptureRoster=Raider.Diagnostics.Wrap("Raid roster scan",Raider.Services.Raid.CaptureRoster,2)
         Raider.Services.Raid.RecordLoot=Raider.Diagnostics.Wrap("Loot message",Raider.Services.Raid.RecordLoot,3)
         Raider.Services.RaidStatistics.BuildSummary=Raider.Diagnostics.Wrap("Raid summary",Raider.Services.RaidStatistics.BuildSummary,2)
         Raider.Services.CSR.BuildSummary=Raider.Diagnostics.Wrap("CSR model",Raider.Services.CSR.BuildSummary,8)

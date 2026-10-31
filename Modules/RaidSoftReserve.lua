@@ -326,9 +326,9 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
     Raider.UI.Components.RegisterDialogSurface(dialog, "panel", { 0.018, 0.018, 0.016, 1 })
     dialog.title = Raider.UI.Components.CreateHeading(dialog, "", 1, "gold", "fix"); dialog.title:SetPoint("TOPLEFT", dialog, "TOPLEFT", 8, -16); dialog.title:SetText("Fix Soft Reserve assignments")
     Raider.UI.Components.Window.StyleProjectDialog(dialog)
-    dialog.help = Raider.UI.Components.CreateLabel(dialog, nil, "OVERLAY", "GameFontHighlightSmall"); dialog.help:SetPoint("TOPLEFT", dialog, "TOPLEFT", 8, -36); dialog.help:SetText("Drag an unassigned Soft Reserve from the right onto the correct raid member.")
+    dialog.help = Raider.UI.Components.CreateLabel(dialog, nil, "OVERLAY", "GameFontHighlightSmall"); dialog.help:SetPoint("TOPLEFT", dialog, "TOPLEFT", 8, -36); dialog.help:SetText("Select a choice, then click players, or drag it onto a player.")
     dialog.leftTitle = Raider.UI.Components.CreateLabel(dialog, nil, "OVERLAY", "GameFontNormal"); dialog.leftTitle:SetPoint("TOPLEFT", dialog, "TOPLEFT", 8, -72); dialog.leftTitle:SetText("Raid members without SR")
-    dialog.rightTitle = Raider.UI.Components.CreateLabel(dialog, nil, "OVERLAY", "GameFontNormal"); dialog.rightTitle:SetPoint("TOPLEFT", dialog, "TOPLEFT", 354, -72); dialog.rightTitle:SetText("Unassigned Soft Reserves")
+    dialog.rightTitle = Raider.UI.Components.CreateLabel(dialog, nil, "OVERLAY", "GameFontNormal"); dialog.rightTitle:SetPoint("TOPLEFT", dialog, "TOPLEFT", 354, -72); dialog.rightTitle:SetText("Available assignments")
     dialog.leftPanel = Raider.UI.Components.CreateContainer(nil, dialog); dialog.leftPanel:SetPoint("TOPLEFT", dialog, "TOPLEFT", 8, -92); dialog.leftPanel:SetWidth(338); dialog.leftPanel:SetHeight(278)
     dialog.rightPanel = Raider.UI.Components.CreateContainer(nil, dialog); dialog.rightPanel:SetPoint("TOPLEFT", dialog, "TOPLEFT", 354, -92); dialog.rightPanel:SetWidth(338); dialog.rightPanel:SetHeight(278)
     local panels = { dialog.leftPanel, dialog.rightPanel }
@@ -357,14 +357,17 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
     dialog.ghost = Raider.UI.Components.CreateContainer(nil, UIParent); dialog.ghost:SetWidth(260); dialog.ghost:SetHeight(22)
     dialog.ghost:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 8, edgeSize = 8, insets = { left = 2, right = 2, top = 2, bottom = 2 } }); dialog.ghost:SetBackdropColor(0.12, 0.09, 0.03, 0.98)
     dialog.ghost.text = Raider.UI.Components.CreateLabel(dialog.ghost, nil, "OVERLAY", "GameFontHighlightSmall"); dialog.ghost.text:SetPoint("LEFT", dialog.ghost, "LEFT", 8, 0); dialog.ghost:Hide()
-    dialog.ghost:SetScript("OnUpdate", function() local x, y = GetCursorPosition(); local scale = UIParent:GetEffectiveScale(); this:ClearAllPoints(); this:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale) end)
+    local function UpdateGhost() local x, y = GetCursorPosition(); local scale = UIParent:GetEffectiveScale(); this:ClearAllPoints(); this:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale) end
 
-    local function CloseDialog() dialog.ghost:Hide(); dialog:Hide(); dismiss:Hide() end
+    local function StopDrag() dialog.ghost:SetScript("OnUpdate",nil); dialog.ghost:Hide(); dialog.dragged=nil end
+    local function CloseDialog() StopDrag(); dialog.selectedReservation=nil; dialog:Hide(); dismiss:Hide() end
+    dialog:SetScript("OnHide",function() StopDrag();dialog.selectedReservation=nil;dismiss:Hide() end)
     dialog.Close = CloseDialog
+    local noReserveChoice={name="No Soft Reserve",noReserve=true}
     local function BuildAvailable()
         local used = {}; local _, reservationName
-        for _, reservationName in pairs(dialog.assignments) do used[string.lower(reservationName)] = true end
-        dialog.available = {}; local count = 0
+        for _, reservationName in pairs(dialog.assignments) do if type(reservationName)=="string" then used[string.lower(reservationName)] = true end end
+        dialog.available = {noReserveChoice}; local count = 1
         local reservations = dialog.importInfo and dialog.importInfo.unmatchedReservations or {}
         local index
         for index = 1, table.getn(reservations) do if not used[string.lower(reservations[index].name or "")] then count = count + 1; dialog.available[count] = reservations[index] end end
@@ -376,9 +379,18 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
         local index
         for index = 1, 12 do
             local memberName = dialog.missing[dialog.leftOffset + index]; local left = dialog.leftRows[index]; left.memberName = memberName
-            if memberName then local assigned = dialog.assignments[memberName]; left.label:SetText(RaidManagement.SoftReservePlayerLabel(memberName, dialog.attendance) .. (assigned and ("  <-  " .. RaidManagement.SoftReservePlayerLabel(assigned, dialog.attendance, dialog.reservationByName and dialog.reservationByName[string.lower(assigned)])) or "")); left:Show() else left:Hide() end
+            if memberName then
+                local assigned=dialog.assignments[memberName]
+                local label=assigned==false and "No Soft Reserve" or assigned and RaidManagement.SoftReservePlayerLabel(assigned,dialog.attendance,dialog.reservationByName and dialog.reservationByName[string.lower(assigned)])
+                left.label:SetText(RaidManagement.SoftReservePlayerLabel(memberName,dialog.attendance)..(label and ("  <-  "..label) or ""))
+                Raider.UI.Components.SetClassicButtonSelected(left,assigned~=nil);left:Show()
+            else left:Hide() end
             local reservation = dialog.available[dialog.rightOffset + index]; local right = dialog.rightRows[index]; right.reservation = reservation
-            if reservation then
+            Raider.UI.Components.SetClassicButtonSelected(right,reservation and reservation==dialog.selectedReservation)
+            if reservation and reservation.noReserve then
+                right.itemId=nil;right.labelPrefix=nil;right.itemHit.itemId=nil;right.itemHit.itemName=nil;right.itemHit:Hide()
+                right.label:SetText("No Soft Reserve");right:Show()
+            elseif reservation then
                 local reference = reservation.itemIds and reservation.itemIds[1] or nil
                 right.itemId = tonumber(reference)
                 right.labelPrefix = RaidManagement.SoftReservePlayerLabel(reservation.name, dialog.attendance, reservation) .. "  -  "
@@ -392,20 +404,33 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
                 right.itemHit.itemName = reference and Raider.Services.ItemReference.Name(reference)
                 right.itemHit:ClearAllPoints(); right.itemHit:SetPoint("LEFT", right, "LEFT", inset, 0)
                 right.itemHit:SetWidth(math.max(1,itemWidth)); right.itemHit:Show(); right:Show()
-            else right.itemId = nil; right.labelPrefix = nil; right:Hide() end
+            else right.itemId = nil; right.labelPrefix = nil; right.itemHit.itemId=nil;right.itemHit.itemName=nil;right.itemHit:Hide();right:Hide() end
         end
+    end
+    local function Assign(memberName,reservation)
+        if reservation.noReserve then dialog.assignments[memberName]=false
+        else dialog.assignments[memberName]=reservation.name;dialog.selectedReservation=nil end
     end
     dialog.leftPanel:SetScript("OnMouseWheel", function() dialog.leftOffset = (dialog.leftOffset or 0) - arg1; RefreshDialog() end)
     dialog.rightPanel:SetScript("OnMouseWheel", function() dialog.rightOffset = (dialog.rightOffset or 0) - arg1; RefreshDialog() end)
     for rowIndex = 1, 12 do
-        local left = dialog.leftRows[rowIndex]; left:SetScript("OnClick", function() if this.memberName and dialog.assignments[this.memberName] then dialog.assignments[this.memberName] = nil; RefreshDialog() end end)
+        local left = dialog.leftRows[rowIndex]; left:SetScript("OnClick", function()
+            if not this.memberName then return end
+            if dialog.selectedReservation then Assign(this.memberName,dialog.selectedReservation)
+            elseif dialog.assignments[this.memberName]~=nil then dialog.assignments[this.memberName]=nil end
+            RefreshDialog()
+        end)
         local right = dialog.rightRows[rowIndex]
         right:SetScript("OnEnter", nil); right:SetScript("OnLeave", HideItemTooltip)
-        right:SetScript("OnDragStart", function() if this.reservation then dialog.dragged = this.reservation; dialog.ghost.text:SetText(this.label:GetText() or this.reservation.name); dialog.ghost:Show() end end)
+        right:SetScript("OnClick",function()
+            if dialog.selectedReservation==this.reservation then dialog.selectedReservation=nil else dialog.selectedReservation=this.reservation end
+            RefreshDialog()
+        end)
+        right:SetScript("OnDragStart", function() if this.reservation then dialog.dragged = this.reservation; dialog.ghost.text:SetText(this.label:GetText() or this.reservation.name); dialog.ghost:SetScript("OnUpdate",UpdateGhost);dialog.ghost:Show() end end)
         right:SetScript("OnDragStop", function()
-            dialog.ghost:Hide(); if not dialog.dragged then return end
+            dialog.ghost:SetScript("OnUpdate",nil);dialog.ghost:Hide(); if not dialog.dragged then return end
             local targetIndex
-            for targetIndex = 1, 12 do local target = dialog.leftRows[targetIndex]; if target.memberName and IsCursorOverFrame(target) then dialog.assignments[target.memberName] = dialog.dragged.name; break end end
+            for targetIndex = 1, 12 do local target = dialog.leftRows[targetIndex]; if target.memberName and IsCursorOverFrame(target) then Assign(target.memberName,dialog.dragged); break end end
             dialog.dragged = nil; RefreshDialog()
         end)
     end
@@ -418,7 +443,31 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
     end
     dismiss:SetScript("OnClick", CloseDialog); dialog.close:SetScript("OnClick", CloseDialog)
     dialog.save:SetScript("OnClick", function()
-        local ok,reason=applyAssignments(dialog.attendance, dialog.assignments)
+        local attendance=dialog.attendance
+        if page.getSoftReserveData then attendance=page.getSoftReserveData() end
+        if not attendance or attendance~=dialog.attendance and (not dialog.raidId or attendance.syncRaidId~=dialog.raidId) then
+            dialog.message:SetText("The raid session changed. Reopen Fix SR.");return
+        end
+        local audit=Raider.Services.RaidAudit
+        if dialog.editBase then
+            local baseline={raidId=dialog.editBase.raidId,heads={},keys={"import:sr","raid:lifecycle"}}
+            for name in pairs(dialog.assignments) do table.insert(baseline.keys,"sr:"..string.lower(name)) end
+            for _,key in ipairs(baseline.keys) do baseline.heads[key]=dialog.editBase.heads[key] end
+            if not audit.CheckEditBase(baseline) then dialog.message:SetText("SR data changed. Your choices are kept. Reopen Fix SR.");return end
+            local journal,db=Raider.Services.RaidJournal,Raider.Database.Ensure()
+            local imported=journal.GetRecord(db,dialog.raidId,"import:sr")
+            local ready=not imported or not imported.deleted and journal.Equal(imported.value,audit.ImportValue(attendance.softReserveImport))
+            for name in pairs(dialog.assignments) do
+                local record=journal.GetRecord(db,dialog.raidId,"sr:"..string.lower(name))
+                local member
+                for _,candidate in ipairs(attendance.members or {}) do if string.lower(candidate.name)==string.lower(name) then member=candidate;break end end
+                if not member then dialog.message:SetText("This player is no longer in the raid. Reopen Fix SR.");return end
+                if table.getn(member.srItemIds or {})>0 then dialog.message:SetText("This player already has an SR. Reopen Fix SR.");return end
+                if record and (record.deleted or not journal.Equal(record.value,audit.SRValue(member,attendance))) then ready=false end
+            end
+            if not ready then dialog.message:SetText("New SR updates are loading. Try Save again.");return end
+        end
+        local ok,reason=applyAssignments(attendance, dialog.assignments)
         if not ok then dialog.message:SetText(reason or "SR assignments could not be saved.");return end
         CloseDialog();refresh()
     end)
@@ -426,7 +475,12 @@ function RaidManagement.CreateSoftReserveFixDialog(page, applyAssignments, refre
         self.message:SetText("")
         local importInfo = attendance and attendance.softReserveImport
         if not importInfo or not importInfo.missingNames or not importInfo.unmatchedReservations then return end
-        self.attendance = attendance; self.importInfo = importInfo; self.missing = importInfo.missingNames; self.assignments = {}; self.leftOffset = 0; self.rightOffset = 0
+        self.attendance = attendance; self.importInfo = importInfo; self.missing = importInfo.missingNames; self.assignments = {}; self.selectedReservation=nil;self.dragged=nil;self.leftOffset = 0; self.rightOffset = 0
+        self.raidId=attendance.syncRaidId
+        local keys={"import:sr","raid:lifecycle"}
+        for _,name in ipairs(self.missing) do table.insert(keys,"sr:"..string.lower(name)) end
+        local audit=Raider.Services.RaidAudit
+        self.editBase=audit and audit.CaptureEditBase and audit.CaptureEditBase(attendance,keys)
         self.reservationByName = {}
         for _, reservation in ipairs(importInfo.unmatchedReservations) do self.reservationByName[string.lower(reservation.name or "")] = reservation end
         CenterOnScreen(self); RefreshDialog(); dismiss:Show(); self:Show()

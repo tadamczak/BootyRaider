@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.31 — 2026-10-31
+
+- Keep Save Raid in the active session. Retain departed participants, join/leave times and their statistics/CSR through tracking, saving and synchronization.
+- Add an explicit No Soft Reserve choice for one or more players. Show readable Raid Log before/after details with item links and aligned columns.
+
 ## 1.0.0-dev.30 — 2026-10-31
 
 - Keep custom SR review usable after session data refreshes, while guarding newer imports and selected-player edits. Ordinary SR saves no longer record an unchanged exception as a removal.

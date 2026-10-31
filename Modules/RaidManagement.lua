@@ -651,6 +651,7 @@ end
 
 local function OnGroupClick()
     local row = this.ownerRow
+    if row and row.displayedMember and row.displayedMember.leftAt then return end
     if row and row.controller and row.controller.onGroup then row.controller.onGroup(row) end
 end
 
@@ -686,6 +687,7 @@ end
 local function OnRaidRowClick()
     if not this.displayedMember or not this.controller then return end
     if arg1 == "RightButton" then
+        if this.displayedMember.leftAt then return end
         if this.controller.onContext then this.controller.onContext(this) end
     elseif this.controller.onSelect then
         this.controller.onSelect(this)
@@ -787,6 +789,18 @@ function RaidManagement.CreateListRow(parent, index, controller)
         row.actionButtons[actionIndex] = actionButton
     end
     row.lootTitle = Raider.UI.Components.CreateLabel(row.lootPanel, nil, "OVERLAY", "GameFontDisableSmall")
+    row.presence = {}
+    for index, caption in ipairs({"Joined raid:", "Left raid:"}) do
+        local field = {}
+        field.label = Raider.UI.Components.CreateLabel(row.lootPanel, nil, "OVERLAY", "GameFontHighlightSmall")
+        field.label:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 10, -8 - (index-1)*20)
+        field.label:SetText(caption)
+        local gold = Raider.UI.Components.Theme.colors.goldText
+        field.label:SetTextColor(gold[1], gold[2], gold[3])
+        field.value = Raider.UI.Components.CreateLabel(row.lootPanel, nil, "OVERLAY", "GameFontHighlightSmall")
+        field.value:SetPoint("LEFT", field.label, "RIGHT", 8, 0);field.value:SetTextColor(1,1,1)
+        row.presence[index] = field
+    end
     row.lootTitle:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 10, -33); row.lootTitle:SetText("Loot received")
     row.lootEmpty = Raider.UI.Components.CreateLabel(row.lootPanel, nil, "OVERLAY", "GameFontDisableSmall")
     row.lootEmpty:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 10, -55); row.lootEmpty:SetText("No recorded items.")
@@ -1685,7 +1699,17 @@ function RaidManagement.SetListRenderer(page, dependencies)
 end
 
 function RaidManagement.PrepareListMembers(page, target, data, query, selectedClasses, selectedRanks, selectedName)
-    local members = data and data.members or {}
+    local members = page.participantRows or {};page.participantRows = members
+    local names = page.participantNames or {};page.participantNames = names
+    for key in pairs(members) do members[key] = nil end
+    for key in pairs(names) do names[key] = nil end
+    for collectionIndex = 1, 2 do
+        local source = data and (collectionIndex == 1 and data.members or data.departedMembers)
+        for _, member in ipairs(source or {}) do
+            local key = string.lower(member.name or "")
+            if not names[key] then table.insert(members, member);names[key] = true end
+        end
+    end
     if page.filterData ~= data then
         page.filterController:Build(members)
         page.filterData = data
@@ -1705,7 +1729,7 @@ end
 
 function RaidManagement.LootMasterExpandedHeight(availableHeight, memberCount)
     local neighborHeight = math.min(2, math.max(0, memberCount - 1)) * 21
-    return math.min(131, math.max(80, availableHeight - neighborHeight))
+    return math.min(171, math.max(122, availableHeight - neighborHeight))
 end
 
 function RaidManagement.RefreshListView(page, rows, members, selectedName, sortKey, lootMasterMode, settings, issues)
@@ -1735,7 +1759,10 @@ function RaidManagement.RefreshListView(page, rows, members, selectedName, sortK
         if lootMasterMode then
             expandedHeight = RaidManagement.LootMasterExpandedHeight(rowAreaHeight, table.getn(members))
             visibleRowCount = math.max(1, math.min(table.getn(rows), 1 + math.floor((rowAreaHeight - expandedHeight) / rowStep)))
-        else visibleRowCount = math.max(1, availableRows - 7) end
+        else
+            expandedHeight = math.min(195, math.max(122, rowAreaHeight))
+            visibleRowCount = math.max(1, math.min(table.getn(rows), 1 + math.floor((rowAreaHeight - expandedHeight) / rowStep)))
+        end
     end
     if not lootMasterMode or page.bootyLastLootSelection ~= selectedName then
         RaidManagement.KeepSelectionVisible(scrollFrame, members, selectedName, visibleRowCount, rowStep)
@@ -2190,19 +2217,25 @@ function RaidManagement.LayoutLootPanel(row, lootMasterMode, tableWidth, expande
     row:SetWidth(tableWidth)
     row:SetHeight(lootMasterMode and 20 or (tonumber(BootyRaiderDB.raidListRowHeight) or 20))
     row.lootPanel:SetWidth(tableWidth - 8)
-    row.lootPanel:SetHeight(expandedHeight and math.max(55, expandedHeight - 25) or (lootMasterMode and 106 or 130))
-    row.visibleLootRows = math.max(1, math.min(table.getn(row.lootRows), math.floor((row.lootPanel:GetHeight() - 27) / 24)))
+    row.lootPanel:SetHeight(expandedHeight and math.max(97, expandedHeight - 25) or (lootMasterMode and 146 or 170))
+    row.visibleLootRows = math.max(1, math.min(table.getn(row.lootRows), math.floor((row.lootPanel:GetHeight() - 73) / 24)))
     row.actions:Hide()
     row.lootTitle:ClearAllPoints()
-    row.lootTitle:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 10, -8)
+    row.lootTitle:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 10, -48)
     row.lootEmpty:ClearAllPoints()
-    row.lootEmpty:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 10, lootMasterMode and -34 or -30)
+    row.lootEmpty:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 10, -70)
+    row.lootScroll:ClearAllPoints();row.lootScroll:SetPoint("TOPLEFT",row.lootPanel,"TOPLEFT",8,-65)
+    row.lootScroll:SetPoint("BOTTOMRIGHT",row.lootPanel,"BOTTOMRIGHT",-30,8)
+    if row.lootScrollBar then
+        row.lootScrollBar:ClearAllPoints();row.lootScrollBar:SetPoint("TOPRIGHT",row.lootPanel,"TOPRIGHT",-7,-66)
+        row.lootScrollBar:SetPoint("BOTTOMRIGHT",row.lootPanel,"BOTTOMRIGHT",-7,20)
+    end
     local lootIndex
     for lootIndex = 1, table.getn(row.lootRows) do
         row.lootRows[lootIndex].name:SetWidth(lootMasterMode and math.max(1, tableWidth - 80) or 455)
         row.lootRows[lootIndex].hit:ClearAllPoints()
-        row.lootRows[lootIndex].hit:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 8, -(lootMasterMode and 27 or 25) - ((lootIndex - 1) * 24))
-        row.lootRows[lootIndex].hit:SetPoint("TOPRIGHT", row.lootPanel, "TOPRIGHT", -25, -(lootMasterMode and 27 or 25) - ((lootIndex - 1) * 24))
+        row.lootRows[lootIndex].hit:SetPoint("TOPLEFT", row.lootPanel, "TOPLEFT", 8, -65 - ((lootIndex - 1) * 24))
+        row.lootRows[lootIndex].hit:SetPoint("TOPRIGHT", row.lootPanel, "TOPRIGHT", -25, -65 - ((lootIndex - 1) * 24))
     end
 end
 
@@ -2229,14 +2262,14 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
     end
     row.name:SetText(shorten(member.name, 22))
     local memberRank = page.currentRaidRoles and (page.currentRaidRoles[string.lower(member.name or "")] or 0) or tonumber(member.raidRank) or 0
-    local showRole = not lootMasterMode and BootyRaiderDB.raidListShowRoleIcon and memberRank > 0
+    local showRole = not member.leftAt and not lootMasterMode and BootyRaiderDB.raidListShowRoleIcon and memberRank > 0
     if showRole then
         row.crown:SetTexture(memberRank == 2 and "Interface\\GroupFrame\\UI-Group-LeaderIcon" or "Interface\\GroupFrame\\UI-Group-AssistantIcon")
         row.crown:SetAlpha(1); row.crown:Show()
     else
         row.crown:Hide()
     end
-    local showLootMaster = not lootMasterMode and BootyRaiderDB.raidListShowLootMaster and lootMethod == "master" and tonumber(raidLootMasterIndex) == tonumber(member.raidIndex)
+    local showLootMaster = not member.leftAt and not lootMasterMode and BootyRaiderDB.raidListShowLootMaster and lootMethod == "master" and tonumber(raidLootMasterIndex) == tonumber(member.raidIndex)
     local _, fontSize = row.name:GetFont()
     local leftPadding = math.max(2, (row:GetHeight() - (fontSize or 12)) / 2)
     row.crown:ClearAllPoints(); row.crown:SetPoint("LEFT", row, "LEFT", leftPadding, 0)
@@ -2248,13 +2281,13 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
     row.name:SetWidth(math.max(1, (lootMasterMode and (page.bootyLootColumns and page.bootyLootColumns.nameWidth or 90) or page.listWidths[1]) - nameInset))
     row.group:SetText(tostring(member.subgroup or ""))
     row.level:SetText(tostring(member.level or ""))
-    row.status:SetText(member.online and "Online" or "Offline")
+    row.status:SetText(member.leftAt and "Left raid" or member.online and "Online" or "Offline")
     row.class:SetText(shorten(member.class, 12))
     row.rank:SetText(shorten(Raider.Services.RankPolicy.GetDisplayName(member.guildRank ~= "" and member.guildRank or "Guest"), 18))
     local itemId = member.srItemIds and member.srItemIds[1]
     local numericId = tonumber(itemId)
     row.srHit.labelPrefix = member.srException and "* " or ""
-    row.sr:SetText(itemId and (row.srHit.labelPrefix .. (numericId and Raider.UI.Components.GetItemLabel(numericId) or itemId)) or "")
+    row.sr:SetText(itemId and (row.srHit.labelPrefix .. (numericId and Raider.UI.Components.GetItemLabel(numericId) or itemId)) or member.srOptOut and "No Soft Reserve" or "")
     row.srHit.itemId, row.srHit.itemName = numericId, itemId and Raider.Services.ItemReference.Name(itemId)
     local srTexture = numericId and type(GetItemIcon) == "function" and GetItemIcon(numericId) or nil
     if not srTexture and numericId then local _, _, _, _, _, _, _, _, _, cachedTexture = GetItemInfo(numericId); srTexture = cachedTexture end
@@ -2300,13 +2333,15 @@ function RaidManagement.BindListMember(page, row, member, lootMethod, raidLootMa
 end
 
 function RaidManagement.ExpandListRow(row, member, lootMasterMode, requestedHeight)
-    local expandedHeight = requestedHeight or (lootMasterMode and 131 or 155)
+    local expandedHeight = requestedHeight or (lootMasterMode and 171 or 195)
     row:SetHeight(expandedHeight)
     local pressedColor = BootyRaiderDB.raidListPressedColor
     Raider.UI.Components.SetRowColor(row, pressedColor, 0.98)
     row:SetBackdropBorderColor(0.7, 0.55, 0.15, 0.9)
     Raider.UI.Components.SetClassicRowShade(row, false, false, true)
     row.lootPanel:Show()
+    row.presence[1].value:SetText(member.joinedAt and date("%Y-%m-%d %H:%M:%S",member.joinedAt) or "Not recorded")
+    row.presence[2].value:SetText(member.leftAt and date("%Y-%m-%d %H:%M:%S",member.leftAt) or "Still in raid")
     local loot = member.loot or {}
     table.sort(loot, SortLootByName)
     local visibleLootRows = row.visibleLootRows or table.getn(row.lootRows)

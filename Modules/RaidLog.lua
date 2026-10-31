@@ -60,18 +60,70 @@ local function Gold(text)
     local color=UI.Theme.colors.goldText
     return string.format("|cff%02x%02x%02x",math.floor(color[1]*255),math.floor(color[2]*255),math.floor(color[3]*255))..text.."|r"
 end
-local fieldNames={id="Raid ID",raidName="Raid type",name="Player",items="Soft Reserve",exception="Loot rights exception",recipient="Recipient",item="Item",count="Quantity",raidRank="Raid role",subgroup="Group",level="Level",online="Online",guildRank="Guild rank",savedAt="Saved at",endedAt="Ended at",startedAt="Started at",saveCSR="CSR",saveRaidStatistics="Raid statistics"}
+local fieldNames={id="Raid ID",raidName="Raid type",name="Player",items="Soft Reserve",srItems="Soft Reserve",lootItems="Loot",exception="Loot rights exception",recipient="Recipient",item="Item",itemId="Item",count="Quantity",raidRank="Raid role",subgroup="Group",level="Level",online="Online",guildRank="Guild rank",class="Class",classFile="Class",attendance="Attendance",savedAt="Saved at",endedAt="Ended at",startedAt="Started at",joinedAt="Joined raid",leftAt="Left raid",timestamp="Received at",saveCSR="CSR",saveRaidStatistics="Raid statistics"}
 local function Value(value,key)
     if value==nil then return "None" end
     if key=="item" or key=="itemId" then return Item(value) end
     if key=="items" and type(value)=="table" then local names={};for _,item in ipairs(value) do table.insert(names,Item(item)) end;return table.getn(names)>0 and table.concat(names,", ") or "None" end
     if type(value)=="boolean" then return value and "Yes" or "No" end
     if type(value)=="table" then return "Nested values" end
-    if key=="savedAt" or key=="endedAt" or key=="startedAt" then return Timestamp(value) end
+    if key=="savedAt" or key=="endedAt" or key=="startedAt" or key=="joinedAt" or key=="leftAt" or key=="timestamp" then return Timestamp(value) end
     return tostring(value)
 end
-local function Field(value,key)
-    if type(value)=="table" then return value[key] end
+
+local function Field(value,key) if type(value)=="table" then return value[key] end end
+local function White(text) return "|cffffffff"..tostring(text or "None").."|r" end
+local function Same(a,b) return Raider.Services.RaidJournal and Raider.Services.RaidJournal.Equal(a,b) or a==b end
+local function DetailsFields(change)
+    local fields={}
+    if not change then return fields end
+    local key=change.key or "";local archived=string.sub(key,1,8)=="archive:"
+    if archived then key=string.sub(key,9) end
+    local before,after=change.before,change.value
+    if change.beforeDeleted then before=nil end;if change.deleted then after=nil end
+    if archived and string.find(key,"^saved:") then if before==false then before=nil end;if after==false then after=nil end end
+    local function Add(label,old,new,field,rightLabel)
+        if table.getn(fields)>=24 then fields.omitted=true;return end
+        table.insert(fields,{leftLabel=label,rightLabel=rightLabel or label,before=old,after=new,field=field})
+    end
+    if string.find(key,"^sr:") then
+        local name=Field(after,"name") or Field(before,"name") or string.sub(key,4)
+        Add("Player",Field(before,"name") or name,Field(after,"name") or name,"name")
+        Add("Previous SR",Field(before,"optOut") and "No Soft Reserve" or Field(before,"items") or Field(before,"item"),Field(after,"optOut") and "No Soft Reserve" or Field(after,"items") or Field(after,"item"),"items","New SR")
+        if not Same(Field(before,"exception"),Field(after,"exception")) then Add("Loot rights exception",Field(before,"exception"),Field(after,"exception"),"exception") end
+        return fields
+    end
+    if string.find(key,"^loot:") then
+        Add("Recipient",Field(before,"recipient"),Field(after,"recipient"),"recipient")
+        Add("Item",Field(before,"item"),Field(after,"item"),"item")
+        Add("Quantity",Field(before,"count"),Field(after,"count"),"count")
+        if Field(before,"timestamp") or Field(after,"timestamp") then Add("Received at",Field(before,"timestamp"),Field(after,"timestamp"),"timestamp") end
+        return fields
+    end
+    local named=string.find(key,"^member:") or string.find(key,"^saved:member:")
+    if named then Add("Player",Field(before,"name") or Field(after,"name"),Field(after,"name") or Field(before,"name"),"name") end
+    local function Walk(old,new,path,field,depth)
+        if Same(old,new) then return end
+        if field=="items" or field=="srItems" or field=="lootItems" or field=="item" or field=="itemId" then Add(path,old,new,field);return end
+        if (type(old)=="table" or type(new)=="table") and depth<4 then
+            local keys={};for k in pairs(type(old)=="table" and old or {}) do keys[k]=true end;for k in pairs(type(new)=="table" and new or {}) do keys[k]=true end
+            local sorted={};for k in pairs(keys) do table.insert(sorted,k) end;table.sort(sorted,function(a,b)return tostring(a)<tostring(b) end)
+            for _,k in ipairs(sorted) do
+                if k~="custom" and k~="sourceName" and k~="syncRecordId" and k~="historyKey" and not (named and k=="name") then
+                    local label=fieldNames[k] or tostring(k)
+                    Walk(Field(old,k),Field(new,k),path=="" and label or path.." / "..label,k,depth+1)
+                end
+            end
+        else Add(path~="" and path or (key=="raid:lifecycle" and "Session status" or "Value"),old,new,field) end
+    end
+    Walk(before,after,"",nil,0)
+    return fields
+end
+
+local function ItemValues(value,field)
+    if value==nil or value==false then return {} end
+    if field=="item" or field=="itemId" or type(value)~="table" then return {value} end
+    return value
 end
 function Log.FormatChange(change)
     local key=change.key or "";local before=change.before;local after=change.value
@@ -192,6 +244,87 @@ function Log.Create(parent)
     controller.count:SetPoint("LEFT",controller.next,"RIGHT",8,0)
 
     local detail
+    local function ItemControl(parent)
+        local control=UI.CreateControl(nil,parent)
+        control.label=Label(control,"",0,0,100)
+        control.label:SetTextColor(1,1,1)
+        if control.label.SetWordWrap then control.label:SetWordWrap(true) end
+        if control.label.SetNonSpaceWrap then control.label:SetNonSpaceWrap(true) end
+        control:SetScript("OnEnter",function()
+            UI.ShowItemTooltip(this)
+            if detail and detail:IsShown() then detail:LayoutContent(detail:GetWidth(),detail:GetHeight()) end
+        end)
+        control:SetScript("OnLeave",function() if GameTooltip then GameTooltip:Hide() end end)
+        control:SetScript("OnClick",function() UI.HandleItemClick(this) end)
+        return control
+    end
+    local function Cell(parent)
+        local cell=UI.CreateContainer(nil,parent);cell.links={}
+        cell.caption=Label(cell,"",0,0,100);cell.caption:SetTextColor(unpack(UI.Theme.colors.goldText))
+        cell.text=Label(cell,"",0,-18,100);cell.text:SetTextColor(1,1,1)
+        if cell.text.SetWordWrap then cell.text:SetWordWrap(true) end
+        if cell.text.SetNonSpaceWrap then cell.text:SetNonSpaceWrap(true) end
+        return cell
+    end
+    local function LayoutCell(cell,value,field,label,width)
+        cell:SetWidth(width);cell.caption:SetText(label..":");cell.caption:SetWidth(0);cell.caption:SetHeight(0)
+        local captionWidth=math.min(cell.caption:GetStringWidth(),width*0.6)
+        cell.caption:SetWidth(captionWidth)
+        local captionHeight=UI.MeasureTextHeight(cell.caption,captionWidth,true);cell.caption:SetHeight(captionHeight)
+        local valueX=captionWidth+8;local valueWidth=math.max(1,width-valueX)
+        local y=0;local items=field=="items" or field=="srItems" or field=="lootItems" or field=="item" or field=="itemId"
+        local values=items and ItemValues(value,field) or nil
+        local count=values and table.getn(values) or 0
+        if count>0 then
+            cell.text:Hide()
+            for index=1,math.min(count,40) do
+                local control=cell.links[index]
+                if not control then control=ItemControl(cell);cell.links[index]=control end
+                local item=values[index];local reference=type(item)=="table" and (item.itemId or item.name or item.item) or item
+                control.itemId=tonumber(reference);control.itemName=type(item)=="table" and item.name or (type(reference)=="string" and reference or nil)
+                local quantity=type(item)=="table" and tonumber(item.count) or 1
+                control.labelSuffix=quantity and quantity>1 and (" x "..quantity) or ""
+                control.label:SetText((control.itemId and UI.GetItemLabel(control.itemId) or tostring(reference or "None"))..control.labelSuffix)
+                control:ClearAllPoints();control:SetPoint("TOPLEFT",cell,"TOPLEFT",valueX,-y);control:SetWidth(valueWidth)
+                control.label:SetWidth(valueWidth);control.label:SetHeight(0)
+                local height=math.max(18,UI.MeasureTextHeight(control.label,valueWidth,true));control.label:SetHeight(height);control:SetHeight(height)
+                control:EnableMouse(control.itemId~=nil);control:Show();y=y+height+2
+            end
+            if count>40 then cell.text:SetText(White((count-40).." additional items."));cell.text:Show() end
+        else cell.text:SetText(White(items and "None" or Value(value,field)));cell.text:Show() end
+        if cell.text:IsShown() then
+            cell.text:ClearAllPoints();cell.text:SetPoint("TOPLEFT",cell,"TOPLEFT",valueX,-y);cell.text:SetWidth(valueWidth);cell.text:SetHeight(0)
+            local height=UI.MeasureTextHeight(cell.text,valueWidth,true);cell.text:SetHeight(height);y=y+height
+        end
+        for index=math.min(count,40)+1,table.getn(cell.links) do cell.links[index].itemId=nil;cell.links[index]:Hide() end
+        y=math.max(y,captionHeight);cell:SetHeight(y);cell:Show();return y
+    end
+    local function LayoutDetails(width,height)
+        if not detail or not detail.entry then return end
+        detail.summary:SetWidth(width-20);detail.summary:SetHeight(0)
+        local summaryHeight=UI.MeasureTextHeight(detail.summary,width-20,true);detail.summary:SetHeight(summaryHeight)
+        local top=36+summaryHeight+8;local bodyHeight=math.max(1,height-top-40)
+        detail.body:ClearAllPoints();detail.body:SetPoint("TOPLEFT",detail,"TOPLEFT",10,-top);detail.body:SetWidth(width-20);detail.body:SetHeight(bodyHeight)
+        UI.LayoutResponsiveCanvas(detail.canvas,function(available)
+            local gap=16;local column=math.max(1,(available-gap)/2)
+            detail.before:SetWidth(column);detail.after:ClearAllPoints();detail.after:SetPoint("TOPLEFT",detail.canvas,"TOPLEFT",column+gap,0);detail.after:SetWidth(column)
+            local y=24
+            for index,field in ipairs(detail.fields or {}) do
+                local row=detail.fieldRows[index]
+                if not row then row={left=Cell(detail.canvas),right=Cell(detail.canvas)};detail.fieldRows[index]=row end
+                row.left:ClearAllPoints();row.left:SetPoint("TOPLEFT",detail.canvas,"TOPLEFT",0,-y)
+                row.right:ClearAllPoints();row.right:SetPoint("TOPLEFT",detail.canvas,"TOPLEFT",column+gap,-y)
+                local left=LayoutCell(row.left,field.before,field.field,field.leftLabel,column)
+                local right=LayoutCell(row.right,field.after,field.field,field.rightLabel,column)
+                y=y+math.max(left,right)+8
+            end
+            for index=table.getn(detail.fields or {})+1,table.getn(detail.fieldRows) do detail.fieldRows[index].left:Hide();detail.fieldRows[index].right:Hide() end
+            detail.empty:ClearAllPoints();detail.empty:SetPoint("TOPLEFT",detail.canvas,"TOPLEFT",0,-y);detail.empty:SetWidth(available)
+            if table.getn(detail.fields or {})==0 then detail.empty:SetText("No record details.");detail.empty:Show();y=y+20
+            elseif detail.fields.omitted then detail.empty:SetText("Further changed fields omitted from this summary.");detail.empty:Show();y=y+28 else detail.empty:Hide() end
+            return y
+        end,nil,width-20,bodyHeight)
+    end
     local function ShowChange()
         if not detail or not detail.entry then return end
         local changes=detail.entry.changes
@@ -201,50 +334,41 @@ function Log.Create(parent)
         if changes then change=changes[detail.index]
         else change,total=Raider.Services.RaidAudit.GetChange(detail.entry.id,detail.index) end
         if change and change.operationStatus then detail.entry.status=change.operationStatus end
-        detail.summary:SetText(Gold(Log.FormatAction(detail.entry)).."\n"..tostring(detail.entry.author or "Unknown").."  •  "..Gold(Timestamp(detail.entry.timestamp)))
-        detail.text:SetText(change and Log.FormatChange(change) or "No record details.")
+        local action=string.gsub(string.gsub(Log.FormatAction(detail.entry),"|c%x%x%x%x%x%x%x%x",""),"|r","")
+        detail.summary:SetText(Gold("Who:").." "..White(detail.entry.author or "Unknown").."\n"..Gold("Action:").." "..White(action).."\n"..Gold("Time:").." "..White(Timestamp(detail.entry.timestamp)))
+        if change and change.status and change.status~="accepted" then detail.summary:SetText(detail.summary:GetText().."\n"..Gold("Status:").." "..White(statusCaptions[change.status] or change.status)) end
+        detail.fields=DetailsFields(change)
         detail.count:SetText(total==0 and "No changes" or ("Change "..detail.index.." / "..total))
-        UI.SetButtonEnabled(detail.previous,detail.index>1)
-        UI.SetButtonEnabled(detail.next,detail.index<total)
+        UI.SetButtonEnabled(detail.previous,detail.index>1);UI.SetButtonEnabled(detail.next,detail.index<total)
         detail.canvas.layoutViewport:SetVerticalScroll(0)
-        UI.LayoutResponsiveCanvas(detail.canvas,function(width)
-            detail.text:SetWidth(math.max(1,width-12));detail.text:SetHeight(0)
-            return UI.MeasureTextHeight(detail.text,math.max(1,width-12),true)+12
-        end,nil,detail:GetWidth()-20,detail:GetHeight()-106)
+        LayoutDetails(detail:GetWidth(),detail:GetHeight())
     end
     function controller:ShowDetails(entry)
         if not self:IsVisible() or not entry then return end
         if not detail then
-            detail=Dialog(frame,"Raid Log details",660,348)
-            self.details=detail
-            detail.summary=Label(detail,"",10,-36,640);detail.summary:SetHeight(32)
-            UI.AttachLabelTooltip(detail,detail.summary,"Raid Log",function() return detail.summary:GetText() end)
+            detail=Dialog(frame,"Raid Log details",660,348);self.details=detail;detail.fieldRows={}
+            detail.summary=Label(detail,"",10,-36,640);detail.summary:SetTextColor(1,1,1)
+            if detail.summary.SetWordWrap then detail.summary:SetWordWrap(true) end
+            if detail.summary.SetNonSpaceWrap then detail.summary:SetNonSpaceWrap(true) end
             detail.body=UI.CreateContainer(nil,detail)
-            detail.body:SetPoint("TOPLEFT",detail,"TOPLEFT",10,-72);detail.body:SetWidth(640);detail.body:SetHeight(242)
             detail.canvas=UI.CreateResponsiveCanvas(detail.body,"BootyRaiderLogDetail"..id)
-            detail.text=Label(detail.canvas,"",6,-6,628)
-            if detail.text.SetWordWrap then detail.text:SetWordWrap(true) end
-            if detail.text.SetNonSpaceWrap then detail.text:SetNonSpaceWrap(true) end
-            detail.previous=UI.CreateButton(detail,nil,"<",26,22)
-            detail.next=UI.CreateButton(detail,nil,">",26,22)
-            detail.previous:SetPoint("BOTTOMLEFT",detail,"BOTTOMLEFT",10,8)
-            detail.next:SetPoint("LEFT",detail.previous,"RIGHT",6,0)
-            detail.count=UI.CreateLabel(detail,nil,"OVERLAY","GameFontHighlightSmall")
-            detail.count:SetPoint("LEFT",detail.next,"RIGHT",8,0)
+            detail.before=Label(detail.canvas,"Before",0,0,300);detail.before:SetTextColor(unpack(UI.Theme.colors.goldText))
+            detail.after=Label(detail.canvas,"After",320,0,300);detail.after:SetTextColor(unpack(UI.Theme.colors.goldText))
+            detail.empty=Label(detail.canvas,"",0,0,640)
+            detail.previous=UI.CreateButton(detail,nil,"<",26,22);detail.next=UI.CreateButton(detail,nil,">",26,22)
+            detail.previous:SetPoint("BOTTOMLEFT",detail,"BOTTOMLEFT",10,8);detail.next:SetPoint("LEFT",detail.previous,"RIGHT",6,0)
+            detail.count=UI.CreateLabel(detail,nil,"OVERLAY","GameFontHighlightSmall");detail.count:SetPoint("LEFT",detail.next,"RIGHT",8,0)
             detail.previous:SetScript("OnClick",function() detail.index=detail.index-1;ShowChange() end)
             detail.next:SetScript("OnClick",function() detail.index=detail.index+1;ShowChange() end)
-            function detail:LayoutContent(w,h)
-                self.summary:SetWidth(w-20);self.body:SetWidth(w-20);self.body:SetHeight(h-106)
-                UI.LayoutResponsiveCanvas(self.canvas,function(width)
-                    self.text:SetWidth(math.max(1,width-12));self.text:SetHeight(0)
-                    return UI.MeasureTextHeight(self.text,math.max(1,width-12),true)+12
-                end,nil,w-20,h-106)
-            end
-            detail:SetScript("OnHide",function() detail.entry=nil;detail.text:SetText("");detail.summary:SetText("") end)
+            function detail:LayoutContent(w,h) if self:IsShown() then LayoutDetails(w,h) end end
+            detail:SetScript("OnHide",function()
+                detail.entry=nil;detail.fields=nil;detail.summary:SetText("")
+                for _,row in ipairs(detail.fieldRows) do for _,cell in ipairs({row.left,row.right}) do
+                    cell:Hide();for _,link in ipairs(cell.links) do link.itemId=nil;link:Hide() end
+                end end
+            end)
         end
-        detail.entry=entry;detail.index=1
-        detail.summary:SetText(Timestamp(entry.timestamp).."  |  "..tostring(entry.author or "Unknown").."\n"..Log.FormatAction(entry))
-        detail:Show();detail:LayoutContent(detail:GetWidth(),detail:GetHeight());ShowChange()
+        detail.entry=entry;detail.index=1;detail:Show();ShowChange()
         if UI.WindowStack then UI.WindowStack.Raise(detail,frame) end
     end
 
@@ -252,7 +376,7 @@ function Log.Create(parent)
         local row=UI.CreateControl(nil,frame)
         row:SetWidth(800);row:SetHeight(26);row.cells={}
         for cell=1,3 do
-            row.cells[cell]=Label(row,"",positions[cell]-10+4,-5,widths[cell]-8)
+            row.cells[cell]=Label(row,"",positions[cell]-10,-5,widths[cell])
             if cell==1 then row.cells[cell]:SetTextColor(unpack(UI.Theme.colors.goldText)) end
             if row.cells[cell].SetWordWrap then row.cells[cell]:SetWordWrap(false) end
         end
@@ -314,7 +438,7 @@ function Log.Create(parent)
         controller.hint:SetWidth(w-20);controller.empty:SetWidth(w-20)
         local previous=controller.pageSize;controller.pageSize=math.max(1,math.min(pageSize,math.floor((h-116)/26)))
         local actionWidth=w-270;controller.headings[3]:SetWidth(actionWidth)
-        for _,row in ipairs(controller.rows) do row:SetWidth(w-20);row.cells[3]:SetWidth(actionWidth-8) end
+        for _,row in ipairs(controller.rows) do row:SetWidth(w-20);row.cells[3]:SetWidth(actionWidth) end
         if previous~=nil and previous~=controller.pageSize and controller:IsVisible() and controller.raidId then controller:Refresh() end
     end
     function controller:Open(raidId,provider)
@@ -330,7 +454,7 @@ function Log.Create(parent)
         if controller.offset+(controller.pageSize or pageSize)<(controller.total or 0) then controller.offset=controller.offset+(controller.pageSize or pageSize);controller:Refresh() end
     end)
     frame:SetScript("OnHide",function()
-        if detail then detail:Hide();detail.entry=nil;detail.text:SetText("");detail.summary:SetText("") end
+        if detail then detail:Hide();detail.entry=nil;detail.fields=nil;detail.summary:SetText("") end
         for _,row in ipairs(controller.rows) do row.entry=nil;for _,cell in ipairs(row.cells) do cell:SetText("") end end
         controller.provider=nil;controller.raidId=nil;controller.total=nil;controller.revision=nil
     end)
