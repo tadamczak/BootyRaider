@@ -504,7 +504,10 @@ function Database.GetRaidStatistics()
         local entry = history.raids[history.order[index]]
         if entry then
             local lifecycle,saved
-            if entry.syncRaidId and BootyRaiderDB.raidJournal and BootyRaiderDB.raidJournal.raids[entry.syncRaidId] then
+            -- Readers share the replica's publication boundary: a partially
+            -- replayed lifecycle must not hide an already published raid/CSR.
+            local pending=entry.syncRaidId and BootyRaiderDB.raidSyncProjectionPending and BootyRaiderDB.raidSyncProjectionPending[entry.syncRaidId]
+            if entry.syncRaidId and not pending and BootyRaiderDB.raidJournal and BootyRaiderDB.raidJournal.raids[entry.syncRaidId] then
                 local records=BootyRaiderDB.raidJournal.raids[entry.syncRaidId].records
                 local record,stored=records["raid:lifecycle"],records["saved:statistic"]
                 lifecycle=record and not record.deleted and not record.pendingCheckpoint and record.value or false

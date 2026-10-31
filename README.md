@@ -105,6 +105,8 @@ Raid Log shows project-gold timestamps and values aligned with their column head
 
 ## Officer synchronization
 
+While an incomplete historical transfer is arriving, Raid Stats and CSR keep the previously received complete raid until its update is ready. Editing a saved raid preserves named Soft Reserves and participants who left the raid.
+
 New Raid, Test Raid and Sync share the left side of the raid toolbar; Raid Info stays on its right. Active sessions show their ID, raid, recorded member count, capacity, creation date, storage and last save. Saved raids also show Active/Ended status. Raid names use MC, BWL, ZG, Ony and K10; duration uses HH:MM:SS. Join and reopen sessions from the Raid tab. Sync lists active sessions (including unsaved memory copies) and saved raids for conflict review and recording comparisons. Ended sessions without a snapshot are excluded. Offline officers do not remove active sessions from recovery. Active and saved session headings use matching text sizes and distinct icons.
 
 **Active raid sessions** appears above Saved raids. Join the existing session when another officer in your current party or raid has one; New Raid is disabled while that session is known or being checked. Separate groups can record separate sessions. Loading an ended snapshot reopens that same shared session (officer access required). Saved raids show **In memory** after changes and **On disk** for the version read at addon startup, plus the last editor; the active raid shows **Last save**. Save does not itself write WoW SavedVariables files.

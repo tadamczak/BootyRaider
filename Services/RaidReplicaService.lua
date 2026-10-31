@@ -794,10 +794,15 @@ function Replica.Create(options)
     local function ApplyArchiveEdits(id,snapshot,statistic)
         local function ReplaceMember(entry,name,value,isSnapshot)
             if not entry then return end
-            local index
-            for i,member in ipairs(entry.members or {}) do if Lower(member.name)==name then index=i;break end end
-            if not value then if index then table.remove(entry.members,index) end;return end
-            local previous=index and entry.members[index]
+            local index,collection=nil,entry.members
+            for i,member in ipairs(collection or {}) do if Lower(member.name)==name then index=i;break end end
+            if isSnapshot and not index then
+                for i,member in ipairs(entry.departedMembers or {}) do
+                    if Lower(member.name)==name then index=i;collection=entry.departedMembers;break end
+                end
+            end
+            if not value then if index then table.remove(collection,index) end;return end
+            local previous=index and collection[index]
             local member=Copy(value)
             if isSnapshot then
                 member=Copy(previous or {})
@@ -812,10 +817,16 @@ function Replica.Create(options)
                     if old then local merged=Copy(old);for field,fieldValue in pairs(loot) do merged[field]=fieldValue end;member.loot[index]=merged end
                 end
             else
+                -- Saved-history editors change SR/loot, not presence history.
+                member.joinedAt=member.joinedAt or previous and previous.joinedAt
+                member.leftAt=member.leftAt or previous and previous.leftAt
                 member.srCount=table.getn(member.srItems or {});member.lootCount=0
                 for _,loot in ipairs(member.lootItems or {}) do member.lootCount=member.lootCount+(loot.count or 1) end
             end
-            if index then entry.members[index]=member else table.insert(entry.members,member) end
+            if index then collection[index]=member
+            elseif isSnapshot and member.leftAt then
+                entry.departedMembers=entry.departedMembers or {};table.insert(entry.departedMembers,member)
+            else table.insert(entry.members,member) end
         end
         for _,key in ipairs(Keys(Raid(id).records)) do
             local record=Raid(id).records[key]

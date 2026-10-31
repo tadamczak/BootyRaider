@@ -386,7 +386,9 @@ function Sync.New(options)
             peer.advertised=peer.advertised or {}
             for _,entry in ipairs(summary.entries) do
                 if not peer.advertised[entry.raidId] and CountMap(peer.advertised)>=Sync.limits.progressRaids then return Reject("progress-raid-limit") end
-                local progress=peer.advertised[entry.raidId] or {confirmed=0};peer.advertised[entry.raidId]=progress;progress.generation=self.generation;progress.activity=Now()
+                local progress=peer.advertised[entry.raidId] or {confirmed=0};peer.advertised[entry.raidId]=progress
+                if progress.generation~=self.generation then progress.sent=nil end
+                progress.generation=self.generation;progress.activity=Now()
             end
             return true
         elseif kind=="caught-up" then
@@ -631,6 +633,7 @@ function Sync.New(options)
         self.announce=true;self.discoveryRemaining=2;self.discoveryAt=Now()+3;return true
     end
     function self:Retry()
+        if not self.enabled and self.reason=="send-failed" then return self:Start() end
         if not Ready() then return false,self.reason end
         local peers=self.peers
         self:Stop("retrying")
@@ -894,6 +897,7 @@ function Sync.New(options)
             if operation and not Allowed(operation.raidId) then return end
             self.encoding={target=message.target,priority=message.priority,job=self.codec.BeginEncode(message.payload),
                 requestId=self.request and message.payload==self.request.payload and self.request.id or nil,
+                advertisement=message.payload.type=="summary" and {generation=message.payload.generation,entries=message.payload.summary.entries} or nil,
                 receipt=operation and {peer=message.target,peerSession=self.peers[message.target] and self.peers[message.target].session,
                     raidId=operation.raidId,origin=operation.origin,sequence=operation.sequence,operationId=operation.id} or nil}
         end
@@ -911,7 +915,7 @@ function Sync.New(options)
         if size<32 then Reject("chunk-envelope-limit");return end
         local total=math.ceil(string.len(text)/size)
         if total>16384 then Reject("chunk-count-limit");return end
-        self.outgoing={target=encoding.target,session=session,id=tostring(self.sequence),priority=encoding.priority,text=text,size=size,total=total,ack=0,sent=0,activity=Now(),attempts=0,requestId=encoding.requestId}
+        self.outgoing={target=encoding.target,session=session,id=tostring(self.sequence),priority=encoding.priority,text=text,size=size,total=total,ack=0,sent=0,activity=Now(),attempts=0,requestId=encoding.requestId,advertisement=encoding.advertisement}
         if encoding.receipt then
             if CountMap(self.sentOperations)>=128 then
                 local oldest
@@ -926,7 +930,11 @@ function Sync.New(options)
         if self.tokens<cost then return false end
         if string.len(text)>Sync.limits.packet then Reject("packet-limit");return false end
         local ok,result=pcall(options.send,Sync.PREFIX,text,"GUILD")
-        if not ok or result==false then self.lastError="send-failed";return false end
+        if not ok or result==false then
+            -- A client API failure is not token backpressure. Stop queued work
+            -- and keep an actionable error instead of retrying every frame.
+            self.lastError="send-failed";self:Stop("send-failed");return false
+        end
         self.tokens=self.tokens-cost;self.stats.sentBytes=self.stats.sentBytes+cost;self.revision=self.revision+1;return true
     end
     function self:Tick()
@@ -936,7 +944,7 @@ function Sync.New(options)
         for name in pairs(self.peers) do if not Authority(name) then RemovePeer(name) end end
         for name,peer in pairs(self.peers) do
             for id,progress in pairs(peer.advertised or {}) do
-                if not (Combat() and Priority(id)>1) and now-progress.activity>Sync.limits.timeout then InterruptPeer(name,"source-timeout");break end
+                if progress.sent and not (Combat() and Priority(id)>1) and now-progress.activity>Sync.limits.timeout then InterruptPeer(name,"source-timeout");break end
             end
         end
         for key,transfer in pairs(self.incoming) do
@@ -1010,6 +1018,15 @@ function Sync.New(options)
                 text=table.concat({"D",outgoing.target,outgoing.session,outgoing.id,tostring(index),tostring(outgoing.total),tostring(outgoing.priority),string.sub(outgoing.text,(index-1)*outgoing.size+1,index*outgoing.size)},"~")
                 if not Send(text) then break end
                 outgoing.sent=index;outgoing.activity=now
+                if outgoing.advertisement then
+                    -- A queued inventory may wait behind a large transfer to
+                    -- another officer. Its recipient cannot complete it yet.
+                    local peer=self.peers[outgoing.target]
+                    for _,entry in ipairs(outgoing.advertisement.entries) do
+                        local progress=peer and peer.advertised and peer.advertised[entry.raidId]
+                        if progress and progress.generation==outgoing.advertisement.generation then progress.sent=true;progress.activity=now end
+                    end
+                end
                 if outgoing.requestId and self.request and self.request.id==outgoing.requestId then
                     -- Queueing behind another officer's transfer is local work,
                     -- not time spent waiting for this recipient to respond.
@@ -1036,7 +1053,10 @@ function Sync.New(options)
             for _,peer in pairs(self.peers) do if not peer.blocked and not peer.unavailable then return true end end
         end
         for _,peer in pairs(self.peers) do
-            if not peer.blocked and not peer.unavailable and (next(peer.advertised or {}) or next(peer.completionPending or {})) then return true end
+            if not peer.blocked and not peer.unavailable then
+                if next(peer.completionPending or {}) then return true end
+                for id,progress in pairs(peer.advertised or {}) do if progress.sent and (not Combat() or Priority(id)==1) then return true end end
+            end
             if peer.relayPending and not peer.blocked and not peer.unavailable then return true end
             if not peer.blocked and not peer.unavailable and peer.needsSummary then return true end
             if not peer.blocked and not peer.unavailable and peer.summary then
@@ -1117,7 +1137,7 @@ function Sync.New(options)
             if not peer.blocked and not peer.unavailable then
                 if next(peer.completionPending or {}) and Count(self.outbox)<Sync.limits.outbox then return now end
                 for id,progress in pairs(peer.advertised or {}) do
-                    if not combat or Priority(id)==1 then local deadline=progress.activity+Sync.limits.timeout;if not wake or deadline<wake then wake=deadline end end
+                    if progress.sent and (not combat or Priority(id)==1) then local deadline=progress.activity+Sync.limits.timeout;if not wake or deadline<wake then wake=deadline end end
                 end
             end
             if not self.request and not peer.blocked and not peer.unavailable then

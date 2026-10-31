@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-dev.35 — 2026-10-31
+
+- Stop redundant Raid renders, hidden drag updates and equal-opacity polling in Loot Master Mode.
+- Pause historical synchronization work correctly in combat and start inventory timeouts when data is sent, keeping queued transfers safe.
+- Keep published Raid Stats/CSR stable during partial synchronization; preserve named SR and departed participants when editing saved raids.
+
 ## 1.0.0-dev.34 — 2026-10-31
 
 - Reduce initial synchronization traffic with compact data messages and coalesced relay announcements, keeping the existing sending limit. Reload every officer client after updating.

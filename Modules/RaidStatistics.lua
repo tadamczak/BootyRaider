@@ -39,13 +39,18 @@ local function CopyItems(source)
     return target
 end
 
+local function ReserveText(member)
+    local item=member.srItems and member.srItems[1]
+    return tostring(item and (item.itemId or item.name) or "")
+end
+
 local function CopyEditableMember(source)
     local target={};local key,value
     for key,value in pairs(source or {}) do if key~="srItems" and key~="lootItems" then target[key]=value end end
     target.srItems=CopyItems(source and source.srItems);target.lootItems=CopyItems(source and source.lootItems)
     target.attendance=tonumber(target.attendance);if target.attendance==nil then target.attendance=1 end
     target.attendanceText=tostring(target.attendance)
-    target.srItemText=tostring(target.srItems[1] and target.srItems[1].itemId or "")
+    target.srItemText=ReserveText(target)
     return target
 end
 
@@ -69,7 +74,8 @@ local function OnItemsClick()
 end
 
 local function OnDirectItemEnter()
-    Raider.UI.Components.ShowItemTooltip(this)
+    if this.itemId then Raider.UI.Components.ShowItemTooltip(this)
+    elseif this.itemName then UI.AnchorTooltip(this);GameTooltip:SetText(this.itemName);GameTooltip:Show() end
 end
 
 function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
@@ -325,11 +331,16 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         for rowIndex=1,table.getn(controller.rows) do UpdateEditMember(controller.rows[rowIndex]) end
         for rowIndex=1,table.getn(controller.editMembers or {}) do
             local member=controller.editMembers[rowIndex];local name=string.gsub(tostring(member.name or ""),"^%s+","");name=string.gsub(name,"%s+$","")
-            local attendance=tonumber(member.attendanceText or member.attendance);local itemText=string.gsub(tostring(member.srItemText or ""),"%s","");local itemId=itemText~="" and tonumber(itemText) or nil
+            local attendance=tonumber(member.attendanceText or member.attendance)
+            local itemText=string.gsub(tostring(member.srItemText or ""),"^%s+","");itemText=string.gsub(itemText,"%s+$","")
+            local itemId=Raider.Services.ItemReference.Id(itemText)
+            local itemName=not itemId and Raider.Services.ItemReference.NormalizeName(itemText) or nil
             if name=="" then EditFailure("Player name is required.");return end
             if not attendance or attendance<0 then EditFailure("Attendance must be a non-negative number.");return end
-            if itemText~="" and not itemId then EditFailure("SR must contain a numeric Item ID.");return end
-            member.name=name;member.attendance=attendance;member.attendanceText=tostring(attendance);member.srItemText=itemId and tostring(itemId) or "";member.srItems=itemId and {{itemId=itemId,count=1}} or {};member.srCount=itemId and 1 or 0
+            if itemText~="" and not itemId and not itemName then EditFailure("Enter a valid Item ID or item name (up to 120 characters).");return end
+            -- Unrelated edits preserve every imported reservation and its data.
+            if itemText~=ReserveText(member) then member.srItems=itemText~="" and {{itemId=itemId,name=itemName,count=1}} or {} end
+            member.name=name;member.attendance=attendance;member.attendanceText=tostring(attendance);member.srItemText=ReserveText(member);member.srCount=table.getn(member.srItems or {})
         end
         controller.editError:Hide();controller.editDialog.raidId=controller.editingRaidId;controller.editDialog.attendance:SetChecked(controller.editingEntry.attendanceEnabled~=false and 1 or nil);controller.editDialog.csr:SetChecked(controller.editingEntry.csrEnabled~=false and 1 or nil)
         controller.editDialog:SetRaidType(controller.editingEntry.raidName);controller.editDialog.message:SetText("Save changes to this raid, its attendance, Soft Reserves and loot rules?");LayoutEditDialog();controller.editDialog:Show()
@@ -359,7 +370,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         row.loot = Raider.UI.Components.CreateIconButton(row, nil, "Interface\\Icons\\INV_Misc_Bag_10", 20, 2); row.loot:SetPoint("RIGHT", row, "RIGHT", -8, 0); row.loot.ownerRow = row; row.loot.itemKind = "loot"; row.loot.statisticsController = controller; row.loot:SetScript("OnClick", OnItemsClick)
         row.nameEdit=UI.CreateFramedEditBox(row,nil,110);row.nameEdit.ownerRow=row;row.nameEdit:SetScript("OnTextChanged",function() UpdateEditMember(this.ownerRow) end);row.nameEdit:Hide()
         row.attendanceEdit=UI.CreateFramedEditBox(row,nil,54);row.attendanceEdit.ownerRow=row;row.attendanceEdit:SetMaxLetters(8);row.attendanceEdit:SetScript("OnTextChanged",function() UpdateEditMember(this.ownerRow) end);row.attendanceEdit:Hide()
-        row.srEdit=UI.CreateFramedEditBox(row,nil,70);row.srEdit.ownerRow=row;row.srEdit:SetMaxLetters(10);row.srEdit:SetScript("OnTextChanged",function() UpdateEditMember(this.ownerRow) end);row.srEdit:Hide()
+        row.srEdit=UI.CreateFramedEditBox(row,nil,70);row.srEdit.ownerRow=row;row.srEdit:SetMaxLetters(120);row.srEdit:SetScript("OnTextChanged",function() UpdateEditMember(this.ownerRow) end);row.srEdit:Hide()
         Raider.UI.Components.AttachTooltip(row.sr, "Soft Reserves", "Show every item reserved by this player in the selected raids."); Raider.UI.Components.AttachTooltip(row.loot, "Loot received", "Show every recorded item received by this player in the selected raids.")
         row:Hide(); controller.rows[index] = row
     end
@@ -675,9 +686,10 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
                 row.attendance:SetText(player.attendanceOff and "Off" or player.raids); row.loot:SetInactive(table.getn(player.lootItems or {}) == 0)
                 row.srMissing:Hide()
                 if not self.showSR then row.srDirect.itemId=nil;row.srDirect:Hide();row.sr:Hide()
-                elseif singleRaid and self.directItemLabel and player.srItems and player.srItems[1] and player.srItems[1].itemId then
-                    local item = player.srItems[1]; row.sr:Hide(); row.srDirect.itemId = item.itemId; row.srDirect.itemName = item.name; row.srDirect.label:SetText(Raider.UI.Components.GetItemLabel(item.itemId) .. (table.getn(player.srItems) > 1 and (" +" .. (table.getn(player.srItems) - 1)) or "")); row.srDirect:Show()
-                    local texture = type(GetItemIcon) == "function" and GetItemIcon(item.itemId) or nil; row.srDirect.iconRegion:SetTexture(texture or "Interface\\Icons\\INV_Misc_QuestionMark")
+                elseif singleRaid and self.directItemLabel and player.srItems and player.srItems[1] and (player.srItems[1].itemId or player.srItems[1].name) and not player.srItems[1].missing then
+                    local item = player.srItems[1]; row.sr:Hide(); row.srDirect.itemId = item.itemId; row.srDirect.itemName = item.name
+                    row.srDirect.label:SetText((item.itemId and Raider.UI.Components.GetItemLabel(item.itemId) or item.name) .. (table.getn(player.srItems) > 1 and (" +" .. (table.getn(player.srItems) - 1)) or "")); row.srDirect:Show()
+                    local texture = item.itemId and type(GetItemIcon) == "function" and GetItemIcon(item.itemId) or nil; row.srDirect.iconRegion:SetTexture(texture or "Interface\\Icons\\INV_Misc_QuestionMark")
                 elseif singleRaid then row.srDirect.itemId = nil; row.srDirect:Hide(); row.sr:Hide(); row.srMissing:Show()
                 else row.srDirect.itemId = nil; row.srDirect:Hide(); row.sr:SetInactive(table.getn(player.srItems or {}) == 0); row.sr:Show() end
                 row:Show()

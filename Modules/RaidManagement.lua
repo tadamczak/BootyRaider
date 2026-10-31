@@ -627,6 +627,15 @@ local function OnRaidPageSizeChanged()
     this.resizeRefresh()
 end
 
+local function LootMasterOpacity(value)
+    return math.max(0,math.min(100,tonumber(value) or 100))/100
+end
+
+local function ApplyLootMasterOpacity(controller,opacity)
+    if controller.appliedOpacity==opacity then return end
+    controller.appliedOpacity=opacity;controller.dashboard:SetAlpha(opacity)
+end
+
 local function OnLootMasterAlphaUpdate()
     this.elapsed = this.elapsed + arg1
     if this.elapsed < 0.08 then return end
@@ -639,9 +648,8 @@ local function OnLootMasterAlphaUpdate()
     local inside = dashboard:GetLeft() and cursorX >= dashboard:GetLeft() and cursorX <= dashboard:GetRight() and cursorY >= dashboard:GetBottom() and cursorY <= dashboard:GetTop()
     local settings = controller.getSettings()
     local opacity
-    if inside then opacity = tonumber(settings.lootMasterOpacity) or 100
-    else opacity = tonumber(settings.outOfFocusOpacity) or 100 end
-    dashboard:SetAlpha(math.max(0, math.min(100, opacity)) / 100)
+    if inside then opacity = settings.lootMasterOpacity else opacity = settings.outOfFocusOpacity end
+    ApplyLootMasterOpacity(controller,LootMasterOpacity(opacity))
 end
 
 local function OnRaidActionClick()
@@ -3678,6 +3686,11 @@ function RaidManagement.CreateLifecycle(options)
 
     function lifecycle:Hide()
         options.page.groupMovePending = nil
+        local ghost=options.page.dragGhost
+        if ghost and (ghost:IsShown() or ghost:GetScript("OnUpdate")) then
+            Raider.dragRaidIndex=nil;Raider.raidDropSlot=nil;Raider.raidDragStarted=nil
+            ghost:SetScript("OnUpdate",nil);ghost:Hide()
+        end
         RaidManagement.HideSoftReserveWarnings(options.page)
         local detached = options.isDetachedActive and options.isDetachedActive()
         if not detached then options.setLiveTracking(false); self:CancelRosterUpdate() end
@@ -3870,6 +3883,13 @@ function RaidManagement.CreateLootMasterController(options)
 
     controller.Refresh = function()
         if not window:IsVisible() or not compact then return end
+        local settings=options.getSettings()
+        local focused,unfocused=LootMasterOpacity(settings.lootMasterOpacity),LootMasterOpacity(settings.outOfFocusOpacity)
+        if focused==unfocused then
+            alphaWatcher:SetScript("OnUpdate",nil);alphaWatcher:Hide();ApplyLootMasterOpacity(controller,focused)
+        elseif not alphaWatcher:GetScript("OnUpdate") then
+            alphaWatcher.elapsed=0;alphaWatcher:SetScript("OnUpdate",OnLootMasterAlphaUpdate);alphaWatcher:Show()
+        end
         LayoutToolbar()
         UI.SetButtonEnabled(newRoll, Raider.Modules.MasterLootWindow and Raider.Modules.MasterLootWindow.CanStartManualRoll and Raider.Modules.MasterLootWindow.CanStartManualRoll() or false)
         if window.minimized then return end
@@ -4023,7 +4043,7 @@ function RaidManagement.CreateLootMasterController(options)
             window:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", settings.lootMasterLeft, settings.lootMasterBottom)
         else window:SetPoint("CENTER", UIParent, "CENTER", 0, 0) end
         compact:Show(); grip:Show(); UI.SetWindowButtonAction(minimize, "minimize")
-        window:Show(); alphaWatcher.elapsed = 0; alphaWatcher:SetScript("OnUpdate", OnLootMasterAlphaUpdate); alphaWatcher:Show()
+        window:Show()
         if options.page.lifecycle then options.page.lifecycle:SyncTrackingSetting() end
         controller.Refresh()
     end

@@ -195,7 +195,7 @@ function Screen.Create(parent, host)
         setScanReady=function(value) Raider.raidScanReady=value end,
     })
     Raid.AttachResizeHandler(page,Refresh);Raid.AttachListScroll(page,Refresh)
-    function controller:Show() if not Raider.active then return end;SizePage();lifecycle:Show();Refresh() end
+    function controller:Show() if not Raider.active then return end;SizePage();lifecycle:Show() end
     function controller:Hide() page:Hide();lifecycle:Hide() end
     function controller:Refresh() Refresh() end
     function controller:HideSessionTransitionPrompt() page.HideSessionTransitionPrompt() end
