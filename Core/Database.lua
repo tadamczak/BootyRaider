@@ -295,6 +295,11 @@ function Database.OwnsField(key)
     return type(key)=="string" and (ownedExact[key] or legacyOwnedKeys[key] or string.find(key,"^raid")
         or string.find(key,"^nativeRaid") or string.find(key,"^lm") or string.find(key,"^lootMaster") or string.find(key,"^csr")) and true or false
 end
+function Database.OwnsLegacyField(key)
+    -- The monolithic minimap preference belongs to Suite, not this later
+    -- standalone setting. Existing Raider values and scoped profiles stay owned.
+    return key~="hideMinimapIcon" and Database.OwnsField(key)
+end
 function Database.Ensure()
     local store,failure=BootyLib.Data.Ensure("raider")
     if not store then error(failure or "BootyRaider data is unavailable.") end
@@ -332,7 +337,7 @@ function Database.GetGuildIdentity()
     if not snapshot then return nil end
     return tostring(snapshot.realmName or "UnknownRealm").." - "..snapshot.guildName,snapshot.guildName,snapshot.realmName
 end
-BootyLib.Data.RegisterOwner("raider","BootyRaiderDB",Database.OwnsField,InitializeDefaults)
+BootyLib.Data.RegisterOwner("raider","BootyRaiderDB",Database.OwnsField,InitializeDefaults,Database.OwnsLegacyField)
 function Database.GetRaidAttendance()
     Database.Ensure()
     return BootyRaiderDB.raidAttendance

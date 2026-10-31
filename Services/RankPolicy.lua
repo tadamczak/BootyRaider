@@ -6,6 +6,11 @@ Raider.Services.RankPolicy = RankPolicy
 
 local lootAliases = { ["officer wukong"] = "chimp", ["chimp banker"] = "chimp" }
 local lootRanks = { macaque = true, guest = true, alt = true, baboon = true, chimp = true, silverback = true }
+local guildRanks = { "Mukla", "Officer Wukong", "Silverback", "Chimp", "Baboon", "Alt", "Guest", "Macaque" }
+
+function RankPolicy.GetGuildRanks()
+    return guildRanks
+end
 
 -- Exact names only: callers retain their own empty/default and raw-rank policy.
 function RankPolicy.GetLootAlias(value)

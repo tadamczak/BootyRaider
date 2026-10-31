@@ -214,6 +214,7 @@ local function MeasureHistory(width, controls)
                 Cell(button.status,button,dataWidth-statusWidth,statusWidth,info.lifecycle=="deleted" and "Archived" or info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended"))
             button:SetHeight(height); button:Show()
             Raider.UI.Components.StyleSelectableTableRow(button, math.mod(index, 2) == 0, page.selectedRaidHistoryId == snapshot.id)
+            Raider.UI.Components.SetAlternatingRowColor(button, nil, index)
             load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(24); deleteButton:SetHeight(24)
             load:ClearAllPoints(); load:SetPoint("LEFT", button, "RIGHT", 4, 0); load:Show()
             if edit then

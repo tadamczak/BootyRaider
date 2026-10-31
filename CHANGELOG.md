@@ -1,11 +1,12 @@
 # Changelog
 
-## 1.0.0 — 2026-10-31
+## 1.0.0-dev.36 — 2026-10-31
 
-- First production release: raid sessions, loot tools, Soft Reserves, Raid Stats and CSR in standalone or Booty Suite views.
-- Share raid changes between authorized officers, recover after disconnects, and resolve saved-raid conflicts without duplicating CSR.
-- Retain departed participants and named reservations; bound synchronization and hidden UI work during raids.
-- Requires BootyLib 0.1.0. Update all synchronizing officers together. Pre-journal test raid/CSR data is reset once; current journal data and preferences are retained.
+- Keep private raid offers from blocking other synchronized raids or falsely timing out their officers.
+- Include compact CSR history, clearer archived/awarded sources and structured Test Lab player, item and timeline controls.
+- Return to saved CSR when the CSR page closes; retain the temporary Lab data for explicit reopening.
+- Keep legacy Suite minimap preferences separate from BootyRaider's standalone setting.
+- Candidate for in-game verification with BootyLib 0.1.0-dev.84. Update all synchronizing officers together; current journal data and preferences are retained.
 
 ## 1.0.0-dev.35 — 2026-10-31
 

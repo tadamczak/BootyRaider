@@ -310,9 +310,15 @@ function Sync.New(options)
         if Count(retired)>=8 then table.remove(retired,1) end
         table.insert(retired,session)
     end
+    local function HasPendingDelivery(peer)
+        -- Inventory alone may be filtered by the receiver's per-raid opt out.
+        -- Only a requested delivery can stall or keep the transport awake.
+        for _,progress in pairs(peer.advertised or {}) do if progress.transferring then return true end end
+        return false
+    end
     local function PeerBusy(peer)
         local name=peer.name
-        if peer.advertised and next(peer.advertised) or peer.completionPending and next(peer.completionPending)
+        if HasPendingDelivery(peer) or peer.completionPending and next(peer.completionPending)
             or peer.relayPending or peer.needsSummary or self.request and self.request.peer==name or self.outgoing and self.outgoing.target==name
             or self.encoding and self.encoding.target==name then return true end
         for _,queued in ipairs(self.outbox) do if queued.target==name then return true end end
@@ -944,7 +950,7 @@ function Sync.New(options)
         for name in pairs(self.peers) do if not Authority(name) then RemovePeer(name) end end
         for name,peer in pairs(self.peers) do
             for id,progress in pairs(peer.advertised or {}) do
-                if progress.sent and not (Combat() and Priority(id)>1) and now-progress.activity>Sync.limits.timeout then InterruptPeer(name,"source-timeout");break end
+                if progress.transferring and progress.sent and not (Combat() and Priority(id)>1) and now-progress.activity>Sync.limits.timeout then InterruptPeer(name,"source-timeout");break end
             end
         end
         for key,transfer in pairs(self.incoming) do
@@ -1055,7 +1061,7 @@ function Sync.New(options)
         for _,peer in pairs(self.peers) do
             if not peer.blocked and not peer.unavailable then
                 if next(peer.completionPending or {}) then return true end
-                for id,progress in pairs(peer.advertised or {}) do if progress.sent and (not Combat() or Priority(id)==1) then return true end end
+                for id,progress in pairs(peer.advertised or {}) do if progress.transferring and progress.sent and (not Combat() or Priority(id)==1) then return true end end
             end
             if peer.relayPending and not peer.blocked and not peer.unavailable then return true end
             if not peer.blocked and not peer.unavailable and peer.needsSummary then return true end
@@ -1137,7 +1143,7 @@ function Sync.New(options)
             if not peer.blocked and not peer.unavailable then
                 if next(peer.completionPending or {}) and Count(self.outbox)<Sync.limits.outbox then return now end
                 for id,progress in pairs(peer.advertised or {}) do
-                    if progress.sent and (not combat or Priority(id)==1) then local deadline=progress.activity+Sync.limits.timeout;if not wake or deadline<wake then wake=deadline end end
+                    if progress.transferring and progress.sent and (not combat or Priority(id)==1) then local deadline=progress.activity+Sync.limits.timeout;if not wake or deadline<wake then wake=deadline end end
                 end
             end
             if not self.request and not peer.blocked and not peer.unavailable then

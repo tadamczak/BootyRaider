@@ -644,6 +644,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
                 local selected = self.selectedHistoryIds[raid.id] and true or false; button:Show()
                 button.bootyClassicSelected=false
                 Raider.UI.Components.StyleSelectableTableRow(button,math.mod(logicalIndex,2)==0,selected)
+                Raider.UI.Components.SetAlternatingRowColor(button,nil,logicalIndex)
             else button.bootyClassicSelected=false;button.bootyTableRowSelected=false;UI.SetProjectButtonOutline(button,false);button:Hide() end
         end
         self.emptyHistory:ClearAllPoints();self.emptyHistory:SetPoint("TOPLEFT",page,"TOPLEFT",rect.x,-rect.y-4);self.emptyHistory:SetWidth(historyWidth)
@@ -669,6 +670,7 @@ function RaidStatistics.Create(host, getEntries, deleteEntry, updateEntry)
         for index = 1, table.getn(self.rows) do
             local row, player = self.rows[index], displayPlayers[offset + index]
             if player and index <= visible then
+                Raider.UI.Components.SetAlternatingRowColor(row,nil,offset+index)
                 row:ClearAllPoints();row:SetPoint("TOPLEFT",page,"TOPLEFT",body.x,-body.y-(index-1)*24);row:SetWidth(rowWidth)
                 UI.ApplyRowBackground(row,offset+index,false)
                 row.player = player
