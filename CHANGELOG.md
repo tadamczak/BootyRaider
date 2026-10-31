@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1-dev.1 — 2026-10-31
+
+- Shorten README to essential features, installation and basic usage.
+
 ## 1.0.0 — 2026-10-31
 
 - First production release of raid sessions, loot tools, Soft Reserves, Raid Stats and CSR, standalone or in Booty Suite.
