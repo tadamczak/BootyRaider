@@ -586,6 +586,69 @@ function Journal.GetRecord(db, raidId, key)
     return raid and Clone(raid.records[key]) or nil
 end
 
+-- A fresh copy may exceed one operation's bounds. Stage only its new identity,
+-- then publish locally once. The seed chain makes the final metadata depend on
+-- every preceding part, so receivers cannot expose a half-imported session.
+function Journal.CommitNewRaid(db, raidId, kind, changes, detail, audit, validate)
+    if (kind~="raid.save" and kind~="raid.start") or not Text(raidId,300)
+        or type(changes)~="table" or getmetatable(changes) or type(validate)~="function" then return false,"invalid-raid-seed" end
+    local state,failure=Journal.Ensure(db)
+    if not state then return false,failure end
+    if state.raids[raidId] then return false,"raid-seed-already-exists" end
+    local records,keys,metadata={},{},nil
+    local count=table.getn(changes)
+    for index in pairs(changes) do
+        if not Integer(index) or index<1 or index>count then return false,"invalid-change-array" end
+    end
+    for _,change in ipairs(changes) do
+        if type(change)~="table" or not Text(change.key,256) or keys[change.key] or change.key=="raid:seed" then return false,"invalid-change" end
+        keys[change.key]=true
+        if change.key=="raid:metadata" then metadata=change else table.insert(records,change) end
+    end
+    if not metadata or metadata.deleted then return false,"raid-seed-metadata-required" end
+    local context=contexts[db] or {}
+    if audit~=false and context.auditPolicy then
+        local called,enabled=pcall(context.auditPolicy,raidId,kind,db)
+        if not called or type(enabled)~="boolean" then return false,"invalid-audit-policy" end
+        audit=enabled
+    end
+    local staged={raidJournal={schema=state.schema,replicaId=state.replicaId,sequence=state.sequence,
+        identitySequence=state.identitySequence,raids={},operations={}}}
+    Journal.Ensure(staged,context)
+    local operations,offset,part={},1,0
+    local function CommitPart(batch,final)
+        table.insert(batch,{key="raid:seed",value={part=part+1,complete=final}})
+        local operationKind=final and kind or "raid.seed"
+        local valid,reason=validate({kind=operationKind,changes=batch})
+        if not valid then return false,reason end
+        local ok,operation=Journal.Commit(staged,raidId,operationKind,batch,final and detail or nil,final and audit~=false or false)
+        if not ok then return false,operation end
+        valid,reason=validate(operation)
+        if not valid then return false,reason end
+        part=part+1;table.insert(operations,operation)
+        return true,operation
+    end
+    while offset<=table.getn(records) do
+        local size=math.min(64,table.getn(records)-offset+1)
+        while true do
+            local batch={};for index=offset,offset+size-1 do table.insert(batch,records[index]) end
+            local ok,reason=CommitPart(batch,false)
+            if ok then offset=offset+size;break end
+            if size==1 or (reason~="operation-node-limit" and reason~="operation-byte-limit") then return false,reason end
+            size=math.floor(size/2)
+        end
+    end
+    local ok,operation=CommitPart({metadata},true)
+    if not ok then return false,operation end
+    state.raids[raidId]=staged.raidJournal.raids[raidId]
+    state.sequence=staged.raidJournal.sequence
+    for _,entry in ipairs(operations) do
+        state.operations[entry.id]=staged.raidJournal.operations[entry.id]
+        Journal.IndexOperation(state,entry)
+    end
+    return true,operation
+end
+
 function Journal.GetOperation(db, id)
     local state, failure = Journal.Ensure(db)
     if not state then return nil, failure end
@@ -608,14 +671,25 @@ function Journal.GetRevision(db, raidId)
     return raid and (raid.logRevision+(raid.logStatusRevision or 0)) or 0
 end
 
+local function VisibleChange(operation,index)
+    local count,selected=0,nil
+    for _,change in ipairs(operation.changes) do
+        if change.key~="raid:seed" then
+            count=count+1
+            if count==index then selected=change end
+        end
+    end
+    return selected,count
+end
+
 function Journal.GetChange(db, operationId, index)
     local state, failure = Journal.Ensure(db)
     if not state then return nil, failure end
     local operation = state.operations[operationId]
     if not operation then return nil, 0 end
-    local count = table.getn(operation.changes)
+    local selected,count = VisibleChange(operation,index)
     if not Integer(index) or index < 1 or index > count then return nil, count end
-    local change=Clone(operation.changes[index])
+    local change=Clone(selected)
     local conflicts=Raider.Services.RaidConflict
     change.status=conflicts and conflicts.AuditStatus(state,state.raids[operation.raidId],operationId,change.key) or "accepted"
     change.operationStatus=conflicts and conflicts.AuditStatus(state,state.raids[operation.raidId],operationId) or "accepted"
@@ -642,9 +716,10 @@ function Journal.GetLogSummary(db, raidId, offset, limit)
     for index = first, last, -1 do
         local operation = state.operations[raid.log[index]]
         local conflicts=Raider.Services.RaidConflict
+        local _,changeCount=VisibleChange(operation)
         table.insert(page, {id=operation.id,raidId=operation.raidId,author=operation.author,
             timestamp=operation.timestamp,kind=operation.kind,detail=Clone(operation.detail),
-            changeCount=table.getn(operation.changes),status=conflicts and conflicts.AuditStatus(state,raid,operation.id) or "accepted"})
+            changeCount=changeCount,status=conflicts and conflicts.AuditStatus(state,raid,operation.id) or "accepted"})
     end
     return page, total
 end

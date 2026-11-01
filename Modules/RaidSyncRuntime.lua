@@ -251,7 +251,7 @@ function SyncRuntime.RefreshAuthority()
             onRaidDelivered=function(name,id,count,lastOperationId)
                 ArmMaintenance()
                 local operation=count==1 and lastOperationId and Raider.Services.RaidJournal.GetOperation(BootyRaiderDB,lastOperationId)
-                if operation and operation.kind~="raid.observe" and not operation.compacted then
+                if operation and operation.kind~="raid.observe" and operation.kind~="raid.seed" and not operation.compacted then
                     local action=Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
                     runtime.replica.LogSync(name.." confirmed receipt: "..tostring(action))
                 elseif count>1 then

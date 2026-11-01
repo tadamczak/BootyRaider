@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1-dev.4 — 2026-11-01
+
+- Save large raids under a new Raid ID without replacing the original or exposing an incomplete copy.
+- Clarify retained snapshots with the status **Session removed** and an explanatory tooltip.
+- Update all synchronizing officers together; existing saved data is retained.
+
 ## 1.0.1-dev.3 — 2026-10-31
 
 - Update live loot records without rebuilding the entire raid history on every drop.

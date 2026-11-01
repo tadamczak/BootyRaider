@@ -102,7 +102,7 @@ local function KnownKey(key)
         return field=="raid:metadata" or field=="raid:loot-rules" or field=="saved:flags" or field=="saved:snapshot" or field=="saved:statistic"
             or string.find(field,"^saved:member:") or string.find(field,"^csr:")
     end
-    return type(key)=="string" and (key=="raid:metadata" or key=="raid:lifecycle" or key=="raid:alias-decision" or key=="raid:save" or key=="raid:loot-rules"
+    return type(key)=="string" and (key=="raid:metadata" or key=="raid:seed" or key=="raid:lifecycle" or key=="raid:alias-decision" or key=="raid:save" or key=="raid:loot-rules"
         or string.find(key,"^raid:session%-deleted:")
         or key=="saved:snapshot" or key=="saved:statistic" or key=="saved:flags" or key=="import:sr"
         or string.find(key,"^member:") or string.find(key,"^sr:") or string.find(key,"^loot:") or string.find(key,"^entitlement:")
@@ -129,6 +129,7 @@ function Replica.ValidateOperation(operation)
     if type(operation)~="table" or not List(operation.changes,512,function(change)
         return type(change)=="table" and type(change.key)=="string"
     end) then return false,"invalid-domain-operation" end
+    local seed,metadata
     for _,change in ipairs(operation.changes) do
         local key,value=change.key,change.value
         if type(key)~="string" then return false,"invalid-domain-key" end
@@ -138,11 +139,27 @@ function Replica.ValidateOperation(operation)
         local archiveDeleted=archiveKey and value==false and (key=="saved:snapshot" or key=="saved:statistic" or string.find(key,"^saved:member:"))
         local sessionDeletion=string.find(key,"^raid:session%-deleted:")
         if sessionDeletion and (change.deleted or change.base or change.bases) then return false,"invalid-session-tombstone" end
+        if key=="raid:seed" then
+            if change.deleted or not Fields(value,{part="number",complete="boolean"}) or not Number(value.part,9007199254740991)
+                or value.part<1 or value.part~=math.floor(value.part) or type(value.complete)~="boolean" then return false,"invalid-raid-seed" end
+            if value.complete then
+                if operation.kind~="raid.save" and operation.kind~="raid.start" then return false,"invalid-raid-seed-final" end
+            elseif operation.kind~="raid.seed" or operation.audit==true then return false,"invalid-raid-seed-part" end
+            if operation.schema then
+                if value.part==1 then
+                    if change.base or change.bases or change.before then return false,"invalid-raid-seed-base" end
+                elseif not change.base or change.bases or type(change.before)~="table" or change.before.complete~=false
+                    or change.before.part~=value.part-1 then return false,"invalid-raid-seed-base" end
+            end
+            seed=value
+        end
+        if key=="raid:metadata" and not archiveKey then metadata=not change.deleted end
         if not change.deleted and not archiveDeleted then
             if sessionDeletion then
                 if type(value)~="table" or not ArchivedHistory(value.snapshot,false) or not ArchivedHistory(value.statistic,true) then return false,"invalid-session-archive" end
                 for field in pairs(value) do if field~="snapshot" and field~="statistic" then return false,"invalid-session-archive" end end
                 for _,entry in pairs(value) do if entry and operation.raidId and entry.syncRaidId~=operation.raidId then return false,"invalid-session-archive-identity" end end
+            elseif key=="raid:seed" then -- validated with its causal context above
             elseif key=="raid:metadata" then
                 if not Fields(value,{id="string",raidName="string",displayName="string",startedAt="number",endedAt="number",savedAt="number",modifiedAt="number"})
                     or not Text(value.id) or not Text(value.raidName) then return false,"invalid-raid-metadata" end
@@ -219,6 +236,8 @@ function Replica.ValidateOperation(operation)
             else return false,"invalid-domain-value" end
         end
     end
+    if seed and seed.complete~=(metadata==true) then return false,"invalid-raid-seed-publication" end
+    if operation.kind=="raid.seed" and not seed then return false,"invalid-raid-seed-part" end
     return true
 end
 function Replica.ValidateCheckpoint(entry)
@@ -425,7 +444,7 @@ function Replica.Create(options)
         local count=state.receivedCounts[id]
         if count then
             local operation=count==1 and state.receivedLast[id] and J.GetOperation(db,state.receivedLast[id])
-            if operation and operation.kind~="raid.observe" and not operation.compacted then
+            if operation and operation.kind~="raid.observe" and operation.kind~="raid.seed" and not operation.compacted then
                 local action=Raider.Modules and Raider.Modules.RaidLog and Raider.Modules.RaidLog.FormatAction(operation) or operation.kind
                 api.LogSync("Received update by "..tostring(operation.author)..": "..tostring(action))
             elseif count>1 then
@@ -441,6 +460,8 @@ function Replica.Create(options)
     end
     function api.OnOperation(operation,status,localChange,source)
         if not operation or status=="duplicate" then return end
+        -- No projection or action log until the seed's final metadata arrives.
+        if operation.kind=="raid.seed" then return end
         local catchingUp=CatchingUp(operation.raidId)
         if not localChange and catchingUp then
             -- Only alias inputs need an import checkpoint: saved raid data is
@@ -745,7 +766,7 @@ function Replica.Create(options)
         if latestId==nil then
             for _,operationId in ipairs(raid and raid.operationIds or {}) do
                 local operation=J.GetOperation(db,operationId)
-                if operation and operation.kind~="raid.observe" and LaterChange(operation,latest) then latest=operation end
+                if operation and operation.kind~="raid.observe" and operation.kind~="raid.seed" and LaterChange(operation,latest) then latest=operation end
             end
             state.latestOperations[id]=latest and latest.id or false
         end
@@ -1426,7 +1447,7 @@ function Replica.Create(options)
         for _,sourceKey in ipairs(Keys(sourceRecords)) do
             local incoming=sourceRecords[sourceKey]
             local known=previous and previous.token and previous.token.heads and previous.token.heads[sourceKey]
-            if not string.find(sourceKey,"^merge:") and not string.find(sourceKey,"^recorder:") and sourceKey~="raid:lifecycle" and sourceKey~="raid:alias-decision"
+            if not string.find(sourceKey,"^merge:") and not string.find(sourceKey,"^recorder:") and sourceKey~="raid:lifecycle" and sourceKey~="raid:alias-decision" and sourceKey~="raid:seed"
                 and not J.Equal(known,plan.token.source.heads[sourceKey]) then
                 local key=plan.mapping[sourceKey] or sourceKey
                 local current=targetRecords[key]

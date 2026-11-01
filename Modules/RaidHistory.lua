@@ -160,6 +160,10 @@ local function Cell(label, parent, x, width, text)
     return Raider.UI.Components.MeasureTextHeight(label, width, true) + 10
 end
 
+local function SnapshotStatus(info)
+    return info.lifecycle=="deleted" and "Session removed" or info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended"
+end
+
 local function MeasureHistory(width, controls)
     local page, snapshots, actionY = controls.historyPage, controls.historyPage.raidHistorySnapshots, controls.historyActionY
     local canEdit = Raider.Services.RankPolicy.CanManageHistory()
@@ -168,7 +172,7 @@ local function MeasureHistory(width, controls)
         local created,modified,duration=Raider.Services.RaidRes.GetSnapshotTimes(snapshot)
         local api=Raider.Runtime and Raider.Runtime.replica;local info=api and api.GetRaidInfo and api.GetRaidInfo(snapshot.syncRaidId) or {}
         modified=info.modifiedAt or modified
-        values[index]={index,snapshot.id,ShortRaid(snapshot.raidName),Raider.Services.RaidRes.FormatDuration(duration),created and date("%Y-%m-%d %H:%M",created) or "Unknown",modified and date("%Y-%m-%d %H:%M",modified) or "Unknown",info.storage or "In memory",info.lastAuthor or "Unknown",info.lifecycle=="deleted" and "Archived" or info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended",""}
+        values[index]={index,snapshot.id,ShortRaid(snapshot.raidName),Raider.Services.RaidRes.FormatDuration(duration),created and date("%Y-%m-%d %H:%M",created) or "Unknown",modified and date("%Y-%m-%d %H:%M",modified) or "Unknown",info.storage or "In memory",info.lastAuthor or "Unknown",SnapshotStatus(info),""}
     end
     if not controls.historyHeaders[10] then controls.historyHeaders[10]=UI.CreateColumnLabel(page,"Actions","gold") end
     local widths=FitColumns(page,controls,controls.historyHeaders,values,width,canEdit and 134 or 108)
@@ -211,9 +215,18 @@ local function MeasureHistory(width, controls)
                 Cell(button.savedAt, button, durationX + durationWidth + createdWidth, modifiedWidth, modifiedAt and date("%Y-%m-%d %H:%M", modifiedAt) or "Unknown"),
                 Cell(button.storage,button,dataWidth-storageWidth-authorWidth-statusWidth,storageWidth,info.storage),
                 Cell(button.author,button,dataWidth-authorWidth-statusWidth,authorWidth,info.lastAuthor or "Unknown"),
-                Cell(button.status,button,dataWidth-statusWidth,statusWidth,info.lifecycle=="deleted" and "Archived" or info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended"))
+                Cell(button.status,button,dataWidth-statusWidth,statusWidth,SnapshotStatus(info)))
             button:SetHeight(height); button:Show()
             Raider.UI.Components.StyleSelectableTableRow(button, math.mod(index, 2) == 0, page.selectedRaidHistoryId == snapshot.id)
+            if not button.bootySnapshotTooltip then
+                button.bootySnapshotTooltip=true
+                UI.AttachTooltip(button,function() return button.status:GetText() end,function()
+                    if button.status:GetText()=="Session removed" then
+                        return "The active session was removed. This saved snapshot is kept. Load it to start a new session."
+                    end
+                    return "A saved copy of the raid. Load it to continue the session."
+                end)
+            end
             Raider.UI.Components.SetAlternatingRowColor(button, nil, index)
             load:SetWidth(24); load:SetHeight(24); deleteButton:SetWidth(24); deleteButton:SetHeight(24)
             load:ClearAllPoints(); load:SetPoint("LEFT", button, "RIGHT", 4, 0); load:Show()

@@ -49,12 +49,23 @@ function Audit.Commit(record, kind, changes, detail, visible)
         end
         changes=archived
     end
-    if Raider.Services.RaidReplica then
-        local valid,reason=Raider.Services.RaidReplica.ValidateOperation({changes=changes})
-        if not valid then return false,reason end
-    end
     local id = Audit.EnsureIdentity(record)
-    local ok,operation=Raider.Services.RaidJournal.Commit(Store(), id, kind, changes, detail, visible)
+    local db,journal=Store(),Raider.Services.RaidJournal
+    local validate=Raider.Services.RaidReplica and Raider.Services.RaidReplica.ValidateOperation
+    local newCopy=validate and not db.raidJournal.raids[id] and (kind=="raid.save" or kind=="raid.start")
+    local ok,operation
+    if newCopy and table.getn(changes)>journal.limits.changes then
+        ok,operation=journal.CommitNewRaid(db,id,kind,changes,detail,visible,validate)
+    else
+        if validate then
+            local valid,reason=validate({changes=changes})
+            if not valid then return false,reason end
+        end
+        ok,operation=journal.Commit(db,id,kind,changes,detail,visible)
+        if not ok and newCopy and (operation=="operation-node-limit" or operation=="operation-byte-limit") then
+            ok,operation=journal.CommitNewRaid(db,id,kind,changes,detail,visible,validate)
+        end
+    end
     local replica=Raider.Runtime and Raider.Runtime.replica
     if ok and operation and replica then replica.OnOperation(operation,"applied",true) end
     return ok,operation
