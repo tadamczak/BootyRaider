@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 — 2026-11-01
+
+- Reduce loot-related memory churn and repeated UI work during long raids.
+- Save recorded raids incrementally and avoid repeated synchronization attempts to offline officers.
+- Copy large raids under a new Raid ID without replacing the original or exposing incomplete data.
+- Clarify retained snapshots with **Session removed** and keep the README concise.
+- Requires BootyLib 0.1.0. Update all synchronizing officers together; current saved data is retained.
+
 ## 1.0.1-dev.4 — 2026-11-01
 
 - Save large raids under a new Raid ID without replacing the original or exposing an incomplete copy.
