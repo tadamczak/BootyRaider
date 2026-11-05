@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2-dev.4 — 2026-11-05
+
+- Allow Tmog by equipment slot, including all main-hand, off-hand and ranged items regardless of item class.
+
 ## 1.0.2-dev.3 — 2026-11-05
 
 - Clarify that unchecked rank rules mean no extra loot rights; ordinary MS / OS / Tmog rolls remain available.

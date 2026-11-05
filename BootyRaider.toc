@@ -2,7 +2,7 @@
 ## Title: BootyRaider
 ## Notes: Raid sessions, loot tools, raid statistics and CSR. Works with or without Booty Suite.
 ## Author: Mukla
-## Version: 1.0.2-dev.3
+## Version: 1.0.2-dev.4
 ## X-Release-Version: 1.0.2
 ## RequiredDeps: BootyLib
 ## SavedVariables: BootyRaiderDB

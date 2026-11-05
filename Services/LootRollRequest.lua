@@ -8,7 +8,8 @@ local transmogSlots = {
     INVTYPE_HEAD=true, INVTYPE_SHOULDER=true, INVTYPE_CHEST=true, INVTYPE_ROBE=true, INVTYPE_BODY=true,
     INVTYPE_WRIST=true, INVTYPE_HAND=true, INVTYPE_WAIST=true, INVTYPE_LEGS=true, INVTYPE_FEET=true,
     INVTYPE_WEAPON=true, INVTYPE_2HWEAPON=true, INVTYPE_WEAPONMAINHAND=true, INVTYPE_WEAPONOFFHAND=true,
-    INVTYPE_RANGED=true, INVTYPE_RANGEDRIGHT=true, INVTYPE_THROWN=true,
+    INVTYPE_SHIELD=true, INVTYPE_HOLDABLE=true,
+    INVTYPE_RANGED=true, INVTYPE_RANGEDRIGHT=true, INVTYPE_THROWN=true, INVTYPE_RELIC=true,
 }
 
 function Request.IsTransmogEligible(reference)
@@ -29,7 +30,7 @@ function Request.IsTransmogEligible(reference)
     elseif type(legacySlot) == "string" and string.find(legacySlot, "^INVTYPE_") then slot = legacySlot
     elseif extendedSlot == "" or legacySlot == "" then slot = "" end
     if slot == nil then return false, "Item equipment information is unavailable for Tmog; try again." end
-    if not transmogSlots[slot] then return false, "Tmog is available only for eligible armor slots and weapons." end
+    if not transmogSlots[slot] then return false, "Tmog is not available for this equipment slot." end
     return true
 end
 
