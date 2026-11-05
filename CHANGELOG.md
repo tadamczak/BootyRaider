@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2-dev.3 — 2026-11-05
+
+- Clarify that unchecked rank rules mean no extra loot rights; ordinary MS / OS / Tmog rolls remain available.
+- Specify SR in the missing-rights confirmation.
+
 ## 1.0.2-dev.2 — 2026-11-05
 
 - Keep saved raids marked Ended after deleting a reopened session, including their Raid Stats and CSR eligibility.

@@ -174,12 +174,12 @@ function Management.CreateReserveEditor(page, getAttendance, refresh)
         if allowed and table.getn(selected)==0 then frame.message:SetText("Select an SR before enabling an exception."); return end
         if not hasRights and not allowed and table.getn(selected)>0 and not confirmed then
             if not frame.confirm then
-                frame.confirm=UI.Window.CreateProjectConfirmation("BootyRaiderReserveRightsConfirm","No loot rights","Save anyway","raids")
+                frame.confirm=UI.Window.CreateProjectConfirmation("BootyRaiderReserveRightsConfirm","No SR loot rights","Save anyway","raids")
                 if UI.WindowStack then UI.WindowStack.SetOwner(frame.confirm,frame) end
             end
             local confirm=frame.confirm
             confirm.label:SetWidth(confirm:GetWidth()-16);confirm.label:SetHeight(0)
-            confirm:Open(frame.memberName.." has no loot rights.\nNo SR exception selected.\nSave this SR anyway?",function() Save(true) end)
+            confirm:Open(frame.memberName.." has no SR loot rights.\nNo SR exception selected.\nSave this SR anyway?",function() Save(true) end)
             -- Some clients report the old constrained FontString height. The
             -- three explicit lines still need their full line boxes.
             local _,size=confirm.label:GetFont()

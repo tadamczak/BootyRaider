@@ -8,6 +8,7 @@ Raid and loot management for **WoW 1.12**. Works standalone or inside **BootySui
 
 - Raid sessions, attendance and loot history, including players who leave early.
 - Loot Master tools and MS, OS, Tmog, Reycoin and SR rolls.
+- Rank checkboxes grant extra rights; ordinary MS / OS / eligible Tmog rolls do not require them.
 - Soft Reserve import, manual edits and item names without links.
 - Raid Stats and CSR points from saved, ended raids.
 - Automatic officer synchronization, session recovery and Raid Log.
