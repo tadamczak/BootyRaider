@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2-dev.2 — 2026-11-05
+
+- Keep saved raids marked Ended after deleting a reopened session, including their Raid Stats and CSR eligibility.
+
 ## 1.0.2-dev.1 — 2026-11-05
 
 - Keep warning INFO and Fix SR windows open during ordinary raid refreshes.

@@ -770,8 +770,23 @@ function Replica.Create(options)
             end
             state.latestOperations[id]=latest and latest.id or false
         end
+        local removed=api.IsSessionDeleted(id)
+        local lifecycle,record=Record(id,"raid:lifecycle")
+        local savedLifecycle
+        if removed and lifecycle=="active" and record and record.revision then
+            local operation=J.GetOperation(db,record.revision)
+            -- Reopening changes the live lifecycle, not the earlier completion.
+            -- Its current head survives compaction; an end-time field alone is
+            -- insufficient because Save can record a time without ending.
+            if operation and operation.kind=="raid.reopen" then
+                for _,change in ipairs(operation.changes) do
+                    if change.key=="raid:lifecycle" and change.before=="ended" then savedLifecycle="ended";break end
+                end
+            end
+        end
         local info={storage=state.loadedRaids[id] and not state.changedRaids[id] and "On disk" or "In memory",
-            lifecycle=api.IsSessionDeleted(id) and "deleted" or Record(id,"raid:lifecycle") or "active",lastAuthor=latest and latest.author or "Unknown",lastSave=metadata.savedAt,modifiedAt=latest and latest.timestamp}
+            lifecycle=removed and "deleted" or lifecycle or "active",savedLifecycle=savedLifecycle,
+            lastAuthor=latest and latest.author or "Unknown",lastSave=metadata.savedAt,modifiedAt=latest and latest.timestamp}
         state.raidInfo[id]=info;return info
     end
 
@@ -917,17 +932,22 @@ function Replica.Create(options)
     end
     local function RestoreDeletedHistory(id)
         local best={snapshot=false,statistic=false};local pending=false
+        local savedLifecycle=api.GetRaidInfo(id).savedLifecycle
         for key in pairs(Raid(id).records) do
             if string.find(key,"^raid:session%-deleted:") then
                 local archive,record=Record(id,key)
                 if not archive or record.pendingCheckpoint or record.conflicted then pending=true
-                else for _,field in ipairs({"snapshot","statistic"}) do
-                    if NewerArchive(archive[field],best[field]) then best[field]=archive[field] end
-                end end
+                else
+                    if savedLifecycle and archive.statistic then archive.statistic.syncLifecycle=savedLifecycle end
+                    for _,field in ipairs({"snapshot","statistic"}) do
+                        if NewerArchive(archive[field],best[field]) then best[field]=archive[field] end
+                    end
+                end
             end
         end
         if pending then return false,"Waiting for the preserved saved raid." end
         local localArchive={snapshot=PackHistory(ExistingHistory("softReserveHistory",id)),statistic=PackHistory(ExistingHistory("raidStatistics",id))}
+        if savedLifecycle and localArchive.statistic then localArchive.statistic.syncLifecycle=savedLifecycle end
         local relay=false;local edited=false
         for key in pairs(Raid(id).records) do if string.sub(key,1,8)=="archive:" then edited=true;break end end
         for _,field in ipairs({"snapshot","statistic"}) do

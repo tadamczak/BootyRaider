@@ -34,6 +34,7 @@ Raid and loot management for **WoW 1.12**. Works standalone or inside **BootySui
 - To copy a saved raid, use **Session → Save Raid** with a new **Raid ID**.
 - **End & Save** saves and ends the shared raid; other officers can choose to continue.
 - **Session removed** means the saved snapshot remains; load it to start a new session.
+- Removing a reopened, previously ended session keeps its saved raid **Ended**.
 - Saved raids show the newest saves first; removed sessions stay out of the Sync list.
 - Uncheck **Raid sync** for a private raid; previously shared copies remain.
 - Use `/reload` or log out normally to write received data to disk.

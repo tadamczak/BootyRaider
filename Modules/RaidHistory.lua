@@ -161,7 +161,8 @@ local function Cell(label, parent, x, width, text)
 end
 
 local function SnapshotStatus(info)
-    return info.lifecycle=="deleted" and "Session removed" or info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended"
+    if info.lifecycle=="deleted" then return info.savedLifecycle=="ended" and "Ended" or "Session removed" end
+    return info.lifecycle and info.lifecycle~="ended" and "Active" or "Ended"
 end
 
 local function MeasureHistory(width, controls)

@@ -527,6 +527,10 @@ function Database.GetRaidStatistics()
                 local record,stored=records["raid:lifecycle"],records["saved:statistic"]
                 lifecycle=record and not record.deleted and not record.pendingCheckpoint and record.value or false
                 saved=stored and not stored.deleted and not stored.pendingCheckpoint and stored.value==true or false
+                local replica=Raider.Runtime and Raider.Runtime.replica
+                local info=replica and replica.IsSessionDeleted and replica.IsSessionDeleted(entry.syncRaidId)
+                    and replica.GetRaidInfo and replica.GetRaidInfo(entry.syncRaidId)
+                if info and info.savedLifecycle then lifecycle=info.savedLifecycle end
                 entry.syncLifecycle,entry.syncSaved=lifecycle,saved
             end
             if Raider.Services.CSR.IsSavedAndEnded(entry,lifecycle,saved) then
