@@ -435,16 +435,26 @@ function Database.StoreSoftReserveSnapshot(snapshot)
     return true
 end
 
+local function SnapshotBefore(left, right)
+    local a = left.savedAt or left.updatedAt or left.createdAt or left.startedAt or 0
+    local b = right.savedAt or right.updatedAt or right.createdAt or right.startedAt or 0
+    if a ~= b then return a > b end
+    return tostring(left.syncRaidId or left.id) < tostring(right.syncRaidId or right.id)
+end
+
 function Database.GetSoftReserveHistory()
     Database.Ensure()
     local history = BootyRaiderDB.softReserveHistory
     local snapshots = {}
     if not history or not history.order or not history.raids then return snapshots end
     local index, defaults = nil, BootyRaiderDB.lootRulesByRank
-    for index = 1, math.min(10, table.getn(history.order)) do
+    for index = 1, table.getn(history.order) do
         local snapshot = history.raids[history.order[index]]
         if snapshot then FreezeLootRules(snapshot, defaults); table.insert(snapshots, snapshot) end
     end
+    -- Journal replay/incoming order must not decide which snapshots are shown.
+    table.sort(snapshots, SnapshotBefore)
+    while table.getn(snapshots) > 10 do table.remove(snapshots) end
     return snapshots
 end
 

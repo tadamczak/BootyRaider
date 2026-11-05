@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2-dev.1 — 2026-11-05
+
+- Keep warning INFO and Fix SR windows open during ordinary raid refreshes.
+- Explain HCI restrictions separately from missing SR rights.
+- Keep saved raids ordered by save time across reload and synchronization.
+
 ## 1.0.1 — 2026-11-01
 
 - Reduce loot-related memory churn and repeated UI work during long raids.

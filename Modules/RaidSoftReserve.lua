@@ -170,7 +170,8 @@ local function CreateWarningCard(page, dialogName, dialogTitle, background, bord
     warning.info:SetScript("OnClick", function()
         warning.dialog.title:SetText("|cffffd147Warning:|r " .. (warning.text:GetText() or dialogTitle))
         local attendance = page.getWarningAttendance and page.getWarningAttendance() or page.listRenderer and page.listRenderer.getData()
-        local issues = Raider.Services.Raid.GetSoftReserveIssues(attendance, page.getSoftReserveRules and page.getSoftReserveRules())
+        local rules = page.getSoftReserveRules and page.getSoftReserveRules()
+        local issues = Raider.Services.Raid.GetSoftReserveIssues(attendance, rules)
         local key = warning == page.softReserveWarning and "unmatchedNames" or warning == page.missingSoftReserveWarning and "missingNames" or "invalidNames"
         local names = issues[key] or {}
         local dialog = warning.dialog
@@ -203,7 +204,10 @@ local function CreateWarningCard(page, dialogName, dialogTitle, background, bord
             if key == "invalidNames" then
                 for _, member in ipairs(attendance and attendance.members or {}) do
                     if string.lower(member.name or "") == string.lower(names[index]) then
-                        caption = caption .. " - " .. Raider.Services.RankPolicy.GetDisplayName((member.guildRank and member.guildRank ~= "" and member.guildRank) or "Guest") .. " rank has no SR"
+                        local rank = Raider.Services.RankPolicy.GetDisplayName((member.guildRank and member.guildRank ~= "" and member.guildRank) or "Guest")
+                        local reason = Raider.Services.Raid.HasSoftReserveRights(member, rules)
+                            and ": HCI item not allowed" or ": no SR rights"
+                        caption = caption .. " - " .. rank .. reason
                         break
                     end
                 end

@@ -1019,7 +1019,8 @@ function RaidManagement.BeginRefresh(page, rows)
     page.lmConfigToggle:Hide()
     page.classicListButton:Hide(); page.classicGroupButton:Hide(); page.classicTwoButton:Hide(); page.classicFourButton:Hide()
     page.refreshControls.minimizedLabel:Hide()
-    page.softReserveWarning:Hide(); page.missingSoftReserveWarning:Hide(); page.invalidSoftReserveWarning:Hide()
+    -- Warning visibility belongs to the final layout. A transient Hide here
+    -- also closes the INFO/Fix windows owned by an otherwise unchanged card.
     page.listHeaderUI.online:Hide(); page.listHeaderUI.onlineButton:Hide()
     page.listHeaderUI.level:Hide(); page.listHeaderUI.levelButton:Hide()
     page.groupSelectMenu:Hide(); page.groupSelectDismiss:Hide()
@@ -1417,6 +1418,7 @@ function RaidManagement.RefreshPage(renderer)
 end
 
 function RaidManagement.ShowMinimizedLootMasterState(page, rows)
+    RaidManagement.HideSoftReserveWarnings(page)
     if page.toolDropdowns then for _, panel in pairs(page.toolDropdowns) do panel:Hide() end end
     local controls = page.refreshControls
     controls.leaderMode:Hide(); controls.resetFilters:Hide()
@@ -1432,6 +1434,7 @@ function RaidManagement.ShowMinimizedLootMasterState(page, rows)
 end
 
 function RaidManagement.ShowNoRaidState(page, rows)
+    RaidManagement.HideSoftReserveWarnings(page)
     if page.toolDropdowns then for _, panel in pairs(page.toolDropdowns) do panel:Hide() end end
     local controls = page.refreshControls
     controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.mode:Hide(); controls.unavailable:Show()
@@ -1443,6 +1446,7 @@ function RaidManagement.ShowNoRaidState(page, rows)
 end
 
 function RaidManagement.ShowScanRequiredState(page, rows)
+    RaidManagement.HideSoftReserveWarnings(page)
     if page.toolDropdowns then for _, panel in pairs(page.toolDropdowns) do panel:Hide() end end
     local controls = page.refreshControls
     controls.leaderMode:Hide(); controls.resetFilters:Hide(); controls.mode:Hide()

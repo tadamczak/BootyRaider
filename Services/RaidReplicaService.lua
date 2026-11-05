@@ -777,12 +777,19 @@ function Replica.Create(options)
 
     local function RemoveHistory(history,id)
         if not history or not history.raids then return end
+        local position
         for key,entry in pairs(history.raids) do
             if entry.syncRaidId==id then
                 history.raids[key]=nil
-                for index=table.getn(history.order or {}),1,-1 do if history.order[index]==key then table.remove(history.order,index) end end
+                for index=table.getn(history.order or {}),1,-1 do
+                    if history.order[index]==key then
+                        if not position or index<position then position=index end
+                        table.remove(history.order,index)
+                    end
+                end
             end
         end
+        return position
     end
     local function AvailableHistoryId(history,name,raidId)
         local stem=name.." ["..ShortId(raidId).."]"
@@ -795,7 +802,7 @@ function Replica.Create(options)
     local function StoreHistory(field,entry)
         local history=db[field]
         if not history then history={raids={},order={}};db[field]=history end
-        RemoveHistory(history,entry.syncRaidId)
+        local position=RemoveHistory(history,entry.syncRaidId)
         local other=history.raids[entry.id]
         if other and other.syncRaidId~=entry.syncRaidId then
             local otherId=other.syncRaidId
@@ -804,7 +811,10 @@ function Replica.Create(options)
                 for index,value in ipairs(history.order) do if value==oldId then history.order[index]=other.id end end
             else entry.id=AvailableHistoryId(history,entry.id,entry.syncRaidId) end
         end
-        history.raids[entry.id]=entry;table.insert(history.order,1,entry.id)
+        history.raids[entry.id]=entry
+        -- Reconstructing a projection is not a new save. Preserve its position,
+        -- including when a display ID is renamed or disambiguated.
+        table.insert(history.order,position or 1,entry.id)
     end
     local function ExistingHistory(field,id)
         for _,entry in pairs(db[field] and db[field].raids or {}) do if entry.syncRaidId==id then return entry end end
