@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2 — 2026-11-07
+
+- Keep warning INFO windows open during refresh and explain HCI restrictions correctly.
+- Keep saved raids in a stable order and retain Ended status when a reopened session is removed.
+- Clarify that MS / OS / Tmog rolls do not require extra rank rights.
+- Allow Tmog by equipment slot, including shields, holdables and relics.
+- Requires BootyLib 0.1.0; existing saved data is retained.
+
 ## 1.0.2-dev.4 — 2026-11-05
 
 - Allow Tmog by equipment slot, including all main-hand, off-hand and ranged items regardless of item class.
