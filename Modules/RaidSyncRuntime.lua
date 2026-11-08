@@ -2,7 +2,6 @@ local Raider=BootyRaider
 local SyncRuntime={}
 Raider.Modules.RaidSyncRuntime=SyncRuntime
 local runtime,nextWake,changed,statusChanged,registered,rosterAt,lastRosterFailure
-local lastSyncError
 local statusRefreshAt
 local lootRefresh,lootRefreshAt={},nil
 local onlineOfficers
@@ -247,7 +246,10 @@ function SyncRuntime.RefreshAuthority()
             validateCheckpoint=Raider.Services.RaidReplica.ValidateCheckpoint,
             onApply=function(operation,reason,source) runtime.replica.OnOperation(operation,reason,false,source) end,
             onConnected=function(name) runtime.replica.LogSync("Connected to "..name..". Checking raid updates.") end,
-            onDisconnected=function(name,reason) runtime.replica.LogSync("Lost connection to "..name.." ("..tostring(reason or "offline")..").") end,
+            onDisconnected=function(name,reason,reported)
+                if not reported then runtime.replica.LogSync("Lost connection to "..name.." ("..tostring(reason or "offline")..").") end
+            end,
+            onFailure=function(message) runtime.replica.LogSync(message) end,
             onRaidDelivered=function(name,id,count,lastOperationId)
                 ArmMaintenance()
                 local operation=count==1 and lastOperationId and Raider.Services.RaidJournal.GetOperation(BootyRaiderDB,lastOperationId)
@@ -260,8 +262,6 @@ function SyncRuntime.RefreshAuthority()
                 end
             end,
             onStatus=function(status)
-                if status.lastError and status.lastError~=lastSyncError then runtime.replica.LogSync(status.message.." ["..status.lastError.."]") end
-                lastSyncError=status.lastError
                 runtime.replica._state.revision=runtime.replica._state.revision+1;statusChanged=true;SyncRuntime.Wake() end})
         runtime.replica.SetTransport(runtime.raidSync)
     end
@@ -292,7 +292,7 @@ function SyncRuntime.Stop()
         runtime.events:SetScript("OnUpdate",nil)
         if registered then runtime.events:UnregisterEvent("CHAT_MSG_ADDON");runtime.events:UnregisterEvent("PLAYER_REGEN_ENABLED") end
     end
-    lastSyncError=nil;onlineOfficers=nil;registered=nil;nextWake=nil;rosterAt=nil;changed=nil;statusChanged=nil;statusRefreshAt=nil;maintenanceArmed=false;lastRosterFailure=nil
+    onlineOfficers=nil;registered=nil;nextWake=nil;rosterAt=nil;changed=nil;statusChanged=nil;statusRefreshAt=nil;maintenanceArmed=false;lastRosterFailure=nil
     lootRefresh={};lootRefreshAt=nil
     if Raider.Modules.RaidSync then Raider.Modules.RaidSync.Close() end
 end

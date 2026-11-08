@@ -399,8 +399,8 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
     local page = UI.CreateResponsiveCanvas(host, "BootyRaiderCSRPage")
     local controller = { page = page, rows = {}, detailRows = {}, detailLines = {}, viewButtons = {},
         summary = { players = {} }, selectedRaids = {}, expanded = {}, sortStates = {},
-        nodes = {}, pairs = {}, groups = {}, layoutRows = {}, groupMode = "default", showArchived = false,
-        showAwarded = false, visibility = {} }
+        nodes = {}, pairs = {}, groups = {}, layoutRows = {}, groupMode = "default", showArchived = true,
+        showAwarded = true, visibility = {} }
     page.csrController = controller; host.csrController = controller
     local raidNames = Raider.Services.RaidStatistics.GetRaidNames()
     for _, name in ipairs(raidNames) do controller.selectedRaids[name] = true end
@@ -448,7 +448,7 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
         group:SetWidth(156); group:SetHeight(26); group.bootyFlowWidth = 156
         local check = UI.CreateCheckButton(nil, group, "UICheckButtonTemplate")
         check:SetPoint("LEFT", group, "LEFT", 0, 0)
-        check:SetWidth(18); check:SetHeight(18); check:SetChecked(false)
+        check:SetWidth(18); check:SetHeight(18); check:SetChecked(controller[field])
         check.label = UI.CreateLabel(group, nil, "OVERLAY", "GameFontHighlightSmall")
         check.label:SetPoint("LEFT", check, "RIGHT", 0, 0); check.label:SetText(text)
         check.label:SetJustifyH("LEFT"); check.label:SetJustifyV("MIDDLE")
@@ -558,9 +558,13 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
             local node = { kind = "pair", key = PairKey(player), player = player, sources = {} }
             for index, raid in ipairs(player.raids or {}) do
                 local raidText = SourceLabel(raid)
-                local days = math.max(0, math.ceil(((tonumber(raid.expiresAt) or 0) - (self.summary.now or time())) / 86400))
+                local expires = "-"
+                if raid.status ~= "AWARDED" then
+                    local days = math.max(0, math.ceil(((tonumber(raid.expiresAt) or 0) - (self.summary.now or time())) / 86400))
+                    expires = tostring(days) .. "d"
+                end
                 node.sources[index] = { no = index, raid = raid, sortRaid = string.lower(raidText),
-                    texts = { tostring(index), raidText, date("%Y-%m-%d", tonumber(raid.savedAt) or 0), tostring(days) .. "d", (raid.status or "ACTIVE") .. (raid.provisional and " *" or "") } }
+                    texts = { tostring(index), raidText, date("%Y-%m-%d", tonumber(raid.savedAt) or 0), expires, (raid.status or "ACTIVE") .. (raid.provisional and " *" or "") } }
             end
             table.insert(self.pairs, node)
             if self.groupMode == "default" then table.insert(self.nodes, node)
@@ -855,8 +859,8 @@ function CSR.Create(host, getEntries, getRules, getRosterData, openRaidStatistic
                 for index, column in ipairs(controller.sourceColumns) do
                     local label = row.labels[index]
                     UI.Table.Cell(label, row, x, column.width - 8, row:GetHeight(), detail.source.texts[index])
-                    if raid.status == "ARCHIVED" then label:SetTextColor(0.5, 0.5, 0.5)
-                    elseif column.field == "status" and raid.status == "AWARDED" then label:SetTextColor(0.2, 1, 0.2)
+                    if column.field == "status" and raid.status == "AWARDED" then label:SetTextColor(0.2, 1, 0.2)
+                    elseif raid.status == "ARCHIVED" or raid.status == "AWARDED" then label:SetTextColor(0.5, 0.5, 0.5)
                     elseif column.field == "status" then label:SetTextColor(1, 1, 0)
                     else label:SetTextColor(1, 1, 1) end
                     label:Show(); x = x + column.width

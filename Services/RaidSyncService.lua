@@ -53,14 +53,33 @@ local messages={
     ["officer-authority-required"]="Current guild officer access is required.",
     ["officer-authority-or-messaging-unavailable"]="Officer access or client messaging is unavailable.",
     ["unauthorized-original-author"]="A received change has no current officer author. Review the blocked officer.",
-    ["source-timeout"]="An officer stopped responding. Other available sources can continue.",
-    ["transfer-timeout"]="A transfer was interrupted. Missing data can resume from another officer.",
+    ["source-timeout"]="No response to the synchronization request.",
+    ["transfer-timeout"]="Data transfer timed out.",
     ["send-failed"]="The client could not send a synchronization message.",
     ["incompatible-peer"]="An officer uses an incompatible version or guild scope.",
     ["peer-limit"]="The officer connection limit has been reached.",
     ["peer-authority-lost"]="An officer no longer has access; their transfer was stopped.",
     ["peer-session-changed"]="An officer reconnected. Missing changes are being checked."
 }
+local failureReasons={
+    ["unauthorized-peer"]="The sender is not a current guild officer or used an unsupported channel.",
+    ["unauthorized-original-author"]="The change's author does not have current officer access.",
+    ["incompatible-peer"]="The addon protocol, data schema, or guild does not match.",
+    ["peer-authority-lost"]="The officer no longer has synchronization access.",
+    ["peer-session-changed"]="The officer reloaded or reconnected; checking missing data.",
+    ["invalid-domain-operation"]="The received raid change failed validation.",
+    ["invalid-message-scope"]="The received data belongs to a different guild.",
+    ["handshake-required"]="Data arrived before the officer connection was established.",
+    ["buffer-limit"]="The incoming data exceeds the memory limit.",
+    ["incoming-backpressure"]="Too many incoming transfers are already in progress.",
+    ["chunk-collision"]="Conflicting parts were received for the same transfer.",
+    ["invalid-ack"]="The officer acknowledged data that was not sent.",
+    ["operation-outside-range"]="The received change is outside the requested range."
+}
+local function LogText(value)
+    -- Error details may include remote labels; never interpret chat escapes.
+    return string.gsub(string.sub(tostring(value),1,120),"[%c|]","?")
+end
 
 function Sync.New(options)
     options=options or {}
@@ -142,8 +161,34 @@ function Sync.New(options)
         return true
     end
     function self:RefreshReadiness() return Ready() end
-    local function Reject(reason)
-        self.stats.rejected=self.stats.rejected+1;self.lastError=reason;self.revision=self.revision+1;self.statusDirty=true;return false,reason
+    local function Failure(reason,name,stage,detail)
+        local owner=self.peers[name or ""] or self
+        local key=tostring(reason)..":"..tostring(stage)
+        if owner==self then key=key..":"..tostring(name) end
+        self.lastError=reason;self.revision=self.revision+1;self.statusDirty=true
+        if owner.failureKey==key then self.lastErrorMessage=owner.failureMessage;return end
+        owner.failureKey=key
+        local who=name and LogText(name) or "client"
+        local message
+        if stage=="offline" then message="Sync paused: "..who.." went offline."
+        elseif stage=="request" then message="No reply from "..who.." to "..detail.."."
+        elseif stage=="receive" then message="Stopped receiving data from "..who.." ("..detail.." parts received)."
+        elseif stage=="acknowledgement" then message=who.." did not acknowledge sent data after 3 retries ("..detail.." parts confirmed)."
+        elseif stage=="completion" then message=who.." did not confirm synchronization of raid "..detail.."."
+        elseif stage=="decode" then message="Could not read data from "..who.."."
+        elseif stage=="encode" then message="Could not prepare data for "..who.."."
+        elseif stage=="send" then message="Client could not send a synchronization message: "..detail.."."
+        else message="Sync with "..who..": "..(failureReasons[reason] or messages[reason] or "Data was rejected during validation.") end
+        message=message.." ["..LogText(reason).."]"
+        owner.failureMessage=message;self.lastErrorMessage=message
+        if options.onFailure then options.onFailure(message,reason,name) end
+    end
+    local function RaidLabel(id)
+        local record=id and self.journal.GetRecord(self.db,id,"raid:metadata")
+        return LogText(record and record.value and record.value.id or id or "unknown")
+    end
+    local function Reject(reason,name,stage)
+        self.stats.rejected=self.stats.rejected+1;Failure(reason,name,stage);return false,reason
     end
     local function Control(text)
         if string.len(text)>Sync.limits.packet then return false,"packet-limit" end
@@ -282,25 +327,26 @@ function Sync.New(options)
             local fields=Fields(self.controls[index]);if fields and fields[2]==name then table.remove(self.controls,index) end
         end
     end
-    local function Disconnect(peer,reason)
-        if peer.connected and options.onDisconnected then options.onDisconnected(peer.name,reason) end
+    local function Disconnect(peer,reason,reported)
+        if peer.connected and options.onDisconnected then options.onDisconnected(peer.name,reason,reported) end
         peer.connected=false
     end
-    local function InterruptPeer(name,reason)
+    local function InterruptPeer(name,reason,stage,detail)
         local peer=self.peers[name]
         if not peer then return end
-        ClearPeerWork(name);Disconnect(peer,reason)
+        Failure(reason,name,stage,detail)
+        ClearPeerWork(name);Disconnect(peer,reason,true)
         peer.unavailable=true;peer.interrupted=reason;peer.needsSummary=nil;peer.summary=nil;peer.offset=0;peer.contactConfirmed=nil
-        self.lastError=reason;self.revision=self.revision+1;self.statusDirty=true
     end
     local function RemovePeer(name,reason)
         local peer=self.peers[name]
-        if peer then Disconnect(peer,reason) end
+        reason=reason or "peer-authority-lost"
+        if reason~="incompatible-peer" then Failure(reason,name) end
+        if peer then Disconnect(peer,reason,true) end
         ClearPeerWork(name);self.peers[name]=nil
         local receipts=self.receipts[name]
         for _,raid in pairs(receipts or {}) do for _,ranges in pairs(raid) do self.receiptRanges=self.receiptRanges-Count(ranges) end end
         self.receipts[name]=nil
-        self.lastError=reason or "peer-authority-lost";self.revision=self.revision+1;self.statusDirty=true
     end
     local function RetireSession(name,session)
         if not self.retiredSessions[name] and CountMap(self.retiredSessions)>=Sync.limits.peers then
@@ -373,32 +419,32 @@ function Sync.New(options)
     end
     local function Dispatch(peer,payload,receiptId,receiptSession)
         if peer.blocked then return true,"blocked-peer" end
-        if type(payload)~="table" or payload.scope~=self.scope then return Reject("invalid-message-scope") end
+        if type(payload)~="table" or payload.scope~=self.scope then return Reject("invalid-message-scope",peer.name) end
         -- A surviving sender can still have chunks addressed to our previous
         -- client process. Request numbers alone restart at one after login.
-        if not Text(payload.recipientSession,32) then return Reject("invalid-recipient-session") end
+        if not Text(payload.recipientSession,32) then return Reject("invalid-recipient-session",peer.name) end
         if payload.recipientSession~=self.session then return true,"stale-recipient-session" end
-        if not Integer(payload.request,9007199254740991) or payload.request<1 then return Reject("invalid-request") end
+        if not Integer(payload.request,9007199254740991) or payload.request<1 then return Reject("invalid-request",peer.name) end
         local kind=payload.type
         local function Busy()
             Control(table.concat({"B",peer.name,peer.session,tostring(payload.request)},"~"));return true,"source-busy"
         end
         if kind=="summary-request" then
-            if not Integer(payload.offset,9007199254740991) then return Reject("invalid-summary-offset") end
+            if not Integer(payload.offset,9007199254740991) then return Reject("invalid-summary-offset",peer.name) end
             local summary,failure=Summary(payload.offset,Sync.limits.summary,ActiveRaid())
-            if not summary then return Reject(failure) end
+            if not summary then return Reject(failure,peer.name) end
             local queued=Queue(peer.name,{type="summary",request=payload.request,summary=summary,activeRaidId=ActiveRaid(),generation=self.generation},1)
             if not queued then return Busy() end
             peer.advertised=peer.advertised or {}
             for _,entry in ipairs(summary.entries) do
-                if not peer.advertised[entry.raidId] and CountMap(peer.advertised)>=Sync.limits.progressRaids then return Reject("progress-raid-limit") end
+                if not peer.advertised[entry.raidId] and CountMap(peer.advertised)>=Sync.limits.progressRaids then return Reject("progress-raid-limit",peer.name) end
                 local progress=peer.advertised[entry.raidId] or {confirmed=0};peer.advertised[entry.raidId]=progress
                 if progress.generation~=self.generation then progress.sent=nil end
                 progress.generation=self.generation;progress.activity=Now()
             end
             return true
         elseif kind=="caught-up" then
-            if not Text(payload.raidId,300) or not Integer(payload.generation,9007199254740991) then return Reject("invalid-completion") end
+            if not Text(payload.raidId,300) or not Integer(payload.generation,9007199254740991) then return Reject("invalid-completion",peer.name) end
             local progress=peer.advertised and peer.advertised[payload.raidId]
             if not progress or progress.generation~=payload.generation then return true,"stale-completion" end
             peer.advertised[payload.raidId]=nil;self.statusDirty=true
@@ -407,7 +453,7 @@ function Sync.New(options)
         elseif kind=="range-request" then
             if not Text(payload.raidId,300) or not Text(payload.origin,256) or not Integer(payload.first,9007199254740991)
                 or payload.first<1 or not Integer(payload.last,9007199254740991) or payload.last<payload.first
-                or payload.last-payload.first>=Sync.limits.range then return Reject("invalid-range") end
+                or payload.last-payload.first>=Sync.limits.range then return Reject("invalid-range",peer.name) end
             if not Allowed(payload.raidId) then Queue(peer.name,{type="done",request=payload.request,missing=true},1);return true,"raid-sync-disabled" end
             if Count(self.exports)>=8 then return Busy() end
             local progress=peer.advertised and peer.advertised[payload.raidId];if progress then progress.transferring=true end
@@ -415,7 +461,7 @@ function Sync.New(options)
                 cursor=payload.first,last=payload.last,priority=Priority(payload.raidId)})
             return true
         elseif kind=="operation-request" then
-            if not Text(payload.id,300) then return Reject("invalid-operation-request") end
+            if not Text(payload.id,300) then return Reject("invalid-operation-request",peer.name) end
             local operation=self.journal.GetOperation(self.db,payload.id)
             if operation and Allowed(operation.raidId) then
                 if Count(self.exports)>=8 then return Busy() end
@@ -428,11 +474,11 @@ function Sync.New(options)
         if not request or request.peer~=peer.name or request.id~=payload.request then return true,"stale-response" end
         request.activity=Now()
         if kind=="summary" then
-            if request.payload.type~="summary-request" or not ValidateSummary(payload.summary) then return Reject("invalid-summary") end
+            if request.payload.type~="summary-request" or not ValidateSummary(payload.summary) then return Reject("invalid-summary",peer.name) end
             if payload.summary.nextOffset and (payload.summary.nextOffset<=request.payload.offset
-                or payload.summary.nextOffset>payload.summary.total or Count(payload.summary.entries)==0) then return Reject("invalid-summary-cursor") end
-            if payload.activeRaidId~=nil and not Text(payload.activeRaidId,300) then return Reject("invalid-active-raid") end
-            if not Integer(payload.generation,9007199254740991) then return Reject("invalid-summary-generation") end
+                or payload.summary.nextOffset>payload.summary.total or Count(payload.summary.entries)==0) then return Reject("invalid-summary-cursor",peer.name) end
+            if payload.activeRaidId~=nil and not Text(payload.activeRaidId,300) then return Reject("invalid-active-raid",peer.name) end
+            if not Integer(payload.generation,9007199254740991) then return Reject("invalid-summary-generation",peer.name) end
             if payload.generation<(tonumber(peer.generation) or 0)
                 or request.payload.offset>0 and tostring(payload.generation)~=request.generation then
                 peer.needsSummary=true;peer.offset=0;peer.inventory=nil;peer.summary=nil;self.request=nil
@@ -444,39 +490,39 @@ function Sync.New(options)
             peer.activeRaidId=Allowed(payload.activeRaidId) and payload.activeRaidId or nil
             peer.summary=payload.summary;peer.needsSummary=false;self.request=nil
             local observed,failure=ObserveInventory(peer,payload.summary,request.payload.offset)
-            if not observed then return Reject(failure) end
+            if not observed then return Reject(failure,peer.name) end
             return true
         elseif kind=="operation" then
             local operation=payload.operation
-            if type(operation)~="table" or not Authority(operation.author) then return Reject("unauthorized-original-author") end
+            if type(operation)~="table" or not Authority(operation.author) then return Reject("unauthorized-original-author",peer.name) end
             if request.payload.type=="operation-request" then
-                if request.payload.id~=operation.id then return Reject("unexpected-operation") end
+                if request.payload.id~=operation.id then return Reject("unexpected-operation",peer.name) end
             elseif request.payload.type=="range-request" then
                 local wanted=request.payload
                 if operation.raidId~=wanted.raidId or operation.origin~=wanted.origin or not Integer(operation.sequence,9007199254740991)
-                    or operation.sequence<wanted.first or operation.sequence>wanted.last then return Reject("operation-outside-range") end
-            else return Reject("unexpected-operation") end
+                    or operation.sequence<wanted.first or operation.sequence>wanted.last then return Reject("operation-outside-range",peer.name) end
+            else return Reject("unexpected-operation",peer.name) end
             if not Allowed(operation.raidId) then return true,"raid-sync-disabled" end
             local validator=payload.checkpoint and options.validateCheckpoint or options.validateOperation
             if validator then
                 local valid,failure=validator(operation,self.scope,peer.name)
-                if not valid then return Reject(failure or "invalid-domain-operation") end
+                if not valid then return Reject(failure or "invalid-domain-operation",peer.name) end
             end
-            if operation.compacted and payload.checkpoint~=true then return Reject("checkpoint-envelope-required") end
-            if payload.checkpoint and type(self.journal.ApplyCheckpointEntry)~="function" then return Reject("checkpoint-unsupported") end
+            if operation.compacted and payload.checkpoint~=true then return Reject("checkpoint-envelope-required",peer.name) end
+            if payload.checkpoint and type(self.journal.ApplyCheckpointEntry)~="function" then return Reject("checkpoint-unsupported",peer.name) end
             local apply=payload.checkpoint and self.journal.ApplyCheckpointEntry or self.journal.Apply
             local applied,reason=apply(self.db,operation)
             if not applied then
                 if reason=="missing-dependency" or reason=="checkpoint-required" then
                     local ok,failure=Dependency(operation,peer.name,reason=="checkpoint-required")
-                    if not ok then return Reject(failure) end
+                    if not ok then return Reject(failure,peer.name) end
                     return true,"dependency-pending"
                 end
-                return Reject(reason)
+                return Reject(reason,peer.name)
             end
             self.dependencies[operation.id]=nil
             self.catchupCandidates[operation.raidId]=true
-            self.lastError=nil
+            self.lastError=nil;self.lastErrorMessage=nil
             -- A validated complete export also proves that this source held the
             -- same operation in RAM when it sent it; no disk claim is inferred.
             Confirm(peer.name,{raidId=operation.raidId,origin=operation.origin,sequence=operation.sequence})
@@ -498,7 +544,7 @@ function Sync.New(options)
             end
             return true,reason
         elseif kind=="done" then
-            if request.payload.type=="summary-request" then return Reject("unexpected-done") end
+            if request.payload.type=="summary-request" then return Reject("unexpected-done",peer.name) end
             if payload.missing then
                 peer.cooldown=Now()+Sync.limits.timeout
                 if request.payload.id and self.dependencies[request.payload.id] then self.dependencies[request.payload.id].peer=nil end
@@ -506,7 +552,7 @@ function Sync.New(options)
             if request.payload.raidId then self.catchupCandidates[request.payload.raidId]=true end
             self.request=nil;return true
         end
-        return Reject("unknown-message")
+        return Reject("unknown-message",peer.name)
     end
 
     function self:GetStatus(raidId)
@@ -561,6 +607,7 @@ function Sync.New(options)
         local message
         if not self.enabled then message=messages[self.reason] or "Synchronization is stopped."
         elseif paused then message=messages["directory-not-ready"]
+        elseif self.lastError and self.lastErrorMessage then message=self.lastErrorMessage
         elseif self.lastError and messages[self.lastError] then message=messages[self.lastError]
         elseif self.lastError then message="Received data was rejected. Review the blocked officer and retry."
         elseif available==0 then message="Waiting for another officer to come online. Your raid is kept on this character."
@@ -606,7 +653,7 @@ function Sync.New(options)
         if self.starts>1 then self.session=string.sub(self.session,1,20).."-r"..self.starts end
         if self.policyEpoch then self.session=string.sub(self.session,1,20).."-p"..tostring(self.policyEpoch) end
         if not Session(self.session) then Status("invalid-session");return false,self.reason end
-        self.enabled=true;self.lastError=nil;self.lastTick=Now();self.tokens=Sync.limits.burst;self.discoveryRemaining=2;self.discoveryAt=Now()+3
+        self.enabled=true;self.failureKey=nil;self.lastError=nil;self.lastErrorMessage=nil;self.lastTick=Now();self.tokens=Sync.limits.burst;self.discoveryRemaining=2;self.discoveryAt=Now()+3
         local queued,reason=Hello()
         if not queued then self:Stop(reason);return false,reason end
         Status("discovering");return true
@@ -639,8 +686,8 @@ function Sync.New(options)
     end
     function self:Discover()
         if not Ready() then return false end
-        for _,peer in pairs(self.peers) do peer.needsSummary=true;peer.offset=0;peer.cooldown=nil;peer.unavailable=nil;peer.blocked=nil;peer.interrupted=nil end
-        self.lastError=nil;self.statusDirty=true
+        for _,peer in pairs(self.peers) do peer.failureKey=nil;peer.needsSummary=true;peer.offset=0;peer.cooldown=nil;peer.unavailable=nil;peer.blocked=nil;peer.interrupted=nil end
+        self.lastError=nil;self.lastErrorMessage=nil;self.statusDirty=true
         self.announce=true;self.discoveryRemaining=2;self.discoveryAt=Now()+3;return true
     end
     function self:Retry()
@@ -651,7 +698,7 @@ function Sync.New(options)
         self.peers=peers
         for _,peer in pairs(peers) do
             peer.summary=nil;peer.offset=0;peer.cooldown=nil;peer.unavailable=nil;peer.blocked=nil;peer.interrupted=nil
-            peer.contactConfirmed=nil;peer.connected=false;peer.needsSummary=true
+            peer.failureKey=nil;peer.contactConfirmed=nil;peer.connected=false;peer.needsSummary=true
             peer.advertised=nil;peer.completionPending=nil;peer.inventory=nil
         end
         return self:Start()
@@ -661,10 +708,10 @@ function Sync.New(options)
         if not Ready() then return false,self.reason end
         -- Guild addon messages also return to their sender. This is not peer input.
         if channel=="GUILD" and sender==self.actor then return false,"self-echo" end
-        if channel~="GUILD" or not Text(sender,96) or not Authority(sender) then return Reject("unauthorized-peer") end
-        if type(text)~="string" or string.len(text)>Sync.limits.packet then return Reject("packet-limit") end
+        if channel~="GUILD" or not Text(sender,96) or not Authority(sender) then return Reject("unauthorized-peer",sender) end
+        if type(text)~="string" or string.len(text)>Sync.limits.packet then return Reject("packet-limit",sender) end
         local fields=Fields(text)
-        if not fields then return Reject("invalid-packet") end
+        if not fields then return Reject("invalid-packet",sender) end
         if fields[2]~=self.actor and fields[2]~="*" then
             -- GUILD transports share a single sender budget. Valid chunks to
             -- another recipient prove a selected source is working, not offline.
@@ -684,7 +731,7 @@ function Sync.New(options)
                 or not Integer(tonumber(fields[7]),9007199254740991) or DecodeScope(fields[8])~=self.scope then
                 if self.peers[sender] then RemovePeer(sender,"incompatible-peer") end
                 if CountMap(self.incompatiblePeers)<Sync.limits.peers or self.incompatiblePeers[sender] then self.incompatiblePeers[sender]={seen=Now()} end
-                return Reject("incompatible-peer")
+                return Reject("incompatible-peer",sender)
             end
             self.incompatiblePeers[sender]=nil
             for _,session in ipairs(self.retiredSessions[sender] or {}) do if session==fields[3] then return false,"stale-session" end end
@@ -696,7 +743,7 @@ function Sync.New(options)
             end
             local connected=not peer
             if not peer then
-                if CountMap(self.peers)>=Sync.limits.peers then return Reject("peer-limit") end
+                if CountMap(self.peers)>=Sync.limits.peers then return Reject("peer-limit",sender) end
                 peer={name=sender,offset=0};self.peers[sender]=peer
             end
             if peer.session~=fields[3] then
@@ -705,9 +752,10 @@ function Sync.New(options)
             end
             if peer.session~=fields[3] or peer.generation~=fields[7] or peer.unavailable or not peer.connected then peer.needsSummary=true;peer.offset=0;peer.inventory=nil end
             local returning=peer.unavailable or not peer.connected
+            if returning then peer.failureKey=nil end
             peer.session=fields[3];peer.generation=fields[7];peer.seen=Now();peer.cooldown=nil;peer.unavailable=nil;peer.interrupted=nil
             peer.presenceRevision=options.presenceRevision and options.presenceRevision() or nil
-            if self.lastError=="peer-session-changed" or self.lastError=="source-timeout" or self.lastError=="transfer-timeout" then self.lastError=nil end
+            if self.lastError=="peer-session-changed" or self.lastError=="source-timeout" or self.lastError=="transfer-timeout" then self.lastError=nil;self.lastErrorMessage=nil end
             if (connected or not peer.connected) and options.onConnected then options.onConnected(sender) end
             peer.connected=true
             -- Suppress echo bursts only after addressed traffic proves the
@@ -718,7 +766,7 @@ function Sync.New(options)
         local peer=self.peers[sender]
         if not peer or fields[2]~=self.actor then
             if not self.incompatiblePeers[sender] and (fields[1]=="D" or fields[1]=="A" or fields[1]=="R" or fields[1]=="B") then return false,"handshake-pending" end
-            return Reject("handshake-required")
+            return Reject("handshake-required",sender)
         end
         if peer.blocked then return false,"blocked-peer" end
         if peer.unavailable then return false,"handshake-pending" end
@@ -738,7 +786,7 @@ function Sync.New(options)
             local outgoing=self.outgoing;local acknowledged=tonumber(fields[5])
             if Count(fields)~=5 or not outgoing or outgoing.target~=sender or fields[3]~=self.session or fields[4]~=outgoing.id
                 or not Integer(acknowledged,outgoing.total) then return false,"stale-ack" end
-            if acknowledged>outgoing.sent then return Reject("invalid-ack") end
+            if acknowledged>outgoing.sent then return Reject("invalid-ack",sender) end
             if acknowledged>outgoing.ack then outgoing.ack=acknowledged;outgoing.activity=Now();outgoing.attempts=0 end
             if outgoing.ack==outgoing.total then self.outgoing=nil end
             return true
@@ -753,26 +801,26 @@ function Sync.New(options)
             local index,total,priority=tonumber(fields[5]),tonumber(fields[6]),tonumber(fields[7])
             if Count(fields)~=8 or not Text(fields[4],20) or not Integer(index,16384) or index<1
                 or not Integer(total,16384) or total<index or not Integer(priority,3) or priority<1
-                or string.len(fields[8])==0 then return Reject("invalid-chunk") end
+                or string.len(fields[8])==0 then return Reject("invalid-chunk",sender) end
             local key=sender..":"..fields[3]..":"..fields[4]
             local completed=self.completed[key]
             if completed then
-                if completed.total~=total then return Reject("chunk-collision") end
+                if completed.total~=total then return Reject("chunk-collision",sender) end
                 Control(table.concat({"A",sender,sourceSession,fields[4],tostring(total)},"~"));return true,"duplicate-chunk"
             end
             local transfer=self.incoming[key]
             if not transfer then
-                if CountMap(self.incoming)+Count(self.decodes)>=Sync.limits.incoming then return Reject("incoming-backpressure") end
+                if CountMap(self.incoming)+Count(self.decodes)>=Sync.limits.incoming then return Reject("incoming-backpressure",sender) end
                 transfer={sender=sender,id=fields[4],session=sourceSession,total=total,priority=priority,chunks={},received=0,contiguous=0,bytes=0,activity=Now()}
                 self.incoming[key]=transfer
             end
-            if transfer.total~=total or transfer.priority~=priority then ReleaseIncoming(key);return Reject("chunk-collision") end
-            if index>transfer.contiguous+Sync.limits.window*2 then return Reject("chunk-window") end
+            if transfer.total~=total or transfer.priority~=priority then ReleaseIncoming(key);return Reject("chunk-collision",sender) end
+            if index>transfer.contiguous+Sync.limits.window*2 then return Reject("chunk-window",sender) end
             local existing=transfer.chunks[index]
-            if existing and existing~=fields[8] then ReleaseIncoming(key);return Reject("chunk-collision") end
+            if existing and existing~=fields[8] then ReleaseIncoming(key);return Reject("chunk-collision",sender) end
             if not existing then
                 local bytes=string.len(fields[8])
-                if transfer.bytes+bytes>self.codec.limits.bytes or self.bufferBytes+bytes>Sync.limits.bufferBytes then ReleaseIncoming(key);return Reject("buffer-limit") end
+                if transfer.bytes+bytes>self.codec.limits.bytes or self.bufferBytes+bytes>Sync.limits.bufferBytes then ReleaseIncoming(key);return Reject("buffer-limit",sender) end
                 transfer.chunks[index]=fields[8];transfer.bytes=transfer.bytes+bytes;self.bufferBytes=self.bufferBytes+bytes;transfer.received=transfer.received+1
             end
             transfer.activity=Now()
@@ -792,7 +840,7 @@ function Sync.New(options)
             end
             return true
         end
-        return Reject("unknown-packet")
+        return Reject("unknown-packet",sender)
     end
 
     function self:Receive(prefix,text,channel,sender)
@@ -817,7 +865,7 @@ function Sync.New(options)
         for name,peer in pairs(self.peers) do
             local witnessed=options.presenceRevision and peer.presenceRevision==options.presenceRevision()
             local offline=options.isOnline and not options.isOnline(name) and not witnessed
-            if peer.connected and offline and PeerBusy(peer) then InterruptPeer(name,"source-timeout")
+            if peer.connected and offline and PeerBusy(peer) then InterruptPeer(name,"source-timeout","offline")
             elseif peer.connected and (offline or peer.unavailable or not Authority(name)) then
                 peer.connected=false;self.revision=self.revision+1;self.statusDirty=true
                 if options.onDisconnected then options.onDisconnected(name,peer.unavailable and "no response" or "offline") end
@@ -844,7 +892,7 @@ function Sync.New(options)
         for _,peer in pairs(self.peers) do
             if peer.connected and not peer.blocked and not peer.unavailable and peer.summary and (not peer.cooldown or peer.cooldown<=now) then
                 local missing,failure=self.journal.GetMissingRanges(self.db,peer.summary,Sync.limits.range)
-                if not missing then Reject(failure);peer.summary=nil
+                if not missing then Reject(failure,peer.name);peer.summary=nil
                 else
                     for _,candidate in ipairs(missing) do
                         local rank=Priority(candidate.raidId)
@@ -883,7 +931,7 @@ function Sync.New(options)
         if operation then task.operation=nil;task.done=true
         else
             local operations,nextSequence=self.journal.GetOperationRange(self.db,task.raidId,task.origin,task.cursor,1,task.last)
-            if not operations then Reject(nextSequence);task.done=true;return end
+            if not operations then Reject(nextSequence,task.peer);task.done=true;return end
             operation=operations[1];task.cursor=nextSequence or task.last+1
             task.done=not operation or task.cursor>task.last
         end
@@ -917,15 +965,15 @@ function Sync.New(options)
         local done,text,failure=encoding.job:Step(Sync.limits.codecNodes)
         if not done then return end
         self.encoding=nil
-        if failure then Reject(failure);return end
+        if failure then Reject(failure,encoding.target,"encode");return end
         self.sequence=self.sequence+1
         local recipient=self.peers[encoding.target]
         if not recipient or recipient.unavailable or recipient.blocked then return end
         local session=self.session..":"..recipient.session
         local size=math.min(160,Sync.limits.packet-string.len(encoding.target)-string.len(session)-44)
-        if size<32 then Reject("chunk-envelope-limit");return end
+        if size<32 then Reject("chunk-envelope-limit",encoding.target,"encode");return end
         local total=math.ceil(string.len(text)/size)
-        if total>16384 then Reject("chunk-count-limit");return end
+        if total>16384 then Reject("chunk-count-limit",encoding.target,"encode");return end
         self.outgoing={target=encoding.target,session=session,id=tostring(self.sequence),priority=encoding.priority,text=text,size=size,total=total,ack=0,sent=0,activity=Now(),attempts=0,requestId=encoding.requestId,advertisement=encoding.advertisement}
         if encoding.receipt then
             if CountMap(self.sentOperations)>=128 then
@@ -944,7 +992,7 @@ function Sync.New(options)
         if not ok or result==false then
             -- A client API failure is not token backpressure. Stop queued work
             -- and keep an actionable error instead of retrying every frame.
-            self.lastError="send-failed";self:Stop("send-failed");return false
+            Failure("send-failed",nil,"send",ok and "messaging API returned false" or LogText(result));self:Stop("send-failed");return false
         end
         self.tokens=self.tokens-cost;self.stats.sentBytes=self.stats.sentBytes+cost;self.revision=self.revision+1;return true
     end
@@ -955,15 +1003,18 @@ function Sync.New(options)
         for name in pairs(self.peers) do if not Authority(name) then RemovePeer(name) end end
         for name,peer in pairs(self.peers) do
             for id,progress in pairs(peer.advertised or {}) do
-                if progress.transferring and progress.sent and not (Combat() and Priority(id)>1) and now-progress.activity>Sync.limits.timeout then InterruptPeer(name,"source-timeout");break end
+                if progress.transferring and progress.sent and not (Combat() and Priority(id)>1) and now-progress.activity>Sync.limits.timeout then InterruptPeer(name,"source-timeout","completion",RaidLabel(id));break end
             end
         end
         for key,transfer in pairs(self.incoming) do
-            if not (Combat() and transfer.priority>1) and now-transfer.activity>Sync.limits.timeout then InterruptPeer(transfer.sender,"transfer-timeout") end
+            if not (Combat() and transfer.priority>1) and now-transfer.activity>Sync.limits.timeout then InterruptPeer(transfer.sender,"transfer-timeout","receive",tostring(transfer.received).." of "..tostring(transfer.total)) end
         end
         for key,cached in pairs(self.completed) do if not Combat() and now-cached.time>60 then self.completed[key]=nil end end
         if self.request and self.request.sent and not (Combat() and self.request.priority>1) and now-self.request.activity>Sync.limits.timeout then
-            InterruptPeer(self.request.peer,"source-timeout")
+            local request=self.request.payload
+            local description=request.type=="summary-request" and "the raid list request"
+                or request.raidId and "the request for raid "..RaidLabel(request.raidId) or "the request for a missing raid change"
+            InterruptPeer(self.request.peer,"source-timeout","request",description)
             self.stats.retries=self.stats.retries+1
         end
         if self.announce then
@@ -981,7 +1032,7 @@ function Sync.New(options)
                 if done then
                     table.remove(self.decodes,index);self.bufferBytes=self.bufferBytes-decode.bytes
                     if failure then
-                        Reject(failure)
+                        Reject(failure,decode.sender,"decode")
                         local peer=self.peers[decode.sender]
                         if peer then peer.blocked=true;peer.blockReason=failure end
                         if self.request and self.request.peer==decode.sender then self.request=nil end
@@ -1016,7 +1067,7 @@ function Sync.New(options)
         if outgoing and not (Combat() and outgoing.priority>1) and now-outgoing.activity>Sync.limits.retry then
             outgoing.sent=outgoing.ack;outgoing.activity=now;outgoing.attempts=outgoing.attempts+1;self.stats.retries=self.stats.retries+1
             if outgoing.attempts>3 then
-                InterruptPeer(outgoing.target,"transfer-timeout");outgoing=nil
+                InterruptPeer(outgoing.target,"transfer-timeout","acknowledgement",tostring(outgoing.ack).." of "..tostring(outgoing.total));outgoing=nil
             end
         end
         for packet=1,Sync.limits.packetsPerTick do

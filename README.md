@@ -13,6 +13,7 @@ Raid and loot management for **WoW 1.12**. Works standalone or inside **BootySui
 - Tmog uses equipment slots, including all main-hand, off-hand and ranged items.
 - Soft Reserve import, manual edits and item names without links.
 - Raid Stats and CSR points from saved, ended raids.
+- CSR includes archived and awarded history by default; awarded entries have no expiry countdown.
 - Automatic officer synchronization, session recovery and Raid Log.
 
 ## Installation
@@ -33,6 +34,7 @@ Raid and loot management for **WoW 1.12**. Works standalone or inside **BootySui
 ## Session basics
 
 - **New Raid** starts a session, including before you join a group.
+- **Live tracking** is on by default; existing choices are preserved.
 - **Save Raid** saves without leaving; **Leave Session** closes only your view.
 - To copy a saved raid, use **Session → Save Raid** with a new **Raid ID**.
 - **End & Save** saves and ends the shared raid; other officers can choose to continue.
@@ -40,6 +42,7 @@ Raid and loot management for **WoW 1.12**. Works standalone or inside **BootySui
 - Removing a reopened, previously ended session keeps its saved raid **Ended**.
 - Saved raids show the newest saves first; removed sessions stay out of the Sync list.
 - Uncheck **Raid sync** for a private raid; previously shared copies remain.
+- **Sync log** names the officer and the cause of a failed transfer.
 - Use `/reload` or log out normally to write received data to disk.
 
 **Upgrading from old test builds:** pre-journal raid/CSR test data is cleared once; settings and current synchronized data are retained.
