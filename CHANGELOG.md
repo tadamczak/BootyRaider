@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.4-dev.1 — 2026-11-08
+
+- Fix raid synchronization on clients without the coroutine library, retaining bounded processing and compatible transfer data.
+
 ## 1.0.3 — 2026-11-08
 
 - Add Elementium Ore to default BWL inclusions; extend BWL, MC and Kara10 exclusions with formulas, plans, sacks and the two Kara10 hatchlings. Saved preset edits are retained.

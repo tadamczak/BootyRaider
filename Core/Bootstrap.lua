@@ -1,6 +1,6 @@
 BootyRaider = BootyRaider or {}
 local Raider = BootyRaider
-Raider.version = "1.0.3"
+Raider.version = "1.0.4-dev.1"
 Raider.productId = "raider"
 Raider.UI = BootyLib.UI
 Raider.Core = BootyLib.Core
