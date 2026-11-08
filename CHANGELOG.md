@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3-dev.1 — 2026-11-08
+
+- Add Elementium Ore to default BWL inclusions; extend BWL, MC and Kara10 exclusions with formulas, plans, sacks and the two Kara10 hatchlings. Saved preset edits are retained.
+
 ## 1.0.2 — 2026-11-07
 
 - Keep warning INFO windows open during refresh and explain HCI restrictions correctly.

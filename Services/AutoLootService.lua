@@ -38,7 +38,7 @@ function AutoLoot.Allows(name, quality, rarities, exclusions, inclusions)
     if quality > 4 then return false end
     return math.mod(math.floor((tonumber(rarities) or 0) / (2 ^ quality)), 2) == 1
 end
--- Preserve existing saved preset bit positions; Kara10 has no supplied exclusions.
+-- Preserve existing saved preset bit positions.
 AutoLoot.PresetNames = { "ZG", "Kara10", "MC", "Onyxia's Lair", "BWL" }
 AutoLoot.ModeChoices = {{text="Auto Loot",value="auto"},{text="Shift Loot",value="shift"},{text="Off",value="off"}}
 AutoLoot.RarityNames = {"Poor","Common","Uncommon","Rare","Epic"}
@@ -46,12 +46,13 @@ AutoLoot.MaximumPresets = 30
 local raidPresetMasks = { ["Zul'Gurub"]=1, ["Karazhan10"]=2, ["Lower Karazhan Halls"]=2,
     ["Molten Core"]=4, ["Onyxia's Lair"]=8, ["Blackwing Lair"]=16 }
 local presets = {
-    { "* Bijou *", "* Coin", "Razzashi Hatchling", "Blood Scythe" }, {},
-    { "Tome of Tranquilizing Shot", "Recipe *" },
+    { "* Bijou *", "* Coin", "Razzashi Hatchling", "Blood Scythe" },
+    { "Formula *", "Plans *", "* Sack of *", "Araxxna's Hatchling", "Skitterweb Hatchling" },
+    { "Tome of Tranquilizing Shot", "Recipe *", "Formula *", "Plans *", "* Sack of *" },
     { "Recipe *", "* Sack of *", "Onyxia Hide Backpack" },
-    { "Recipe *", "Head of the Broodlord Lashlayer" },
+    { "Recipe *", "Head of the Broodlord Lashlayer", "Formula *", "Plans *", "* Sack of *" },
 }
-local inclusionPresets = { {}, {}, { "Lava Core", "Fiery Core" }, {}, {} }
+local inclusionPresets = { {}, {}, { "Lava Core", "Fiery Core" }, {}, { "Elementium Ore" } }
 local checkedDefinitions=setmetatable({},{__mode="k"})
 local registryKeys={exclusions="lmAutoLootExclusionPresetDefinitions",inclusions="lmAutoLootInclusionPresetDefinitions"}
 local maskKeys={exclusions="lmAutoLootPresets",inclusions="lmAutoLootInclusionPresets"}
