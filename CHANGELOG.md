@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.4 — 2026-11-08
+
+- Fix raid synchronization on clients without the coroutine library while retaining bounded processing.
+- Show archived and awarded CSR by default; awarded entries are grey, keep their status color and show no expiry countdown.
+- Identify synchronization failures by officer and cause without duplicate interruption logs.
+
 ## 1.0.4-dev.2 — 2026-11-08
 
 - Show archived and awarded CSR by default; awarded sources are grey, retain their status color and show no expiry countdown.
